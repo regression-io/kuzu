@@ -1,5 +1,9 @@
 #include "processor/operator/persistent/reader_state.h"
 
+#include "common/profiler.h"
+
+#include <iostream>
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::storage;
@@ -126,6 +130,8 @@ void ReaderFunctions::validateNPYFiles(
 std::vector<FileBlocksInfo> ReaderFunctions::countRowsInCSVFile(
     const std::vector<std::string>& paths, CSVReaderConfig csvReaderConfig,
     TableSchema* tableSchema) {
+    Timer timer;
+    timer.start();
     std::vector<FileBlocksInfo> result(paths.size());
     for (auto i = 0u; i < paths.size(); i++) {
         auto csvStreamingReader =
@@ -144,6 +150,8 @@ std::vector<FileBlocksInfo> ReaderFunctions::countRowsInCSVFile(
         }
         result[i] = {numRows, blocks};
     }
+    auto timeForCountingRows = timer.getElapsedTimeInMS();
+    std::cout << "countRowsInCSVFile: " << timeForCountingRows << " ms" << std::endl;
     return result;
 }
 

@@ -48,6 +48,9 @@ public:
     uint64_t currentNodeGroupIdx;
     // The sharedNodeGroup is to accumulate left data within local node groups in CopyNode ops.
     std::unique_ptr<storage::NodeGroup> sharedNodeGroup;
+
+    uint64_t msForPKIndex = 0;
+    common::Timer timer;
 };
 
 struct CopyNodeInfo {
@@ -90,7 +93,7 @@ public:
             children[0]->clone(), id, paramsString);
     }
 
-    static void writeAndResetNodeGroup(common::node_group_idx_t nodeGroupIdx,
+    static void writeAndResetNodeGroup(CopyNodeSharedState* sharedState, common::node_group_idx_t nodeGroupIdx,
         storage::PrimaryKeyIndexBuilder* pkIndex, common::column_id_t pkColumnID,
         storage::NodeTable* table, storage::NodeGroup* nodeGroup);
 
@@ -101,7 +104,7 @@ private:
                    ->getNumTuples() == 0;
     }
 
-    static void populatePKIndex(storage::PrimaryKeyIndexBuilder* pkIndex,
+    static void populatePKIndex(CopyNodeSharedState* sharedState, storage::PrimaryKeyIndexBuilder* pkIndex,
         storage::ColumnChunk* chunk, common::offset_t startNodeOffset, common::offset_t numNodes);
     static void checkNonNullConstraint(
         storage::NullColumnChunk* nullChunk, common::offset_t numNodes);

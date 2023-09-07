@@ -3,6 +3,8 @@
 #include "common/string_utils.h"
 #include "storage/copier/string_column_chunk.h"
 
+#include <iostream>
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::storage;
@@ -63,7 +65,7 @@ void CopyNodeSharedState::appendLocalNodeGroup(std::unique_ptr<NodeGroup> localN
         sharedNodeGroup->append(localNodeGroup.get(), 0 /* offsetInNodeGroup */);
     if (sharedNodeGroup->isFull()) {
         auto nodeGroupIdx = getNextNodeGroupIdxWithoutLock();
-        CopyNode::writeAndResetNodeGroup(
+        CopyNode::writeAndResetNodeGroup(this,
             nodeGroupIdx, pkIndex.get(), pkColumnID, table, sharedNodeGroup.get());
     }
     if (numNodesAppended < localNodeGroup->getNumNodes()) {
@@ -94,7 +96,7 @@ void CopyNode::executeInternal(ExecutionContext* context) {
             if (localNodeGroup->isFull()) {
                 node_group_idx_t nodeGroupIdx;
                 nodeGroupIdx = sharedState->getNextNodeGroupIdx();
-                writeAndResetNodeGroup(nodeGroupIdx, sharedState->pkIndex.get(),
+                writeAndResetNodeGroup(sharedState.get(), nodeGroupIdx, sharedState->pkIndex.get(),
                     sharedState->pkColumnID, sharedState->table, localNodeGroup.get());
             }
             if (numAppendedTuples < numTuplesToAppend) {
@@ -117,24 +119,25 @@ void CopyNode::sliceDataChunk(
     }
 }
 
-void CopyNode::writeAndResetNodeGroup(node_group_idx_t nodeGroupIdx,
+void CopyNode::writeAndResetNodeGroup(CopyNodeSharedState* sharedState, node_group_idx_t nodeGroupIdx,
     PrimaryKeyIndexBuilder* pkIndex, column_id_t pkColumnID, NodeTable* table,
     NodeGroup* nodeGroup) {
     nodeGroup->setNodeGroupIdx(nodeGroupIdx);
     auto startOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
     if (pkIndex) {
-        populatePKIndex(pkIndex, nodeGroup->getColumnChunk(pkColumnID), startOffset,
+        populatePKIndex(sharedState, pkIndex, nodeGroup->getColumnChunk(pkColumnID), startOffset,
             nodeGroup->getNumNodes() /* startPageIdx */);
     }
     table->append(nodeGroup);
     nodeGroup->resetToEmpty();
 }
 
-void CopyNode::populatePKIndex(
+void CopyNode::populatePKIndex(CopyNodeSharedState* sharedState,
     PrimaryKeyIndexBuilder* pkIndex, ColumnChunk* chunk, offset_t startOffset, offset_t numNodes) {
     checkNonNullConstraint(chunk->getNullChunk(), numNodes);
     std::string errorPKValueStr;
     pkIndex->lock();
+    sharedState->timer.start();
     try {
         switch (chunk->getDataType().getPhysicalType()) {
         case PhysicalTypeID::INT64: {
@@ -161,6 +164,7 @@ void CopyNode::populatePKIndex(
         pkIndex->unlock();
         throw;
     }
+    sharedState->msForPKIndex += sharedState->timer.getElapsedTimeInMS();
     pkIndex->unlock();
     if (!errorPKValueStr.empty()) {
         throw CopyException(ExceptionMessage::existedPKException(errorPKValueStr));
@@ -178,7 +182,7 @@ void CopyNode::checkNonNullConstraint(NullColumnChunk* nullChunk, offset_t numNo
 void CopyNode::finalize(ExecutionContext* context) {
     if (sharedState->sharedNodeGroup) {
         auto nodeGroupIdx = sharedState->getNextNodeGroupIdx();
-        writeAndResetNodeGroup(nodeGroupIdx, sharedState->pkIndex.get(), sharedState->pkColumnID,
+        writeAndResetNodeGroup(sharedState.get(), nodeGroupIdx, sharedState->pkIndex.get(), sharedState->pkColumnID,
             sharedState->table, sharedState->sharedNodeGroup.get());
     }
     if (sharedState->pkIndex) {
@@ -199,6 +203,7 @@ void CopyNode::finalize(ExecutionContext* context) {
         sharedState->numRows, sharedState->tableSchema->tableName.c_str());
     FactorizedTableUtils::appendStringToTable(
         sharedState->fTable.get(), outputMsg, context->memoryManager);
+    std::cout << "Time for building PKIndex: " << sharedState->msForPKIndex << std::endl;
 }
 
 template<>
