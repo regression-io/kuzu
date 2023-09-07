@@ -186,7 +186,10 @@ void CopyNode::finalize(ExecutionContext* context) {
             sharedState->table, sharedState->sharedNodeGroup.get());
     }
     if (sharedState->pkIndex) {
+        sharedState->timer.start();
         sharedState->pkIndex->flush();
+        auto msForPKIndexFlush = sharedState->timer.getElapsedTimeInMS();
+        std::cout << "Time for flushing PKIndex: " << msForPKIndexFlush << " ms." << std::endl;
     }
     std::unordered_set<table_id_t> connectedRelTableIDs;
     connectedRelTableIDs.insert(sharedState->tableSchema->getFwdRelTableIDSet().begin(),
@@ -203,7 +206,7 @@ void CopyNode::finalize(ExecutionContext* context) {
         sharedState->numRows, sharedState->tableSchema->tableName.c_str());
     FactorizedTableUtils::appendStringToTable(
         sharedState->fTable.get(), outputMsg, context->memoryManager);
-    std::cout << "Time for building PKIndex: " << sharedState->msForPKIndex << std::endl;
+    std::cout << "Time for building PKIndex: " << sharedState->msForPKIndex << " ms." << std::endl;
 }
 
 template<>
