@@ -1,7 +1,5 @@
 #pragma once
 
-#include <utility>
-
 #include "function/hash/hash_functions.h"
 #include "hash_index_builder.h"
 #include "storage/storage_structure/disk_overflow_file.h"
@@ -137,8 +135,6 @@ public:
     std::unique_ptr<BaseDiskArray<HashIndexHeader>> headerArray;
     std::unique_ptr<BaseDiskArray<Slot<T>>> pSlots;
     std::unique_ptr<BaseDiskArray<Slot<T>>> oSlots;
-    insert_function_t keyInsertFunc;
-    equals_function_t keyEqualsFunc;
     std::unique_ptr<DiskOverflowFile> diskOverflowFile;
     std::unique_ptr<HashIndexLocalStorage> localStorage;
 };

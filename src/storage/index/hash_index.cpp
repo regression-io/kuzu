@@ -141,9 +141,6 @@ HashIndex<T>::HashIndex(const StorageStructureIDAndFName& storageStructureIDAndF
         storageStructureIDAndFName.storageStructureID, O_SLOTS_HEADER_PAGE_IDX, &bm, wal,
         Transaction::getDummyReadOnlyTrx().get());
     // Initialize functions.
-    keyHashFunc = HashIndexUtils::initializeHashFunc(indexHeader->keyDataTypeID);
-    keyInsertFunc = HashIndexUtils::initializeInsertFunc(indexHeader->keyDataTypeID);
-    keyEqualsFunc = HashIndexUtils::initializeEqualsFunc(indexHeader->keyDataTypeID);
     localStorage = std::make_unique<HashIndexLocalStorage>(keyDataType);
     if (keyDataType.getLogicalTypeID() == LogicalTypeID::STRING) {
         diskOverflowFile = std::make_unique<DiskOverflowFile>(storageStructureIDAndFName, &bm, wal);
@@ -312,9 +309,9 @@ void HashIndex<T>::rehashSlots(HashIndexHeader& header) {
             hash_t hash;
             if (header.keyDataTypeID == LogicalTypeID::STRING) {
                 auto str = diskOverflowFile->readString(TransactionType::WRITE, *(ku_string_t*)key);
-                hash = keyHashFunc((const uint8_t*)str.c_str());
+                // hash = keyHashFunc((const uint8_t*)str.c_str());
             } else {
-                hash = keyHashFunc(key);
+                function::Hash::operation(*(int64_t*)key, hash);
             }
             auto newSlotId = hash & header.higherLevelHashMask;
             copyEntryToSlot(newSlotId, key);
@@ -350,7 +347,7 @@ void HashIndex<T>::copyAndUpdateSlotHeader(
     if (isCopyEntry) {
         memcpy(slot.entries[entryPos].data, key, indexHeader->numBytesPerEntry);
     } else {
-        keyInsertFunc(key, value, slot.entries[entryPos].data, diskOverflowFile.get());
+        // keyInsertFunc(key, value, slot.entries[entryPos].data, diskOverflowFile.get());
     }
     slot.header.setEntryValid(entryPos);
     slot.header.numEntries++;
@@ -384,7 +381,7 @@ entry_pos_t HashIndex<T>::findMatchedEntryInSlot(
         if (!slot.header.isEntryValid(entryPos)) {
             continue;
         }
-        if (keyEqualsFunc(trxType, key, slot.entries[entryPos].data, diskOverflowFile.get())) {
+        if (*(int64_t*)key == *(int64_t*)slot.entries[entryPos].data) {
             return entryPos;
         }
     }
