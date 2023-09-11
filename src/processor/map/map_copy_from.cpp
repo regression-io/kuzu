@@ -19,13 +19,16 @@ namespace processor {
 std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyFrom(LogicalOperator* logicalOperator) {
     auto copyFrom = (LogicalCopyFrom*)logicalOperator;
     switch (copyFrom->getInfo()->tableSchema->getTableType()) {
-    case TableType::NODE:
+    case TableType::NODE: {
         return mapCopyNodeFrom(logicalOperator);
-    case TableType::REL:
+    }
+    case TableType::REL: {
         return mapCopyRelFrom(logicalOperator);
+    }
         // LCOV_EXCL_START
-    default:
+    default: {
         throw NotImplementedException{"PlanMapper::mapCopy"};
+    }
     }
     // LCOV_EXCL_STOP
 }
@@ -63,8 +66,7 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyNodeFrom(
         std::make_shared<CopyNodeSharedState>(readerOp->getSharedState()->getNumRowsRef(),
             tableSchema, nodeTable, *copyFromInfo->copyDesc, memoryManager);
     CopyNodeInfo copyNodeDataInfo{readerInfo->dataColumnsPos, *copyFromInfo->copyDesc, nodeTable,
-        &storageManager.getRelsStore(), catalog, storageManager.getWAL(),
-        copyFromInfo->containsSerial};
+        &storageManager.getRelsStore(), catalog, storageManager.getWAL()};
     auto copyNode = std::make_unique<CopyNode>(copyNodeSharedState, copyNodeDataInfo,
         std::make_unique<ResultSetDescriptor>(copyFrom->getSchema()), std::move(reader),
         getOperatorID(), copyFrom->getExpressionsForPrinting());

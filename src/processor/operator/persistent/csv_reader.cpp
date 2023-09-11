@@ -3,7 +3,6 @@
 #include <vector>
 
 #include "common/string_utils.h"
-#include "processor/operator/persistent/csv_reader.h"
 #include "storage/copier/table_copy_utils.h"
 
 using namespace kuzu::common;

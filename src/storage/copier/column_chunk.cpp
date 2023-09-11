@@ -13,7 +13,7 @@ using namespace kuzu::transaction;
 namespace kuzu {
 namespace storage {
 
-ColumnChunk::ColumnChunk(LogicalType dataType, CopyDescription* copyDescription, bool hasNullChunk)
+ColumnChunk::ColumnChunk(LogicalType dataType, const CopyDescription* copyDescription, bool hasNullChunk)
     : dataType{std::move(dataType)}, numBytesPerValue{getDataTypeSizeInChunk(this->dataType)},
       copyDescription{copyDescription}, numValues{0} {
     if (hasNullChunk) {
@@ -496,6 +496,16 @@ void ColumnChunk::setValueFromString<bool>(const char* value, uint64_t length, u
     bool booleanVal;
     boolStream >> std::boolalpha >> booleanVal;
     setValue(booleanVal, pos);
+}
+
+std::unique_ptr<ColumnChunk> ColumnChunk::clone() {
+    auto result = std::make_unique<ColumnChunk>(dataType, copyDescription, nullChunk != nullptr);
+    result->buffer = std::make_unique<uint8_t[]>(bufferSize);
+    memcpy(result->buffer.get(), buffer.get(), bufferSize);
+    if (nullChunk) {
+        result->nullChunk = ku_static_unique_pointer_cast<ColumnChunk, NullColumnChunk>(nullChunk->clone());
+    }
+    return result;
 }
 
 // Fixed list

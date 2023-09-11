@@ -89,6 +89,9 @@ std::string PhysicalOperatorUtils::operatorTypeToString(PhysicalOperatorType ope
     case PhysicalOperatorType::HASH_JOIN_PROBE: {
         return "HASH_JOIN_PROBE";
     }
+    case PhysicalOperatorType::INDEX_BUILDER: {
+        return "INDEX_BUILDER";
+    }
     case PhysicalOperatorType::INDEX_LOOKUP: {
         return "INDEX_LOOKUP";
     }

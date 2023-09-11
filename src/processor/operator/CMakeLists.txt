@@ -16,6 +16,7 @@ add_library(kuzu_processor_operator
         filter.cpp
         filtering_operator.cpp
         flatten.cpp
+        index_builder.cpp
         index_lookup.cpp
         index_scan.cpp
         limit.cpp

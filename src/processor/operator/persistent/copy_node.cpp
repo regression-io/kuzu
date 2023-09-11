@@ -3,6 +3,8 @@
 #include "common/string_utils.h"
 #include "storage/copier/string_column_chunk.h"
 
+#include "common/profiler.h"
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::storage;
@@ -26,7 +28,7 @@ void CopyNodeSharedState::initializePrimaryKey(const std::string& directory) {
         pkIndex = std::make_unique<PrimaryKeyIndexBuilder>(
             StorageUtils::getNodeIndexFName(directory, tableSchema->tableID, DBFileType::ORIGINAL),
             *tableSchema->getPrimaryKey()->getDataType());
-        pkIndex->bulkReserve(numRows);
+//        pkIndex->bulkReserve(numRows);
     }
     for (auto& property : tableSchema->properties) {
         if (property->getPropertyID() == tableSchema->getPrimaryKey()->getPropertyID()) {
@@ -45,13 +47,6 @@ void CopyNodeSharedState::logCopyNodeWALRecord(WAL* wal) {
     }
 }
 
-CopyNode::CopyNode(std::shared_ptr<CopyNodeSharedState> sharedState, CopyNodeInfo copyNodeInfo,
-    std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
-    std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-    : Sink{std::move(resultSetDescriptor), PhysicalOperatorType::COPY_NODE, std::move(child), id,
-          paramsString},
-      sharedState{std::move(sharedState)}, copyNodeInfo{std::move(copyNodeInfo)} {}
-
 void CopyNodeSharedState::appendLocalNodeGroup(std::unique_ptr<NodeGroup> localNodeGroup) {
     std::unique_lock xLck{mtx};
     if (!sharedNodeGroup) {
@@ -62,6 +57,12 @@ void CopyNodeSharedState::appendLocalNodeGroup(std::unique_ptr<NodeGroup> localN
         sharedNodeGroup->append(localNodeGroup.get(), 0 /* offsetInNodeGroup */);
     if (sharedNodeGroup->isFull()) {
         auto nodeGroupIdx = getNextNodeGroupIdxWithoutLock();
+        if (pkIndex) {
+            cachedPKChunks.push_back(std::make_unique<PKColumnChunk>(
+                localNodeGroup->getColumnChunk(pkColumnID)->clone(),
+                StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx),
+                localNodeGroup->getNumNodes()));
+        }
         CopyNode::writeAndResetNodeGroup(
             nodeGroupIdx, pkIndex.get(), pkColumnID, table, sharedNodeGroup.get());
     }
@@ -69,6 +70,13 @@ void CopyNodeSharedState::appendLocalNodeGroup(std::unique_ptr<NodeGroup> localN
         sharedNodeGroup->append(localNodeGroup.get(), numNodesAppended);
     }
 }
+
+CopyNode::CopyNode(std::shared_ptr<CopyNodeSharedState> sharedState, CopyNodeInfo copyNodeInfo,
+    std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
+    std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
+    : Sink{std::move(resultSetDescriptor), PhysicalOperatorType::COPY_NODE, std::move(child), id,
+          paramsString},
+      sharedState{std::move(sharedState)}, copyNodeInfo{std::move(copyNodeInfo)} {}
 
 void CopyNode::initGlobalStateInternal(ExecutionContext* context) {
     if (!isCopyAllowed()) {
@@ -93,7 +101,16 @@ void CopyNode::executeInternal(ExecutionContext* context) {
             if (localNodeGroup->isFull()) {
                 node_group_idx_t nodeGroupIdx;
                 nodeGroupIdx = sharedState->getNextNodeGroupIdx();
-                writeAndResetNodeGroup(nodeGroupIdx, sharedState->pkIndex.get(),
+                if (sharedState->pkIndex) {
+                    {
+                        std::unique_lock xLck{sharedState->mtx};
+                        sharedState->cachedPKChunks.push_back(std::make_unique<PKColumnChunk>(
+                            localNodeGroup->getColumnChunk(sharedState->pkColumnID)->clone(),
+                            StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx),
+                            localNodeGroup->getNumNodes()));
+                    }
+                }
+                writeAndResetNodeGroup(nodeGroupIdx, nullptr,
                     sharedState->pkColumnID, sharedState->table, localNodeGroup.get());
             }
             if (numAppendedTuples < numTuplesToAppend) {
@@ -133,11 +150,11 @@ void CopyNode::writeAndResetNodeGroup(node_group_idx_t nodeGroupIdx,
     PrimaryKeyIndexBuilder* pkIndex, column_id_t pkColumnID, NodeTable* table,
     NodeGroup* nodeGroup) {
     nodeGroup->setNodeGroupIdx(nodeGroupIdx);
-    auto startOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
-    if (pkIndex) {
-        populatePKIndex(pkIndex, nodeGroup->getColumnChunk(pkColumnID), startOffset,
-            nodeGroup->getNumNodes() /* startPageIdx */);
-    }
+//    auto startOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
+//    if (pkIndex) {
+//        populatePKIndex(pkIndex, nodeGroup->getColumnChunk(pkColumnID), startOffset,
+//            nodeGroup->getNumNodes() /* startPageIdx */);
+//    }
     table->append(nodeGroup);
     nodeGroup->resetToEmpty();
 }
@@ -190,10 +207,25 @@ void CopyNode::checkNonNullConstraint(NullColumnChunk* nullChunk, offset_t numNo
 void CopyNode::finalize(ExecutionContext* context) {
     if (sharedState->sharedNodeGroup) {
         auto nodeGroupIdx = sharedState->getNextNodeGroupIdx();
+        if (sharedState->pkIndex) {
+            sharedState->cachedPKChunks.push_back(std::make_unique<PKColumnChunk>(
+                sharedState->sharedNodeGroup->getColumnChunk(sharedState->pkColumnID)->clone(),
+                StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx),
+                sharedState->sharedNodeGroup->getNumNodes()));
+        }
         writeAndResetNodeGroup(nodeGroupIdx, sharedState->pkIndex.get(), sharedState->pkColumnID,
             sharedState->table, sharedState->sharedNodeGroup.get());
     }
     if (sharedState->pkIndex) {
+        row_idx_t numRows = 0;
+        for (auto& pkChunk : sharedState->cachedPKChunks) {
+            numRows += pkChunk->numRows;
+        }
+        sharedState->numRows = numRows;
+        sharedState->pkIndex->bulkReserve(numRows);
+        for (auto& pkChunk : sharedState->cachedPKChunks) {
+            populatePKIndex(sharedState->pkIndex.get(), pkChunk->chunk.get(), pkChunk->startOffset, pkChunk->numRows);
+        }
         sharedState->pkIndex->flush();
     }
     std::unordered_set<table_id_t> connectedRelTableIDs;

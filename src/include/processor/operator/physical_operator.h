@@ -33,6 +33,7 @@ enum class PhysicalOperatorType : uint8_t {
     GENERIC_SCAN_REL_TABLES,
     HASH_JOIN_BUILD,
     HASH_JOIN_PROBE,
+    INDEX_BUILDER,
     INDEX_LOOKUP,
     INDEX_SCAN,
     INSERT_NODE,

@@ -66,7 +66,6 @@ protected:
 
 protected:
     std::unique_ptr<HashIndexHeader> indexHeader;
-    std::shared_mutex pSlotSharedMutex;
     hash_function_t keyHashFunc;
 };
 

@@ -55,7 +55,7 @@ public:
 
     // ColumnChunks must be initialized after construction, so this constructor should only be used
     // through the ColumnChunkFactory
-    explicit ColumnChunk(common::LogicalType dataType, common::CopyDescription* copyDescription,
+    explicit ColumnChunk(common::LogicalType dataType, const common::CopyDescription* copyDescription,
         bool hasNullChunk = true);
     virtual ~ColumnChunk() = default;
 
@@ -125,6 +125,8 @@ public:
     inline uint64_t getNumValues() const { return numValues; }
 
     inline void setNumValues(uint64_t numValues_) { this->numValues = numValues_; }
+
+    std::unique_ptr<ColumnChunk> clone();
 
 protected:
     // Initializes the data buffer. Is (and should be) only called in constructor.

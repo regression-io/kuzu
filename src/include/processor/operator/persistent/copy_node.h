@@ -8,6 +8,17 @@
 namespace kuzu {
 namespace processor {
 
+struct PKColumnChunk {
+    std::unique_ptr<storage::ColumnChunk> chunk;
+    common::offset_t startOffset;
+    common::offset_t numRows;
+
+    PKColumnChunk(std::unique_ptr<storage::ColumnChunk> chunk,
+                  common::offset_t startOffset,
+                  common::offset_t numRows) : chunk{std::move(chunk)}, startOffset{startOffset},
+    numRows{numRows} {}
+};
+
 class CopyNodeSharedState {
 public:
     CopyNodeSharedState(uint64_t& numRows, catalog::NodeTableSchema* tableSchema,
@@ -19,12 +30,6 @@ public:
     inline common::offset_t getNextNodeGroupIdx() {
         std::unique_lock<std::mutex> lck{mtx};
         return getNextNodeGroupIdxWithoutLock();
-    }
-    inline void setNextNodeGroupIdx(common::node_group_idx_t nextNodeGroupIdx) {
-        std::unique_lock<std::mutex> lck{mtx};
-        if (nextNodeGroupIdx > currentNodeGroupIdx) {
-            currentNodeGroupIdx = nextNodeGroupIdx;
-        }
     }
 
     void logCopyNodeWALRecord(storage::WAL* wal);
@@ -48,6 +53,7 @@ public:
     uint64_t currentNodeGroupIdx;
     // The sharedNodeGroup is to accumulate left data within local node groups in CopyNode ops.
     std::unique_ptr<storage::NodeGroup> sharedNodeGroup;
+    std::vector<std::unique_ptr<PKColumnChunk>> cachedPKChunks;
 };
 
 struct CopyNodeInfo {
@@ -57,7 +63,6 @@ struct CopyNodeInfo {
     storage::RelsStore* relsStore;
     catalog::Catalog* catalog;
     storage::WAL* wal;
-    bool containsSerial;
 };
 
 class CopyNode : public Sink {

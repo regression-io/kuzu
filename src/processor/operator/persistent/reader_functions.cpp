@@ -144,7 +144,10 @@ std::vector<FileBlocksInfo> ReaderFunctions::countRowsInRelCSVFile(
 std::vector<FileBlocksInfo> ReaderFunctions::countRowsInNodeCSVFile(
     const std::vector<std::string>& paths, common::CSVReaderConfig csvReaderConfig,
     catalog::TableSchema* tableSchema, storage::MemoryManager* memoryManager) {
-    std::vector<FileBlocksInfo> fileInfos;
+    std::vector<FileBlocksInfo> fileInfos(paths.size(), {INVALID_ROW_IDX, INVALID_BLOCK_IDX});
+    return fileInfos;
+
+//    std::vector<FileBlocksInfo> fileInfos;
     fileInfos.reserve(paths.size());
     auto dataChunk = getDataChunkToRead(tableSchema, memoryManager);
     // We should add a countNumRows() API to csvReader, so that it doesn't need to read data to
