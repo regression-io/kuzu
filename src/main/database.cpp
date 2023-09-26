@@ -6,6 +6,8 @@
 #include <unistd.h>
 #endif
 
+#include "common/exception/exception.h"
+#include "common/file_utils.h"
 #include "common/logging_level_utils.h"
 #include "processor/processor.h"
 #include "spdlog/spdlog.h"
@@ -21,9 +23,24 @@ using namespace kuzu::transaction;
 namespace kuzu {
 namespace main {
 
-SystemConfig::SystemConfig() : SystemConfig(-1u) {}
+static void getLockFileFlagsAndType(
+    AccessMode accessMode, bool createNew, int& flags, FileLockType& lock) {
+    flags = accessMode == AccessMode::READ_ONLY ? O_RDONLY : O_RDWR;
+    if (createNew) {
+        assert(flags == O_RDWR);
+        flags |= O_CREAT;
+    }
+    lock = accessMode == AccessMode::READ_ONLY ? FileLockType::READ_LOCK : FileLockType::WRITE_LOCK;
+}
 
-SystemConfig::SystemConfig(uint64_t bufferPoolSize_) {
+SystemConfig::SystemConfig() : SystemConfig(-1u, AccessMode::READ_WRITE) {}
+
+SystemConfig::SystemConfig(uint64_t bufferPoolSize_)
+    : SystemConfig(bufferPoolSize_, AccessMode::READ_WRITE) {}
+
+SystemConfig::SystemConfig(AccessMode accessMode_) : SystemConfig(-1u, accessMode_) {}
+
+SystemConfig::SystemConfig(uint64_t bufferPoolSize_, AccessMode accessMode_) {
     if (bufferPoolSize_ == -1u) {
 #if defined(_WIN32)
         MEMORYSTATUSEX status;
@@ -38,6 +55,7 @@ SystemConfig::SystemConfig(uint64_t bufferPoolSize_) {
                                      (double_t)std::min(systemMemSize, (std::uint64_t)UINTPTR_MAX));
     }
     bufferPoolSize = bufferPoolSize_;
+    accessMode = accessMode_;
     maxNumThreads = std::thread::hardware_concurrency();
 }
 
@@ -68,10 +86,26 @@ void Database::setLoggingLevel(std::string loggingLevel) {
     spdlog::set_level(LoggingLevelUtils::convertStrToLevelEnum(std::move(loggingLevel)));
 }
 
-void Database::initDBDirAndCoreFilesIfNecessary() const {
+void Database::checkAccessMode() {
+    int flags;
+    FileLockType lock;
+    auto lockFilePath = StorageUtils::getLockFilePath(databasePath);
+    if (!FileUtils::fileOrPathExists(lockFilePath)) {
+        getLockFileFlagsAndType(systemConfig.accessMode, true, flags, lock);
+    } else {
+        getLockFileFlagsAndType(systemConfig.accessMode, false, flags, lock);
+    }
+    lockFile = FileUtils::openFile(lockFilePath, flags, lock);
+}
+
+void Database::initDBDirAndCoreFilesIfNecessary() {
     if (!FileUtils::fileOrPathExists(databasePath)) {
+        if (systemConfig.accessMode == AccessMode::READ_ONLY) {
+            throw Exception("Cannot create an empty database under READ ONLY mode.");
+        }
         FileUtils::createDir(databasePath);
     }
+    checkAccessMode();
     if (!FileUtils::fileOrPathExists(StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(
             databasePath, DBFileType::ORIGINAL))) {
         NodesStoreStatsAndDeletedIDs::saveInitialNodesStatisticsAndDeletedIDsToFile(databasePath);

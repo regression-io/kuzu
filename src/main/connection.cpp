@@ -67,6 +67,12 @@ std::unique_ptr<PreparedStatement> Connection::prepare(const std::string& query)
 std::unique_ptr<QueryResult> Connection::query(const std::string& query) {
     lock_t lck{mtx};
     auto preparedStatement = prepareNoLock(query);
+    bool statementReadOnly = preparedStatement->isReadOnly();
+    bool isReadOnlyMode = this->database->systemConfig.accessMode == AccessMode::READ_ONLY;
+    if (isReadOnlyMode && !preparedStatement->isReadOnly()) {
+        throw ConnectionException(
+            "Cannot execute write operations in a read-only access mode database!");
+    }
     return executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get());
 }
 
@@ -74,6 +80,11 @@ std::unique_ptr<QueryResult> Connection::query(
     const std::string& query, const std::string& encodedJoin) {
     lock_t lck{mtx};
     auto preparedStatement = prepareNoLock(query, true /* enumerate all plans */, encodedJoin);
+    bool isReadOnlyMode = this->database->systemConfig.accessMode == AccessMode::READ_ONLY;
+    if (isReadOnlyMode && !preparedStatement->isReadOnly()) {
+        throw ConnectionException(
+            "Cannot execute write operations in a read-only access mode database!");
+    }
     return executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get());
 }
 

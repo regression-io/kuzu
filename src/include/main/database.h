@@ -6,26 +6,41 @@
 #include "common/api.h"
 #include "common/constants.h"
 #include "kuzu_fwd.h"
-
 namespace kuzu {
 namespace main {
+
+enum class AccessMode : uint8_t { READ_ONLY = 0, READ_WRITE = 1 };
 
 /**
  * @brief Stores buffer pool size and max number of threads configurations.
  */
 KUZU_API struct SystemConfig {
     /**
-     * @brief Creates a SystemConfig object with default buffer pool size and max num of threads.
+     * @brief Creates a SystemConfig object with default buffer pool size, default accessmode
+     * (READ_WRIRE), and and max num of threads.
      */
     explicit SystemConfig();
     /**
-     * @brief Creates a SystemConfig object.
+     * @brief Creates a SystemConfig object with default accessmode (READ_WRIRE) and max num of
+     * threads.
      * @param bufferPoolSize Max size of the buffer pool in bytes.
      */
     explicit SystemConfig(uint64_t bufferPoolSize);
+    /**
+     * @brief Creates a SystemConfig object with default buffer pool size and max num of threads.
+     * @param accessMode Access mode to the database (READ_ONLY or READ_WRITE).
+     */
+    explicit SystemConfig(AccessMode accessMode);
+    /**
+     * @brief Creates a SystemConfig object with max num of threads.
+     * @param bufferPoolSize Max size of the buffer pool in bytes.
+     * @param accessMode Access mode to the database (READ_ONLY or READ_WRITE).
+     */
+    explicit SystemConfig(uint64_t bufferPoolSize, AccessMode accessMode);
 
     uint64_t bufferPoolSize;
     uint64_t maxNumThreads;
+    AccessMode accessMode;
 };
 
 /**
@@ -63,7 +78,8 @@ public:
     static void setLoggingLevel(std::string loggingLevel);
 
 private:
-    void initDBDirAndCoreFilesIfNecessary() const;
+    void checkAccessMode();
+    void initDBDirAndCoreFilesIfNecessary();
     static void initLoggers();
     static void dropLoggers();
 
@@ -88,6 +104,7 @@ private:
     std::unique_ptr<transaction::TransactionManager> transactionManager;
     std::unique_ptr<storage::WAL> wal;
     std::shared_ptr<spdlog::logger> logger;
+    std::unique_ptr<common::FileInfo> lockFile;
 };
 
 } // namespace main
