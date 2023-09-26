@@ -18,15 +18,16 @@ using namespace kuzu::transaction;
 namespace kuzu {
 namespace storage {
 
-struct InternalIDNodeColumnFunc {
-    static void readValuesFromPageToVector(uint8_t* frame, PageElementCursor& pageCursor,
-        ValueVector* resultVector, uint32_t posInVector, uint32_t numValuesToRead,
-        const CompressionMetadata& metadata) {
+struct InternalIDNodeColumnVectorFunc {
+    InternalIDNodeColumnVectorFunc() : compressedReader{LogicalType(LogicalTypeID::INTERNAL_ID)} {}
+    void operator()(uint8_t* frame, PageElementCursor& pageCursor, ValueVector* resultVector,
+        uint32_t posInVector, uint32_t numValuesToRead, const CompressionMetadata& metadata) {
+        std::unique_ptr<offset_t[]> buffer = std::make_unique<offset_t[]>(numValuesToRead);
+        compressedReader(frame, pageCursor, (uint8_t*)buffer.get(), 0, numValuesToRead, metadata);
+
         auto resultData = (internalID_t*)resultVector->getData();
         for (auto i = 0u; i < numValuesToRead; i++) {
-            auto posInFrame = pageCursor.elemPosInPage + i;
-            resultData[posInVector + i].offset =
-                *(offset_t*)(frame + (posInFrame * sizeof(offset_t)));
+            resultData[posInVector + i].offset = buffer[i];
         }
     }
 
@@ -35,6 +36,27 @@ struct InternalIDNodeColumnFunc {
         auto relID = vector->getValue<relID_t>(posInVector);
         memcpy(frame + posInFrame * sizeof(offset_t), &relID.offset, sizeof(offset_t));
     }
+
+private:
+    ReadCompressedValuesFromPage compressedReader;
+};
+
+struct InternalIDNodeColumnPageFunc {
+    InternalIDNodeColumnPageFunc() : compressedReader{LogicalType(LogicalTypeID::INTERNAL_ID)} {}
+    void operator()(uint8_t* frame, PageElementCursor& pageCursor, uint8_t* result,
+        uint32_t posInResult, uint32_t numValuesToRead, const CompressionMetadata& metadata) {
+        std::vector<offset_t> buffer(numValuesToRead);
+        compressedReader(frame, pageCursor, (uint8_t*)buffer.data(), 0, numValuesToRead, metadata);
+
+        auto resultData = (internalID_t*)result;
+        for (auto i = 0u; i < numValuesToRead; i++) {
+            auto posInFrame = pageCursor.elemPosInPage + i;
+            resultData[posInResult + i].offset = buffer[i];
+        }
+    }
+
+private:
+    ReadCompressedValuesFromPage compressedReader;
 };
 
 struct NullNodeColumnFunc {
@@ -99,7 +121,7 @@ struct BoolNodeColumnFunc {
 static read_values_to_vector_func_t getReadValuesToVectorFunc(const LogicalType& logicalType) {
     switch (logicalType.getLogicalTypeID()) {
     case LogicalTypeID::INTERNAL_ID:
-        return InternalIDNodeColumnFunc::readValuesFromPageToVector;
+        return InternalIDNodeColumnVectorFunc();
     case LogicalTypeID::BOOL:
         return BoolNodeColumnFunc::readValuesFromPageToVector;
     default:
@@ -107,8 +129,10 @@ static read_values_to_vector_func_t getReadValuesToVectorFunc(const LogicalType&
     }
 }
 
-static read_values_to_page_func_t getWriteValuesToPageFunc(const LogicalType& logicalType) {
+static read_values_to_page_func_t getReadValuesToPageFunc(const LogicalType& logicalType) {
     switch (logicalType.getLogicalTypeID()) {
+    case LogicalTypeID::INTERNAL_ID:
+        return InternalIDNodeColumnPageFunc();
     case LogicalTypeID::BOOL:
         return BoolNodeColumnFunc::copyValuesFromPage;
     default:
@@ -120,7 +144,7 @@ static write_values_from_vector_func_t getWriteValuesFromVectorFunc(
     const LogicalType& logicalType) {
     switch (logicalType.getLogicalTypeID()) {
     case LogicalTypeID::INTERNAL_ID:
-        return InternalIDNodeColumnFunc::writeValueToPage;
+        return InternalIDNodeColumnVectorFunc::writeValueToPage;
     case LogicalTypeID::BOOL:
         return BoolNodeColumnFunc::writeValueToPage;
     default:
@@ -278,7 +302,7 @@ NodeColumn::NodeColumn(LogicalType dataType, const MetadataDAHInfo& metaDAHeader
         transaction);
     numBytesPerFixedSizedValue = getDataTypeSizeInChunk(this->dataType);
     readToVectorFunc = getReadValuesToVectorFunc(this->dataType);
-    readToPageFunc = getWriteValuesToPageFunc(this->dataType);
+    readToPageFunc = getReadValuesToPageFunc(this->dataType);
     batchLookupFunc = getBatchLookupFromPageFunc(this->dataType);
     writeFromVectorFunc = getWriteValuesFromVectorFunc(this->dataType);
     assert(numBytesPerFixedSizedValue <= BufferPoolConstants::PAGE_4KB_SIZE);

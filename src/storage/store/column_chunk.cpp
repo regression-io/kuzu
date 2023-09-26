@@ -109,6 +109,7 @@ static std::shared_ptr<CompressionAlg> getCompression(
         return std::make_shared<IntegerBitpacking<int8_t>>();
     }
     case PhysicalTypeID::VAR_LIST:
+    case PhysicalTypeID::INTERNAL_ID:
     case PhysicalTypeID::UINT64: {
         return std::make_shared<IntegerBitpacking<uint64_t>>();
     }
@@ -161,6 +162,7 @@ void ColumnChunk::initializeFunction(bool enableCompression) {
     case PhysicalTypeID::INT16:
     case PhysicalTypeID::INT8:
     case PhysicalTypeID::VAR_LIST:
+    case PhysicalTypeID::INTERNAL_ID:
     case PhysicalTypeID::UINT64:
     case PhysicalTypeID::UINT32:
     case PhysicalTypeID::UINT16:
