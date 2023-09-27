@@ -140,11 +140,11 @@ static batch_lookup_func_t getBatchLookupFromPageFunc(const LogicalType& logical
 
 NodeColumn::NodeColumn(LogicalType dataType, const MetadataDAHInfo& metaDAHeaderInfo,
     BMFileHandle* dataFH, BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-    transaction::Transaction* transaction, RWPropertyStats propertyStatistics,
+    transaction::Transaction* transaction, RWPropertyStats propertyStatistics, bool compress,
     bool requireNullColumn)
     : storageStructureID{StorageStructureID::newDataID()}, dataType{dataType}, dataFH{dataFH},
       metadataFH{metadataFH}, bufferManager{bufferManager},
-      propertyStatistics{propertyStatistics}, wal{wal} {
+      propertyStatistics{propertyStatistics}, wal{wal}, compress{compress} {
     metadataDA = std::make_unique<InMemDiskArray<ColumnChunkMetadata>>(*metadataFH,
         StorageStructureID::newMetadataID(), metaDAHeaderInfo.dataDAHPageIdx, bufferManager, wal,
         transaction);
@@ -156,7 +156,7 @@ NodeColumn::NodeColumn(LogicalType dataType, const MetadataDAHInfo& metaDAHeader
     assert(numBytesPerFixedSizedValue <= BufferPoolConstants::PAGE_4KB_SIZE);
     if (requireNullColumn) {
         nullColumn = std::make_unique<NullNodeColumn>(metaDAHeaderInfo.nullDAHPageIdx, dataFH,
-            metadataFH, bufferManager, wal, transaction, propertyStatistics);
+            metadataFH, bufferManager, wal, transaction, propertyStatistics, compress);
     }
 }
 
@@ -432,7 +432,7 @@ void NodeColumn::rollbackInMemory() {
 void NodeColumn::populateWithDefaultVal(const Property& property, NodeColumn* nodeColumn,
     ValueVector* defaultValueVector, uint64_t numNodeGroups) {
     auto columnChunk = ColumnChunkFactory::createColumnChunk(
-        *property.getDataType(), nullptr /* copyDescription */);
+        *property.getDataType(), compress, nullptr /* copyDescription */);
     columnChunk->populateWithDefaultVal(defaultValueVector);
     for (auto i = 0u; i < numNodeGroups; i++) {
         nodeColumn->append(columnChunk.get(), i);
@@ -456,15 +456,15 @@ static_assert(PageUtils::getNumElementsInAPage(1, false /*requireNullColumn*/) %
 
 BoolNodeColumn::BoolNodeColumn(const MetadataDAHInfo& metaDAHeaderInfo, BMFileHandle* dataFH,
     BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal, Transaction* transaction,
-    RWPropertyStats propertyStatistics, bool requireNullColumn)
+    RWPropertyStats propertyStatistics, bool compress, bool requireNullColumn)
     : NodeColumn{LogicalType(LogicalTypeID::BOOL), metaDAHeaderInfo, dataFH, metadataFH,
-          bufferManager, wal, transaction, propertyStatistics, requireNullColumn} {}
+          bufferManager, wal, transaction, propertyStatistics, compress, requireNullColumn} {}
 
 NullNodeColumn::NullNodeColumn(page_idx_t metaDAHPageIdx, BMFileHandle* dataFH,
     BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal, Transaction* transaction,
-    RWPropertyStats propertyStatistics)
+    RWPropertyStats propertyStatistics, bool compresss)
     : NodeColumn{LogicalType(LogicalTypeID::BOOL), MetadataDAHInfo{metaDAHPageIdx}, dataFH,
-          metadataFH, bufferManager, wal, transaction, propertyStatistics,
+          metadataFH, bufferManager, wal, transaction, propertyStatistics, compress,
           false /*requireNullColumn*/} {
     readToVectorFunc = NullNodeColumnFunc::readValuesFromPageToVector;
     writeFromVectorFunc = NullNodeColumnFunc::writeValueToPage;
@@ -547,7 +547,8 @@ SerialNodeColumn::SerialNodeColumn(const MetadataDAHInfo& metaDAHeaderInfo, BMFi
     BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal, Transaction* transaction)
     : NodeColumn{LogicalType(LogicalTypeID::SERIAL), metaDAHeaderInfo, dataFH, metadataFH,
           // Serials can't be null, so they don't need PropertyStatistics
-          bufferManager, wal, transaction, RWPropertyStats::empty(), false} {}
+          bufferManager, wal, transaction, RWPropertyStats::empty(), false /*compress*/,
+          false /*requireNullColumn*/} {}
 
 void SerialNodeColumn::scan(
     Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
@@ -576,11 +577,12 @@ void SerialNodeColumn::append(ColumnChunk* columnChunk, uint64_t nodeGroupIdx) {
 
 std::unique_ptr<NodeColumn> NodeColumnFactory::createNodeColumn(const LogicalType& dataType,
     const MetadataDAHInfo& metaDAHeaderInfo, BMFileHandle* dataFH, BMFileHandle* metadataFH,
-    BufferManager* bufferManager, WAL* wal, Transaction* transaction, RWPropertyStats stats) {
+    BufferManager* bufferManager, WAL* wal, Transaction* transaction, RWPropertyStats stats,
+    bool compress) {
     switch (dataType.getLogicalTypeID()) {
     case LogicalTypeID::BOOL: {
         return std::make_unique<BoolNodeColumn>(
-            metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal, transaction, stats);
+            metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal, transaction, stats, compress);
     }
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT32:
@@ -597,8 +599,8 @@ std::unique_ptr<NodeColumn> NodeColumnFactory::createNodeColumn(const LogicalTyp
     case LogicalTypeID::INTERVAL:
     case LogicalTypeID::INTERNAL_ID:
     case LogicalTypeID::FIXED_LIST: {
-        return std::make_unique<NodeColumn>(
-            dataType, metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal, transaction, stats);
+        return std::make_unique<NodeColumn>(dataType, metaDAHeaderInfo, dataFH, metadataFH,
+            bufferManager, wal, transaction, stats, compress);
     }
     case LogicalTypeID::BLOB:
     case LogicalTypeID::STRING: {
@@ -607,13 +609,13 @@ std::unique_ptr<NodeColumn> NodeColumnFactory::createNodeColumn(const LogicalTyp
     }
     case LogicalTypeID::MAP:
     case LogicalTypeID::VAR_LIST: {
-        return std::make_unique<VarListNodeColumn>(
-            dataType, metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal, transaction, stats);
+        return std::make_unique<VarListNodeColumn>(dataType, metaDAHeaderInfo, dataFH, metadataFH,
+            bufferManager, wal, transaction, stats, compress);
     }
     case LogicalTypeID::UNION:
     case LogicalTypeID::STRUCT: {
-        return std::make_unique<StructNodeColumn>(
-            dataType, metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal, transaction, stats);
+        return std::make_unique<StructNodeColumn>(dataType, metaDAHeaderInfo, dataFH, metadataFH,
+            bufferManager, wal, transaction, stats, compress);
     }
     case LogicalTypeID::SERIAL: {
         return std::make_unique<SerialNodeColumn>(

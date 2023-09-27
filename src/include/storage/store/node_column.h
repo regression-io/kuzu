@@ -37,7 +37,7 @@ class NodeColumn {
 public:
     NodeColumn(common::LogicalType dataType, const MetadataDAHInfo& metaDAHeaderInfo,
         BMFileHandle* dataFH, BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-        transaction::Transaction* transaction, RWPropertyStats PropertyStatistics,
+        transaction::Transaction* transaction, RWPropertyStats PropertyStatistics, bool compress,
         bool requireNullColumn = true);
     virtual ~NodeColumn() = default;
 
@@ -130,13 +130,14 @@ protected:
     read_values_to_page_func_t readToPageFunc;
     batch_lookup_func_t batchLookupFunc;
     RWPropertyStats propertyStatistics;
+    bool compress;
 };
 
 class BoolNodeColumn : public NodeColumn {
 public:
     BoolNodeColumn(const MetadataDAHInfo& metaDAHeaderInfo, BMFileHandle* dataFH,
         BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-        transaction::Transaction* transaction, RWPropertyStats propertyStatistics,
+        transaction::Transaction* transaction, RWPropertyStats propertyStatistics, bool compress,
         bool requireNullColumn = true);
 };
 
@@ -146,7 +147,7 @@ class NullNodeColumn : public NodeColumn {
 public:
     NullNodeColumn(common::page_idx_t metaDAHPageIdx, BMFileHandle* dataFH,
         BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-        transaction::Transaction* transaction, RWPropertyStats propertyStatistics);
+        transaction::Transaction* transaction, RWPropertyStats propertyStatistics, bool compress);
 
     void scan(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         common::ValueVector* resultVector) final;
@@ -182,7 +183,7 @@ struct NodeColumnFactory {
     static std::unique_ptr<NodeColumn> createNodeColumn(const common::LogicalType& dataType,
         const MetadataDAHInfo& metaDAHeaderInfo, BMFileHandle* dataFH, BMFileHandle* metadataFH,
         BufferManager* bufferManager, WAL* wal, transaction::Transaction* transaction,
-        RWPropertyStats propertyStatistics);
+        RWPropertyStats propertyStatistics, bool compress);
 };
 
 } // namespace storage

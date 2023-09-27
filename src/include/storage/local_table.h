@@ -80,7 +80,7 @@ public:
 
 class LocalColumn {
 public:
-    explicit LocalColumn(NodeColumn* column) : column{column} {};
+    explicit LocalColumn(NodeColumn* column, bool compress) : column{column}, compress{compress} {};
     virtual ~LocalColumn() = default;
 
     virtual void scan(common::ValueVector* nodeIDVector, common::ValueVector* resultVector);
@@ -101,25 +101,28 @@ public:
 protected:
     std::map<common::node_group_idx_t, std::unique_ptr<LocalColumnChunk>> chunks;
     NodeColumn* column;
+    bool compress;
 };
 
 class StringLocalColumn : public LocalColumn {
 public:
-    explicit StringLocalColumn(NodeColumn* column) : LocalColumn{column} {};
+    explicit StringLocalColumn(NodeColumn* column, bool compress)
+        : LocalColumn{column, compress} {};
 
     void prepareCommitForChunk(common::node_group_idx_t nodeGroupIdx) final;
 };
 
 class VarListLocalColumn : public LocalColumn {
 public:
-    explicit VarListLocalColumn(NodeColumn* column) : LocalColumn{column} {};
+    explicit VarListLocalColumn(NodeColumn* column, bool compress)
+        : LocalColumn{column, compress} {};
 
     void prepareCommitForChunk(common::node_group_idx_t nodeGroupIdx) final;
 };
 
 class StructLocalColumn : public LocalColumn {
 public:
-    explicit StructLocalColumn(NodeColumn* column);
+    explicit StructLocalColumn(NodeColumn* column, bool compress);
 
     void scan(common::ValueVector* nodeIDVector, common::ValueVector* resultVector) final;
     void lookup(common::ValueVector* nodeIDVector, common::ValueVector* resultVector) final;
@@ -135,12 +138,12 @@ private:
 };
 
 struct LocalColumnFactory {
-    static std::unique_ptr<LocalColumn> createLocalColumn(NodeColumn* column);
+    static std::unique_ptr<LocalColumn> createLocalColumn(NodeColumn* column, bool compress);
 };
 
 class LocalTable {
 public:
-    explicit LocalTable(NodeTable* table) : table{table} {};
+    explicit LocalTable(NodeTable* table, bool compress) : table{table}, compress{compress} {};
 
     void scan(common::ValueVector* nodeIDVector, const std::vector<common::column_id_t>& columnIDs,
         const std::vector<common::ValueVector*>& outputVectors);
@@ -157,6 +160,7 @@ public:
 private:
     std::map<common::column_id_t, std::unique_ptr<LocalColumn>> columns;
     NodeTable* table;
+    bool compress;
 };
 
 } // namespace storage
