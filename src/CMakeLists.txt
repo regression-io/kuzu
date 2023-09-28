@@ -12,6 +12,10 @@ add_subdirectory(processor)
 add_subdirectory(storage)
 add_subdirectory(transaction)
 
+# Export functions instead of importing them since we are building kuzu, not
+# linking against it
+add_compile_definitions(KUZU_DLL_EXPORTS)
+
 add_library(kuzu STATIC ${ALL_OBJECT_FILES})
 target_link_libraries(kuzu
         PUBLIC antlr4_cypher antlr4_runtime utf8proc re2 serd ${PARQUET_LIB} ${ARROW_LIB} Threads::Threads fastpfor miniparquet)
@@ -27,3 +31,9 @@ target_link_libraries(kuzu_shared
         PUBLIC antlr4_cypher antlr4_runtime utf8proc re2 serd ${PARQUET_LIB} ${ARROW_LIB} Threads::Threads fastpfor miniparquet)
 target_include_directories(kuzu_shared
         PUBLIC $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include> $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
+# Hide non-exported symbols
+set_property(TARGET kuzu_shared PROPERTY CXX_VISIBILITY_PRESET hidden)
+set_property(TARGET kuzu PROPERTY CXX_VISIBILITY_PRESET hidden)
+set_property(TARGET kuzu_shared PROPERTY VISIBILITY_INLINES_HIDDEN ON)
+set_property(TARGET kuzu PROPERTY VISIBILITY_INLINES_HIDDEN ON)
