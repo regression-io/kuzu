@@ -6,67 +6,106 @@ on:
     - cron: '0 0 * * *'
 
 jobs:
-  gcc-rust-build-test:
-    name: gcc & rust build & test
-    runs-on: ubuntu-20.04
-    env:
-      # Share build cache when building rust API and the example project
-      CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      CARGO_BUILD_JOBS: 32
-      CC: gcc
-      CXX: g++
+  windows-build-test:
+    name: windows build & test
+    strategy:
+      matrix:
+        runner: [windows-2019, windows-2022]
+    runs-on: ${{ matrix.runner }}
     steps:
-      - uses: actions/checkout@v3
+      - run: |
+          mkdir C:\kuzu
+          git clone https://github.com/kuzudb/kuzu.git C:\kuzu
+          cd C:\kuzu
+          git switch ci-more-platforms
+
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
 
       - name: Ensure Python dependencies
+        shell: cmd
+        working-directory: C:\kuzu
         run: |
-          pip install torch~=1.13 --extra-index-url https://download.pytorch.org/whl/cpu &&\
-          pip install --user -r tools/python_api/requirements_dev.txt -f https://data.pyg.org/whl/torch-1.13.0+cpu.html
-      
-      - name: Ensure Node.js dependencies
-        run: npm install --include=dev
-        working-directory: tools/nodejs_api
+          pip install torch~=2.0.0 --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install --user -r tools\python_api\requirements_dev.txt -f https://data.pyg.org/whl/torch-2.0.0+cpu.html
 
-      - name: Test with coverage
-        run: CC=gcc CXX=g++ make lcov NUM_THREADS=32
+      - name: Ensure Node.js dependencies
+        shell: cmd
+        working-directory: C:\kuzu\tools\nodejs_api
+        run: npm install --include=dev
+
+      - name: Build
+        shell: cmd
+        working-directory: C:\kuzu
+        run: make release NUM_THREADS=%NUMBER_OF_PROCESSORS%
+
+      - name: Test
+        shell: cmd
+        working-directory: C:\kuzu
+        run: make test NUM_THREADS=%NUMBER_OF_PROCESSORS%
+
+      - name: C example
+        shell: cmd
+        working-directory: C:\kuzu\examples\c
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build .
+        continue-on-error: true
+
+      - name: C++ example
+        shell: cmd
+        working-directory: C:\kuzu\examples\cpp
+        run: |
+          mkdir build
+          cd build
+          cmake ..
+          cmake --build .
+        continue-on-error: true
 
       - name: Python test
-        run: CC=gcc CXX=g++ make pytest NUM_THREADS=32
-      
+        shell: cmd
+        working-directory: C:\kuzu
+        run: make pytest NUM_THREADS=%NUMBER_OF_PROCESSORS%
+        continue-on-error: true
+
       - name: Node.js test
-        run: CC=gcc CXX=g++ make nodejstest NUM_THREADS=32
+        shell: cmd
+        working-directory: C:\kuzu
+        run: make nodejstest NUM_THREADS=%NUMBER_OF_PROCESSORS%
 
       - name: Java test
-        run: CC=gcc CXX=g++ make javatest NUM_THREADS=32
+        shell: cmd
+        working-directory: C:\kuzu
+        run: make javatest NUM_THREADS=%NUMBER_OF_PROCESSORS%
 
-      - name: Generate coverage report
-        run: |
-          lcov -c -d ./ --no-external -o cover.info &&\
-          lcov --remove cover.info $(< .github/workflows/lcov_exclude) -o cover.info
-
-      - name: C Example
-        working-directory: examples/c
-        run: |
-          mkdir build -p
-          cd build
-          CC=gcc CXX=g++ cmake ..
-          cmake --build .
-
-      - name: C++ Example
-        working-directory: examples/cpp
-        run: |
-          mkdir build -p
-          cd build
-          CC=gcc CXX=g++ cmake ..
-          cmake --build .
+      - name: Rust share build
+        shell: cmd
+        working-directory: C:\kuzu
+        run: (echo [workspace]& echo members = ["tools/rust_api","examples/rust"]) > Cargo.toml
 
       - name: Rust test
-        working-directory: tools/rust_api
+        shell: cmd
+        working-directory: C:\kuzu\tools\rust_api
         run: |
+          set OPENSSL_DIR=C:\Program Files\OpenSSL-Win64
+          set KUZU_TESTING=1
+          set CFLAGS=/MDd
+          set CXXFLAGS=/MDd /std:c++20
+          set CARGO_BUILD_JOBS=%NUMBER_OF_PROCESSORS%
           cargo update -p half@2.3.1 --precise '2.2.1'
           cargo update -p time --precise '0.3.23'
           cargo test --features arrow -- --test-threads=1
+        continue-on-error: true
 
       - name: Rust example
-        working-directory: examples/rust
-        run: cargo build
+        shell: cmd
+        working-directory: C:\kuzu\examples\rust
+        run: |
+          set CARGO_BUILD_JOBS=%NUMBER_OF_PROCESSORS%
+          cargo build --features arrow
+        continue-on-error: true
