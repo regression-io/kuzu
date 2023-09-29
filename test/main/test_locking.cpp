@@ -34,11 +34,10 @@ TEST_F(EmptyDBTest, testReadLock) {
     uint64_t* count = (uint64_t*)mmap(
         NULL, sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
     *count = 0;
-    //create db
+    // create db
     EXPECT_NO_THROW(createDBAndConn());
-    ASSERT_TRUE(
-        conn->query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")
-            ->isSuccess());
+    ASSERT_TRUE(conn->query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")
+                    ->isSuccess());
     ASSERT_TRUE(conn->query("CREATE (:Person {name: 'Alice', age: 25});")->isSuccess());
     database.reset();
     // test read write db
