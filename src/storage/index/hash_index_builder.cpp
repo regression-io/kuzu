@@ -7,7 +7,9 @@ namespace storage {
 
 slot_id_t BaseHashIndex::getPrimarySlotIdForKey(
     const HashIndexHeader& indexHeader_, const uint8_t* key) {
-    auto hash = keyHashFunc(key);
+    common::hash_t hash;
+    function::Hash::operation(*(int64_t*)key, hash);
+//    auto hash = keyHashFunc(key);
     auto slotId = hash & indexHeader_.levelHashMask;
     if (slotId < indexHeader_.nextSplitSlotId) {
         slotId = hash & indexHeader_.higherLevelHashMask;
@@ -18,6 +20,7 @@ slot_id_t BaseHashIndex::getPrimarySlotIdForKey(
 template<typename T>
 HashIndexBuilder<T>::HashIndexBuilder(const std::string& fName, const LogicalType& keyDataType)
     : BaseHashIndex{keyDataType}, numEntries{0} {
+    slotCapacity = getSlotCapacity<T>();
     fileHandle =
         std::make_unique<FileHandle>(fName, FileHandle::O_PERSISTENT_FILE_CREATE_NOT_EXISTS);
     indexHeader = std::make_unique<HashIndexHeader>(keyDataType.getLogicalTypeID());
@@ -36,15 +39,14 @@ HashIndexBuilder<T>::HashIndexBuilder(const std::string& fName, const LogicalTyp
         inMemOverflowFile =
             std::make_unique<InMemOverflowFile>(StorageUtils::getOverflowFileName(fName));
     }
-    keyInsertFunc = InMemHashIndexUtils::initializeInsertFunc(indexHeader->keyDataTypeID);
-    keyEqualsFunc = InMemHashIndexUtils::initializeEqualsFunc(indexHeader->keyDataTypeID);
+//    keyInsertFunc = InMemHashIndexUtils::initializeInsertFunc(indexHeader->keyDataTypeID);
+//    keyEqualsFunc = InMemHashIndexUtils::initializeEqualsFunc(indexHeader->keyDataTypeID);
 }
 
 template<typename T>
 void HashIndexBuilder<T>::bulkReserve(uint32_t numEntries_) {
     slot_id_t numRequiredEntries = getNumRequiredEntries(numEntries.load(), numEntries_);
     // Build from scratch.
-    slotCapacity = getSlotCapacity<T>();
     auto numRequiredSlots = (numRequiredEntries + slotCapacity - 1) / slotCapacity;
     auto numSlotsOfCurrentLevel = 1 << indexHeader->currentLevel;
     while ((numSlotsOfCurrentLevel << 1) < numRequiredSlots) {
@@ -130,7 +132,7 @@ bool HashIndexBuilder<T>::lookupOrExistsInSlotWithoutLock(
             continue;
         }
         auto& entry = slot->entries[entryPos];
-        if (keyEqualsFunc(key, entry.data, inMemOverflowFile.get())) {
+        if (*(int64_t*)key == *(int64_t*)entry.data) {
             if constexpr (IS_LOOKUP) {
                 memcpy(result, entry.data + indexHeader->numBytesPerKey, sizeof(offset_t));
             }
@@ -151,7 +153,9 @@ void HashIndexBuilder<T>::insertToSlotWithoutLock(
     }
     for (auto entryPos = 0u; entryPos < slotCapacity; entryPos++) {
         if (!slot->header.isEntryValid(entryPos)) {
-            keyInsertFunc(key, value, slot->entries[entryPos].data, inMemOverflowFile.get());
+            memcpy(slot->entries[entryPos].data, key, NUM_BYTES_FOR_INT64_KEY);
+            memcpy(slot->entries[entryPos].data + NUM_BYTES_FOR_INT64_KEY, &value, sizeof(common::offset_t));
+//            keyInsertFunc(key, value, slot->entries[entryPos].data, inMemOverflowFile.get());
             slot->header.setEntryValid(entryPos);
             slot->header.numEntries++;
             break;

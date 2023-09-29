@@ -52,7 +52,7 @@ struct SlotInfo {
 class BaseHashIndex {
 public:
     explicit BaseHashIndex(const common::LogicalType& keyDataType) {
-        keyHashFunc = HashIndexUtils::initializeHashFunc(keyDataType.getLogicalTypeID());
+//        keyHashFunc = HashIndexUtils::initializeHashFunc(keyDataType.getLogicalTypeID());
     }
 
     virtual ~BaseHashIndex() = default;
@@ -68,7 +68,7 @@ protected:
 protected:
     std::unique_ptr<HashIndexHeader> indexHeader;
     std::shared_mutex pSlotSharedMutex;
-    hash_function_t keyHashFunc;
+//    hash_function_t keyHashFunc;
 };
 
 template<typename T>
@@ -117,8 +117,8 @@ private:
     std::unique_ptr<InMemDiskArrayBuilder<Slot<T>>> pSlots;
     std::unique_ptr<InMemDiskArrayBuilder<Slot<T>>> oSlots;
     std::vector<std::unique_ptr<std::mutex>> pSlotsMutexes;
-    in_mem_insert_function_t keyInsertFunc;
-    in_mem_equals_function_t keyEqualsFunc;
+//    in_mem_insert_function_t keyInsertFunc;
+//    in_mem_equals_function_t keyEqualsFunc;
     std::unique_ptr<InMemOverflowFile> inMemOverflowFile;
     uint8_t slotCapacity;
     std::atomic<uint64_t> numEntries;
