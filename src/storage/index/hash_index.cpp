@@ -141,7 +141,7 @@ HashIndex<T>::HashIndex(const StorageStructureIDAndFName& storageStructureIDAndF
         storageStructureIDAndFName.storageStructureID, O_SLOTS_HEADER_PAGE_IDX, &bm, wal,
         Transaction::getDummyReadOnlyTrx().get());
     // Initialize functions.
-    keyHashFunc = HashIndexUtils::initializeHashFunc(indexHeader->keyDataTypeID);
+//    keyHashFunc = HashIndexUtils::initializeHashFunc(indexHeader->keyDataTypeID);
     keyInsertFunc = HashIndexUtils::initializeInsertFunc(indexHeader->keyDataTypeID);
     keyEqualsFunc = HashIndexUtils::initializeEqualsFunc(indexHeader->keyDataTypeID);
     localStorage = std::make_unique<HashIndexLocalStorage>(keyDataType);
@@ -309,9 +309,11 @@ void HashIndex<T>::rehashSlots(HashIndexHeader& header) {
             hash_t hash;
             if (header.keyDataTypeID == LogicalTypeID::STRING) {
                 auto str = diskOverflowFile->readString(TransactionType::WRITE, *(ku_string_t*)key);
-                hash = keyHashFunc((const uint8_t*)str.c_str());
+//                hash = keyHashFunc((const uint8_t*)str.c_str());
             } else {
-                hash = keyHashFunc(key);
+                common::hash_t hash;
+                function::Hash::operation(*(int64_t*)key, hash);
+//                hash = keyHashFunc(key);
             }
             auto newSlotId = hash & header.higherLevelHashMask;
             copyEntryToSlot(newSlotId, key);
