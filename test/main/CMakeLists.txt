@@ -7,3 +7,5 @@ add_kuzu_test(main_test
         result_value_test.cpp
         storage_driver_test.cpp
         udf_test.cpp)
+add_kuzu_test(test_locking test_locking.cpp)
+add_kuzu_test(test_read_only test_read_only.cpp)

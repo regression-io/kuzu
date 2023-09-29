@@ -21,12 +21,7 @@ using namespace kuzu::main;
 namespace kuzu {
 namespace testing {
 
-class LockingTest : public EmptyDBTest {
-public:
-    void SetUp() override { EmptyDBTest::SetUp(); }
-};
-
-TEST_F(LockingTest, testReadLock) {
+TEST_F(EmptyDBTest, testReadLock) {
 #ifdef _WIN32
     HANDLE hFileMapping = CreateFileMappingW(
         INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(uint64_t), L"MySharedMemory");
@@ -39,18 +34,13 @@ TEST_F(LockingTest, testReadLock) {
     uint64_t* count = (uint64_t*)mmap(
         NULL, sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
     *count = 0;
-    // create db first
-    pid_t create_pid = fork();
-    if (create_pid == 0) {
-        EXPECT_NO_THROW(createDBAndConn());
-        ASSERT_TRUE(
-            conn->query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")
-                ->isSuccess());
-        ASSERT_TRUE(conn->query("CREATE (:Person {name: 'Alice', age: 25});")->isSuccess());
-        exit(0);
-    }
-    waitpid(create_pid, NULL, 0);
-
+    //create db
+    EXPECT_NO_THROW(createDBAndConn());
+    ASSERT_TRUE(
+        conn->query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name));")
+            ->isSuccess());
+    ASSERT_TRUE(conn->query("CREATE (:Person {name: 'Alice', age: 25});")->isSuccess());
+    database.reset();
     // test read write db
     pid_t pid = fork();
     if (pid == 0) {
@@ -81,7 +71,7 @@ TEST_F(LockingTest, testReadLock) {
 #endif
 }
 
-TEST_F(LockingTest, testWriteLock) {
+TEST_F(EmptyDBTest, testWriteLock) {
 #ifdef _WIN32
     HANDLE hFileMapping = CreateFileMappingW(
         INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(uint64_t), L"MySharedMemory");
@@ -152,7 +142,7 @@ TEST_F(LockingTest, testWriteLock) {
 #endif
 }
 
-TEST_F(LockingTest, testReadOnly) {
+TEST_F(EmptyDBTest, testReadOnly) {
 #ifdef _WIN32
     HANDLE hFileMapping = CreateFileMappingW(
         INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, sizeof(uint64_t), L"MySharedMemory");
