@@ -84,11 +84,6 @@ void Database::setLoggingLevel(std::string loggingLevel) {
 }
 
 void Database::openLockFile() {
-#ifdef _WIN_32_
-    if (systemConfig.accessMode != AccessMode::READ_WRITE) {
-        throw Exception("Can only open database under the default READ_WRITE mode on Windows.");
-    }
-#endif
     int flags;
     FileLockType lock;
     auto lockFilePath = StorageUtils::getLockFilePath(databasePath);

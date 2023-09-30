@@ -64,7 +64,15 @@ std::unique_ptr<FileInfo> FileUtils::openFile(
             path, GetLastError(), std::system_category().message(GetLastError())));
     }
     if (lock_type != FileLockType::NO_LOCK) {
-        throw Exception("File lock is not supported on Win platform yet.");
+        DWORD dwFlags = lock_type == FileLockType::READ_LOCK ?
+                            LOCKFILE_FAIL_IMMEDIATELY :
+                            LOCKFILE_FAIL_IMMEDIATELY | LOCKFILE_EXCLUSIVE_LOCK;
+        OVERLAPPED overlapped = {0};
+        overlapped.Offset = 0;
+        BOOL rc = LockFileEx(handle, dwFlags, 0, 0, 0, &overlapped);
+        if (!rc) {
+            throw Exception("Could not set lock on file : " + path);
+        }
     }
     return std::make_unique<FileInfo>(path, handle);
 #else
