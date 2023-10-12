@@ -11,7 +11,8 @@ public:
     using string_index_t = uint32_t;
     StringColumn(common::LogicalType dataType, const MetadataDAHInfo& metaDAHeaderInfo,
         BMFileHandle* dataFH, BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-        transaction::Transaction* transaction, RWPropertyStats propertyStatistics);
+        transaction::Transaction* transaction, RWPropertyStats propertyStatistics,
+        bool enableCompression);
 
     void scan(transaction::Transaction* transaction, common::node_group_idx_t nodeGroupIdx,
         common::offset_t startOffsetInGroup, common::offset_t endOffsetInGroup,

@@ -63,7 +63,8 @@ public:
                 memset(compressedBuffer.get() + compressedSize, 0,
                     BufferPoolConstants::PAGE_4KB_SIZE - compressedSize);
             }
-            FileUtils::writeToFile(dataFH->getFileInfo(), compressedBuffer.get(), compressedSize,
+            FileUtils::writeToFile(dataFH->getFileInfo(), compressedBuffer.get(),
+                BufferPoolConstants::PAGE_4KB_SIZE,
                 (startPageIdx + numPages) * BufferPoolConstants::PAGE_4KB_SIZE);
             numPages++;
         } while (valuesRemaining > 0);
@@ -483,7 +484,7 @@ std::unique_ptr<ColumnChunk> ColumnChunkFactory::createColumnChunk(
         return std::make_unique<FixedListColumnChunk>(dataType, capacity, enableCompression);
     }
     case PhysicalTypeID::STRING: {
-        return std::make_unique<StringColumnChunk>(dataType, capacity);
+        return std::make_unique<StringColumnChunk>(dataType, capacity, enableCompression);
     }
     case PhysicalTypeID::VAR_LIST: {
         return std::make_unique<VarListColumnChunk>(dataType, capacity, enableCompression);
