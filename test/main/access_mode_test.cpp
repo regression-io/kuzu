@@ -1,30 +1,26 @@
-#include "graph_test/graph_test.h"
-#include "main/kuzu.h"
+#include "main_test_helper/main_test_helper.h"
 
 using namespace kuzu::common;
 using namespace kuzu::testing;
+using namespace kuzu::main;
 
-namespace kuzu {
-namespace testing {
+class AccessModeTest : public ApiTest {};
 
-TEST_F(EmptyDBTest, testReadWrite) {
+TEST_F(AccessModeTest, testReadWrite) {
     systemConfig->accessMode = AccessMode::READ_WRITE;
-    auto db = std::make_unique<main::Database>(databasePath, *systemConfig);
-    auto con = std::make_unique<main::Connection>(db.get());
+    auto db = std::make_unique<Database>(databasePath, *systemConfig);
+    auto con = std::make_unique<Connection>(db.get());
     ASSERT_TRUE(con->query("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY(name))")
                     ->isSuccess());
     ASSERT_TRUE(con->query("CREATE (:Person {name: 'Alice', age: 25})")->isSuccess());
     ASSERT_TRUE(con->query("MATCH (:Person) RETURN COUNT(*)")->isSuccess());
-
     db.reset();
     systemConfig->accessMode = AccessMode::READ_ONLY;
-    std::unique_ptr<main::Database> db2;
-    std::unique_ptr<main::Connection> con2;
-    EXPECT_NO_THROW(db2 = std::make_unique<main::Database>(databasePath, *systemConfig));
-    EXPECT_NO_THROW(con2 = std::make_unique<main::Connection>(db2.get()));
+    std::unique_ptr<Database> db2;
+    std::unique_ptr<Connection> con2;
+    EXPECT_NO_THROW(db2 = std::make_unique<Database>(databasePath, *systemConfig));
+    EXPECT_NO_THROW(con2 = std::make_unique<Connection>(db2.get()));
     EXPECT_ANY_THROW(con2->query("DROP TABLE Person"));
     EXPECT_NO_THROW(con2->query("MATCH (:Person) RETURN COUNT(*)"));
 }
 
-} // namespace testing
-} // namespace kuzu

@@ -2,17 +2,19 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#include "graph_test/graph_test.h"
-#include "main/kuzu.h"
+#include "main_test_helper/main_test_helper.h"
 
 using namespace kuzu::testing;
 using namespace kuzu::common;
 using namespace kuzu::main;
 
-namespace kuzu {
-namespace testing {
+class DBLockingTest : public ApiTest {
+    void SetUp() override {
+        BaseGraphTest::SetUp();
+    }
+};
 
-TEST_F(EmptyDBTest, testReadLock) {
+TEST_F(DBLockingTest, testReadLock) {
     uint64_t* count = (uint64_t*)mmap(
         NULL, sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
     *count = 0;
@@ -51,7 +53,7 @@ TEST_F(EmptyDBTest, testReadLock) {
     }
 }
 
-TEST_F(EmptyDBTest, testWriteLock) {
+TEST_F(DBLockingTest, testWriteLock) {
     uint64_t* count = (uint64_t*)mmap(
         NULL, sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
     *count = 0;
@@ -93,7 +95,7 @@ TEST_F(EmptyDBTest, testWriteLock) {
     }
 }
 
-TEST_F(EmptyDBTest, testReadOnly) {
+TEST_F(DBLockingTest, testReadOnly) {
     uint64_t* count = (uint64_t*)mmap(
         NULL, sizeof(uint64_t), PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
     *count = 0;
@@ -129,5 +131,3 @@ TEST_F(EmptyDBTest, testReadOnly) {
     EXPECT_ANY_THROW(conn->query("MATCH (p:Person) WHERE name='Alice' DELETE p;"));
 }
 
-} // namespace testing
-} // namespace kuzu
