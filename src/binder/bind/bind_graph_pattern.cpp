@@ -582,7 +582,7 @@ std::vector<table_id_t> Binder::getNodeTableIDs(const std::vector<table_id_t>& t
         for (auto& tableID : tableIDs) {
             auto rdfGraphSchema =
                 reinterpret_cast<RdfGraphSchema*>(readVersion->getTableSchema(tableID));
-            result.push_back(rdfGraphSchema->getNodeTableID());
+            result.push_back(rdfGraphSchema->getResourceTableID());
         }
         return result;
     }
@@ -603,7 +603,7 @@ std::vector<table_id_t> Binder::getRelTableIDs(const std::vector<table_id_t>& ta
         for (auto& tableID : tableIDs) {
             auto rdfGraphSchema =
                 reinterpret_cast<RdfGraphSchema*>(readVersion->getTableSchema(tableID));
-            result.push_back(rdfGraphSchema->getRelTableID());
+            result.push_back(rdfGraphSchema->getResourceTripleTableID());
         }
         return result;
     }

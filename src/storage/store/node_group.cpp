@@ -11,12 +11,12 @@ using namespace kuzu::transaction;
 namespace kuzu {
 namespace storage {
 
-NodeGroup::NodeGroup(TableSchema* schema, bool enableCompression)
+NodeGroup::NodeGroup(
+    const std::vector<std::unique_ptr<common::LogicalType>>& columnTypes, bool enableCompression)
     : nodeGroupIdx{UINT64_MAX}, numNodes{0} {
-    chunks.reserve(schema->properties.size());
-    for (auto& property : schema->properties) {
-        chunks.push_back(
-            ColumnChunkFactory::createColumnChunk(*property->getDataType(), enableCompression));
+    chunks.reserve(columnTypes.size());
+    for (auto& type : columnTypes) {
+        chunks.push_back(ColumnChunkFactory::createColumnChunk(*type, enableCompression));
     }
 }
 
@@ -56,6 +56,27 @@ uint64_t NodeGroup::append(
     }
     resultSet->getDataChunk(dataPoses[0].dataChunkPos)->state->selVector->selectedSize =
         originalVectorSize;
+    numNodes += numValuesToAppendInChunk;
+    return numValuesToAppendInChunk;
+}
+
+uint64_t NodeGroup::append(const std::vector<ValueVector*>& columnVectors,
+    DataChunkState* columnState, uint64_t numValuesToAppend) {
+    auto numValuesToAppendInChunk =
+        std::min(numValuesToAppend, StorageConstants::NODE_GROUP_SIZE - numNodes);
+    auto serialSkip = 0u;
+    auto originalSize = columnState->selVector->selectedSize;
+    columnState->selVector->selectedSize = numValuesToAppendInChunk;
+    for (auto i = 0u; i < chunks.size(); i++) {
+        auto chunk = chunks[i].get();
+        if (chunk->getDataType().getLogicalTypeID() == common::LogicalTypeID::SERIAL) {
+            serialSkip++;
+            continue;
+        }
+        assert(chunk->getDataType() == columnVectors[i - serialSkip]->dataType);
+        chunk->append(columnVectors[i - serialSkip], numNodes);
+    }
+    columnState->selVector->selectedSize = originalSize;
     numNodes += numValuesToAppendInChunk;
     return numValuesToAppendInChunk;
 }

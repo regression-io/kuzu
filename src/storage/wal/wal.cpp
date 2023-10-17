@@ -69,9 +69,11 @@ void WAL::logRelTableRecord(table_id_t tableID) {
     addNewWALRecordNoLock(walRecord);
 }
 
-void WAL::logRdfGraphRecord(table_id_t rdfGraphID, table_id_t nodeTableID, table_id_t relTableID) {
+void WAL::logRdfGraphRecord(table_id_t rdfGraphID, table_id_t resourceTableID,
+    table_id_t literalTableID, table_id_t resourceTripleTableID, table_id_t literalTripleTableID) {
     lock_t lck{mtx};
-    WALRecord walRecord = WALRecord::newRdfGraphRecord(rdfGraphID, nodeTableID, relTableID);
+    WALRecord walRecord = WALRecord::newRdfGraphRecord(
+        rdfGraphID, resourceTableID, literalTableID, resourceTripleTableID, literalTripleTableID);
     addNewWALRecordNoLock(walRecord);
 }
 
@@ -115,6 +117,7 @@ void WAL::logAddPropertyRecord(table_id_t tableID, property_id_t propertyID) {
 }
 
 void WAL::clearWAL() {
+    bufferManager.clearEvictionQueue();
     bufferManager.removeFilePagesFromFrames(*fileHandle);
     fileHandle->resetToZeroPagesAndPageCapacity();
     initCurrentPage();
