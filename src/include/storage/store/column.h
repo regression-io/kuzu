@@ -16,6 +16,9 @@ using read_values_to_vector_func_t = std::function<void(uint8_t* frame,
     uint32_t numValuesToRead, const CompressionMetadata& metadata)>;
 using write_values_from_vector_func_t = std::function<void(uint8_t* frame, uint16_t posInFrame,
     common::ValueVector* vector, uint32_t posInVector, const CompressionMetadata& metadata)>;
+using write_values_func_t = std::function<void(uint8_t* frame, uint16_t posInFrame,
+    const uint8_t* data, common::offset_t dataOffset, common::offset_t numValues,
+    const CompressionMetadata& metadata)>;
 
 using read_values_to_page_func_t =
     std::function<void(uint8_t* frame, PageElementCursor& pageCursor, uint8_t* result,
@@ -23,11 +26,17 @@ using read_values_to_page_func_t =
 // This is a special usage for the `batchLookup` interface.
 using batch_lookup_func_t = read_values_to_page_func_t;
 
+struct ReadState {
+    ColumnChunkMetadata metadata;
+    uint64_t numValuesPerPage;
+};
+
 class NullColumn;
 class StructColumn;
 class Column {
     friend class LocalColumn;
     friend class StringLocalColumn;
+    friend class StringColumn;
     friend class VarListLocalColumn;
     friend class StructColumn;
 
@@ -76,8 +85,15 @@ public:
     }
     inline InMemDiskArray<ColumnChunkMetadata>* getMetadataDA() const { return metadataDA.get(); }
 
+    virtual void scan(transaction::Transaction* transaction, const ReadState& state,
+        common::offset_t startOffsetInGroup, common::offset_t endOffsetInGroup, uint8_t* result);
+
     virtual void write(common::offset_t nodeOffset, common::ValueVector* vectorToWriteFrom,
         uint32_t posInVectorToWriteFrom);
+
+    // Append values to the end of the node group, resizing it if necessary
+    common::offset_t appendValues(
+        common::node_group_idx_t nodeGroupIdx, const uint8_t* data, common::offset_t numValues);
 
 protected:
     virtual void scanInternal(transaction::Transaction* transaction,
@@ -96,16 +112,27 @@ protected:
     void readFromPage(transaction::Transaction* transaction, common::page_idx_t pageIdx,
         const std::function<void(uint8_t*)>& func);
 
-    virtual void writeValue(common::offset_t nodeOffset, common::ValueVector* vectorToWriteFrom,
-        uint32_t posInVectorToWriteFrom);
+    virtual void writeValue(const ColumnChunkMetadata& chunkMeta, common::offset_t nodeOffset,
+        common::ValueVector* vectorToWriteFrom, uint32_t posInVectorToWriteFrom);
+    virtual void writeValue(
+        const ColumnChunkMetadata& chunkMeta, common::offset_t nodeOffset, const uint8_t* data);
 
+    // Produces a page cursor for the offset relative to the given node group
+    PageElementCursor getPageCursorForOffsetInGroup(
+        common::offset_t nodeOffset, const ReadState& state);
+
+    ReadState getReadState(
+        transaction::TransactionType transactionType, common::node_group_idx_t nodeGroupIdx) const;
+
+    // Produces a page cursor for the absolute node offset
     PageElementCursor getPageCursorForOffset(
         transaction::TransactionType transactionType, common::offset_t nodeOffset);
     WALPageIdxPosInPageAndFrame createWALVersionOfPageForValue(common::offset_t nodeOffset);
 
 private:
     static bool containsVarList(common::LogicalType& dataType);
-    bool canCommitInPlace(common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk);
+    virtual bool canCommitInPlace(
+        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk);
     void commitLocalChunkInPlace(LocalVectorCollection* localChunk);
     void commitLocalChunkOutOfPlace(common::node_group_idx_t nodeGroupIdx,
         LocalVectorCollection* localChunk, bool isNewNodeGroup);
@@ -135,6 +162,7 @@ protected:
     std::unique_ptr<Column> nullColumn;
     read_values_to_vector_func_t readToVectorFunc;
     write_values_from_vector_func_t writeFromVectorFunc;
+    write_values_func_t writeFunc;
     read_values_to_page_func_t readToPageFunc;
     batch_lookup_func_t batchLookupFunc;
     RWPropertyStats propertyStatistics;
