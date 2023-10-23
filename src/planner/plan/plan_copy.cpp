@@ -31,8 +31,7 @@ std::unique_ptr<LogicalPlan> Planner::planCopyFrom(const BoundStatement& stateme
     QueryPlanner::appendScanFile(copyFromInfo->fileScanInfo.get(), *plan);
     auto tableType = copyFromInfo->tableSchema->tableType;
     if (tableType == TableType::REL && fileType != FileType::TURTLE) {
-        auto extraInfo =
-            reinterpret_cast<ExtraBoundCopyRelInfo*>(copyFromInfo->extraInfo.get());
+        auto extraInfo = reinterpret_cast<ExtraBoundCopyRelInfo*>(copyFromInfo->extraInfo.get());
         std::vector<std::unique_ptr<LogicalIndexScanNodeInfo>> infos;
         auto srcNodeTableSchema = reinterpret_cast<NodeTableSchema*>(extraInfo->srcTableSchema);
         auto srcTableID = srcNodeTableSchema->getTableID();
