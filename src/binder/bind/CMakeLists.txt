@@ -8,10 +8,15 @@ add_library(
         bind_explain.cpp
         bind_file_scan.cpp
         bind_graph_pattern.cpp
+        bind_node.cpp
+        bind_path.cpp
         bind_projection_clause.cpp
+        bind_property.cpp
         bind_query.cpp
         bind_reading_clause.cpp
+        bind_rel.cpp
         bind_standalone_call.cpp
+        bind_table.cpp
         bind_transaction.cpp
         bind_updating_clause.cpp)
 

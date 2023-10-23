@@ -191,7 +191,7 @@ std::unique_ptr<BoundCreateTableInfo> Binder::bindCreateRdfGraphInfo(const Creat
     auto resourceTripleTableName = getRdfResourceTripleTableName(rdfGraphName);
     std::vector<std::unique_ptr<Property>> resourceTripleProperties;
     resourceTripleProperties.push_back(std::make_unique<Property>(
-        common::RDFKeyword::PREDICT_ID, std::make_unique<LogicalType>(LogicalTypeID::INT64)));
+        common::RDFKeyword::PREDICT_ID, std::make_unique<LogicalType>(LogicalTypeID::INTERNAL_ID)));
     auto boundResourceTripleExtraInfo =
         std::make_unique<BoundExtraCreateRelTableInfo>(RelMultiplicity::MANY_MANY, INVALID_TABLE_ID,
             INVALID_TABLE_ID, std::move(resourceTripleProperties));
@@ -201,7 +201,7 @@ std::unique_ptr<BoundCreateTableInfo> Binder::bindCreateRdfGraphInfo(const Creat
     auto literalTripleTableName = getRdfLiteralTripleTableName(rdfGraphName);
     std::vector<std::unique_ptr<Property>> literalTripleProperties;
     literalTripleProperties.push_back(std::make_unique<Property>(
-        common::RDFKeyword::PREDICT_ID, std::make_unique<LogicalType>(LogicalTypeID::INT64)));
+        common::RDFKeyword::PREDICT_ID, std::make_unique<LogicalType>(LogicalTypeID::INTERNAL_ID)));
     auto boundLiteralTripleExtraInfo =
         std::make_unique<BoundExtraCreateRelTableInfo>(RelMultiplicity::MANY_MANY, INVALID_TABLE_ID,
             INVALID_TABLE_ID, std::move(literalTripleProperties));

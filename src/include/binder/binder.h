@@ -223,12 +223,16 @@ private:
     /*** bind graph pattern ***/
     std::pair<std::unique_ptr<QueryGraphCollection>, std::unique_ptr<PropertyKeyValCollection>>
     bindGraphPattern(const std::vector<std::unique_ptr<parser::PatternElement>>& graphPattern);
-
     std::unique_ptr<QueryGraph> bindPatternElement(
         const parser::PatternElement& patternElement, PropertyKeyValCollection& collection);
+
+    /*** bind path ***/
     std::shared_ptr<Expression> createPath(
         const std::string& pathName, const expression_vector& children);
+    std::unique_ptr<common::LogicalType> getRecursiveRelType(
+        const common::LogicalType& nodeType, const common::LogicalType& relType);
 
+    /*** bind rel ***/
     std::shared_ptr<RelExpression> bindQueryRel(const parser::RelPattern& relPattern,
         const std::shared_ptr<NodeExpression>& leftNode,
         const std::shared_ptr<NodeExpression>& rightNode, QueryGraph& queryGraph,
@@ -240,14 +244,21 @@ private:
         const std::vector<common::table_id_t>& tableIDs, std::shared_ptr<NodeExpression> srcNode,
         std::shared_ptr<NodeExpression> dstNode, RelDirectionType directionType);
     std::pair<uint64_t, uint64_t> bindVariableLengthRelBound(const parser::RelPattern& relPattern);
-    void bindQueryRelProperties(RelExpression& rel);
 
+    /*** bind node ***/
     std::shared_ptr<NodeExpression> bindQueryNode(const parser::NodePattern& nodePattern,
         QueryGraph& queryGraph, PropertyKeyValCollection& collection);
     std::shared_ptr<NodeExpression> createQueryNode(const parser::NodePattern& nodePattern);
     std::shared_ptr<NodeExpression> createQueryNode(
         const std::string& parsedName, const std::vector<common::table_id_t>& tableIDs);
+
+    /*** bind property ***/
     void bindQueryNodeProperties(NodeExpression& node);
+    void bindQueryRelProperties(RelExpression& rel);
+    // TODO: remove
+    std::unique_ptr<Expression> createProperty(const std::string& propertyName,
+        const std::string& uniqueVariableName, const std::string& rawVariableName,
+        const std::vector<catalog::TableSchema*>& tableSchemas);
 
     /*** bind table ID ***/
     // Bind table names to catalog table schemas. The function does NOT validate if the table schema

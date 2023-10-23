@@ -12,7 +12,7 @@ example_resource_triples_t|REL|
 example_resource_t|NODE|
 example|RDF|
 
--STATEMENT MATCH (s:example_resource_t) RETURN s.IRI ORDER BY offset(id(s));
+-STATEMENT MATCH (s:example_resource_t) RETURN s._iri ORDER BY offset(id(s));
 -CHECK_ORDER
 ---- 14
 :peter
@@ -46,30 +46,29 @@ http://www.w3.org/1999/02/22-rdf-syntax-ns#type
 10|Brian
 11|12
 
--STATEMENT MATCH (a:example_resource_t)-[e:example_resource_triples_t]->(b:example_resource_t) RETURN a.IRI, b.IRI
----- 10
-:peter|:Person
-:peter|:lois
-:lois|:Person
-:meg|:Person
-:meg|:lois
-:meg|:peter
-:chris|:Person
-:chris|:peter
-:stewie|:Person
-:stewie|:lois
+-STATEMENT MATCH (a:example)-[e:example]->(b:example) RETURN a._iri, e._iri, b._iri
+---- 22
+:andy|:age|12
+:brian|:forename|Brian
+:chris|:forename|Chris
+:chris|:gender|male
+:chris|:hasParent|:peter
+:chris|http://www.w3.org/1999/02/22-rdf-syntax-ns#type|:Person
+:lois|:forename|Lois
+:lois|:gender|female
+:lois|http://www.w3.org/1999/02/22-rdf-syntax-ns#type|:Person
+:meg|:forename|Meg
+:meg|:gender|female
+:meg|:hasParent|:lois
+:meg|:hasParent|:peter
+:meg|http://www.w3.org/1999/02/22-rdf-syntax-ns#type|:Person
+:peter|:forename|Peter
+:peter|:gender|male
+:peter|:marriedTo|:lois
+:peter|http://www.w3.org/1999/02/22-rdf-syntax-ns#type|:Person
+:stewie|:forename|Stewie
+:stewie|:gender|male
+:stewie|:hasParent|:lois
+:stewie|http://www.w3.org/1999/02/22-rdf-syntax-ns#type|:Person
 
--STATEMENT MATCH (a:example_resource_t)-[e:example_literal_triples_t]->(b:example_literal_t) RETURN a.IRI, b.IRI
----- 12
-:peter|Peter
-:peter|male
-:lois|Lois
-:lois|female
-:meg|Meg
-:meg|female
-:chris|Chris
-:chris|male
-:stewie|Stewie
-:stewie|male
-:brian|Brian
-:andy|12
+-STATEMENT MATCH (a:example)-[e:example]->(b:example)-[e2:example]->(c:example) RETURN a._iri, e._iri, b._iri

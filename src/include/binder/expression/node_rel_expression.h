@@ -25,6 +25,10 @@ public:
             }
         }
     }
+    inline void removeTableID(common::table_id_t tableID) {
+
+    }
+
     inline bool isMultiLabeled() const { return tableIDs.size() > 1; }
     inline uint32_t getNumTableIDs() const { return tableIDs.size(); }
     inline std::vector<common::table_id_t> getTableIDs() const { return tableIDs; }
@@ -60,6 +64,9 @@ public:
     inline std::shared_ptr<Expression> getLabelExpression() const { return labelExpression; }
 
     inline std::string toStringInternal() const final { return variableName; }
+
+private:
+
 
 protected:
     std::string variableName;

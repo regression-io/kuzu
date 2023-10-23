@@ -40,7 +40,8 @@ struct InternalKeyword {
 };
 
 struct RDFKeyword {
-    static constexpr char IRI[] = "IRI";
+    static constexpr char IRI[] = "_iri";
+
     static constexpr char ID[] = "ID";
     static constexpr char PREDICT_ID[] = "PREDICT_ID"; // TODO: rename
     static constexpr std::string_view RESOURCE_TABLE_SUFFIX = "_resource_t";
