@@ -1,8 +1,23 @@
 #include "storage/store/string_column_chunk.h"
 
-#include "common/exception/copy.h"
-#include "common/exception/message.h"
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+
+#include "common/constants.h"
 #include "common/exception/not_implemented.h"
+#include "common/file_utils.h"
+#include "common/type_utils.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/storage_structure/in_mem_file.h"
+#include "storage/storage_utils.h"
+#include "storage/store/column_chunk.h"
 #include "storage/store/table_copy_utils.h"
 
 using namespace kuzu::common;

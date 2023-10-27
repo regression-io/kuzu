@@ -1,7 +1,24 @@
+#include <memory>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "binder/expression/node_expression.h"
+#include "binder/expression/rel_expression.h"
+#include "common/types/internal_id_t.h"
+#include "planner/operator/logical_operator.h"
 #include "planner/operator/persistent/logical_delete.h"
+#include "planner/operator/schema.h"
+#include "processor/data_pos.h"
 #include "processor/operator/persistent/delete.h"
+#include "processor/operator/persistent/delete_executor.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/plan_mapper.h"
+#include "storage/stats/rels_store_statistics.h"
+#include "storage/store/node_table.h"
+#include "storage/store/nodes_store.h"
+#include "storage/store/rel_table.h"
+#include "storage/store/rels_store.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;

@@ -1,5 +1,19 @@
 #include "storage/store/rels_store.h"
 
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "catalog/catalog.h"
+#include "common/types/internal_id_t.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/stats/rels_store_statistics.h"
+#include "storage/storage_structure/column.h"
+#include "storage/storage_structure/lists/lists.h"
+#include "storage/store/rel_table.h"
+#include "storage/wal/wal.h"
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 

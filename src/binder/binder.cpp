@@ -1,11 +1,30 @@
 #include "binder/binder.h"
 
+#include <algorithm>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "binder/bound_statement.h"
 #include "binder/bound_statement_rewriter.h"
-#include "binder/expression/variable_expression.h"
-#include "catalog/rel_table_schema.h"
+#include "binder/expression/expression.h"
+#include "binder/expression_binder.h"
+#include "binder/query/bound_regular_query.h"
+#include "binder/query/normalized_single_query.h"
+#include "binder/query/return_with_clause/bound_projection_body.h"
 #include "common/exception/binder.h"
 #include "common/exception/not_implemented.h"
+#include "common/statement_type.h"
 #include "common/string_format.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "parser/expression/parsed_expression.h"
+#include "parser/query/regular_query.h"
+#include "parser/statement.h"
+#include "storage/storage_utils.h"
 
 using namespace kuzu::common;
 using namespace kuzu::parser;

@@ -1,13 +1,39 @@
+#include <cassert>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "binder/copy/bound_copy_from.h"
+#include "binder/expression/expression.h"
+#include "catalog/node_table_schema.h"
+#include "catalog/rel_table_schema.h"
+#include "common/constants.h"
+#include "common/copier_config/copier_config.h"
+#include "common/copier_config/rdf_config.h"
+#include "common/exception/not_implemented.h"
+#include "common/rel_direction.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "planner/operator/logical_operator.h"
 #include "planner/operator/persistent/logical_copy_from.h"
-#include "processor/operator/index_lookup.h"
+#include "processor/data_pos.h"
 #include "processor/operator/persistent/copy_node.h"
 #include "processor/operator/persistent/copy_rdf_resource.h"
 #include "processor/operator/persistent/copy_rel.h"
 #include "processor/operator/persistent/copy_rel_columns.h"
 #include "processor/operator/persistent/copy_rel_lists.h"
 #include "processor/operator/persistent/reader.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/plan_mapper.h"
+#include "processor/result/result_set_descriptor.h"
+#include "storage/in_mem_storage_structure/in_mem_column.h"
+#include "storage/in_mem_storage_structure/in_mem_lists.h"
+#include "storage/storage_utils.h"
+#include "storage/store/nodes_store.h"
+#include "storage/store/rel_table.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::catalog;

@@ -1,6 +1,12 @@
 #include "function/null/vector_null_functions.h"
 
+#include <cassert>
+
+#include "binder/expression/expression.h"
+#include "common/exception/runtime.h"
+#include "common/expression_type.h"
 #include "function/null/null_functions.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

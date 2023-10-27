@@ -1,13 +1,25 @@
 #include "optimizer/acc_hash_join_optimizer.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
 #include "common/exception/not_implemented.h"
+#include "common/join_type.h"
+#include "common/types/internal_id_t.h"
 #include "optimizer/logical_operator_collector.h"
 #include "planner/operator/extend/logical_recursive_extend.h"
+#include "planner/operator/extend/recursive_join_type.h"
 #include "planner/operator/logical_accumulate.h"
 #include "planner/operator/logical_hash_join.h"
 #include "planner/operator/logical_intersect.h"
+#include "planner/operator/logical_operator.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/scan/logical_scan_internal_id.h"
 #include "planner/operator/sip/logical_semi_masker.h"
+#include "planner/operator/sip/side_way_info_passing.h"
 
 using namespace kuzu::common;
 using namespace kuzu::binder;

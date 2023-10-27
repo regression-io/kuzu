@@ -1,11 +1,28 @@
 #include "function/list/vector_list_functions.h"
 
-#include "binder/expression/literal_expression.h"
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
 #include "binder/expression_binder.h"
 #include "common/exception/binder.h"
 #include "common/exception/not_implemented.h"
 #include "common/exception/runtime.h"
-#include "common/types/ku_list.h"
+#include "common/expression_type.h"
+#include "common/int128_t.h"
+#include "common/types/date_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "function/function_definition.h"
 #include "function/list/functions/list_any_value_function.h"
 #include "function/list/functions/list_append_function.h"
 #include "function/list/functions/list_concat_function.h"
@@ -22,6 +39,7 @@
 #include "function/list/functions/list_sort_function.h"
 #include "function/list/functions/list_sum_function.h"
 #include "function/list/functions/list_unique_function.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

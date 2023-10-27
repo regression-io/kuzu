@@ -1,20 +1,37 @@
 #include "storage/store/table_copy_utils.h"
 
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+#include "arrow/csv/options.h"
+#include "arrow/io/file.h"
+#include "arrow/io/interfaces.h"
+#include "arrow/io/type_fwd.h"
+#include "arrow/type_fwd.h"
 #include "common/constants.h"
+#include "common/copier_config/copier_config.h"
 #include "common/exception/copy.h"
 #include "common/exception/message.h"
+#include "common/exception/not_implemented.h"
 #include "common/exception/parser.h"
+#include "common/int128_t.h"
 #include "common/string_format.h"
+#include "common/string_utils.h"
+#include "common/types/date_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
 #include "function/cast/functions/cast_string_to_functions.h"
-#include "storage/storage_structure/lists/lists.h"
-#include <arrow/api.h>
-#include <arrow/csv/api.h>
-#include <arrow/io/api.h>
+#include "storage/storage_utils.h"
 #include <arrow/result.h>
-#include <arrow/scalar.h>
-#include <arrow/table.h>
 #include <parquet/arrow/reader.h>
-#include <parquet/exception.h>
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

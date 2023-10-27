@@ -1,9 +1,30 @@
 #include "processor/result/factorized_table.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <numeric>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
 #include "common/assert.h"
+#include "common/constants.h"
 #include "common/data_chunk/data_chunk_state.h"
+#include "common/data_chunk/sel_vector.h"
+#include "common/in_mem_overflow_buffer.h"
 #include "common/null_buffer.h"
+#include "common/null_mask.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_list.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
 #include "common/vector/value_vector.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/storage_structure/disk_overflow_file.h"
 
 using namespace kuzu::common;
 using namespace kuzu::storage;

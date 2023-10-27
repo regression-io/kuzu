@@ -1,6 +1,13 @@
 #include "storage/in_mem_storage_structure/in_mem_column.h"
 
-#include "common/constants.h"
+#include <memory>
+#include <string>
+#include <utility>
+
+#include "common/types/types.h"
+#include "storage/file_handle.h"
+#include "storage/in_mem_storage_structure/in_mem_column_chunk.h"
+#include "storage/storage_structure/in_mem_file.h"
 #include "storage/storage_utils.h"
 
 using namespace kuzu::common;

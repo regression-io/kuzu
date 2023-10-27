@@ -1,5 +1,15 @@
 #include "storage/store/nodes_store.h"
 
+#include <memory>
+
+#include "catalog/catalog.h"
+#include "catalog/node_table_schema.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/stats/nodes_store_statistics.h"
+#include "storage/store/node_table.h"
+#include "storage/wal/wal.h"
+
 using namespace kuzu::catalog;
 
 namespace kuzu {

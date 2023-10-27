@@ -1,5 +1,11 @@
 #include "processor/operator/skip.h"
 
+#include <cassert>
+#include <cstdint>
+
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
+
 namespace kuzu {
 namespace processor {
 

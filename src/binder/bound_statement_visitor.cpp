@@ -1,7 +1,15 @@
 #include "binder/bound_statement_visitor.h"
 
 #include "binder/bound_explain.h"
+#include "binder/bound_statement.h"
+#include "binder/query/bound_regular_query.h"
+#include "binder/query/normalized_query_part.h"
+#include "binder/query/normalized_single_query.h"
+#include "binder/query/reading_clause/bound_reading_clause.h"
+#include "binder/query/updating_clause/bound_updating_clause.h"
+#include "common/clause_type.h"
 #include "common/exception/not_implemented.h"
+#include "common/statement_type.h"
 
 using namespace kuzu::common;
 

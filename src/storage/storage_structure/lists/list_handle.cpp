@@ -1,5 +1,9 @@
 #include "storage/storage_structure/lists/list_handle.h"
 
+#include <cstdint>
+
+#include "common/types/internal_id_t.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

@@ -1,6 +1,16 @@
 #include "storage/storage_manager.h"
 
+#include <memory>
+
+#include "catalog/catalog.h"
+#include "storage/buffer_manager/bm_file_handle.h"
 #include "storage/buffer_manager/buffer_manager.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/file_handle.h"
+#include "storage/storage_utils.h"
+#include "storage/store/nodes_store.h"
+#include "storage/store/rels_store.h"
+#include "storage/wal/wal.h"
 #include "storage/wal_replayer.h"
 
 using namespace kuzu::catalog;

@@ -1,10 +1,25 @@
 #include "processor/operator/index_lookup.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "arrow/buffer.h"
 #include "common/exception/message.h"
 #include "common/exception/not_implemented.h"
 #include "common/exception/runtime.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "processor/execution_context.h"
+#include "processor/operator/physical_operator.h"
 #include "storage/index/hash_index.h"
 #include "storage/store/table_copy_utils.h"
+#include "transaction/transaction.h"
 #include <arrow/array/array_base.h>
 #include <arrow/type.h>
 

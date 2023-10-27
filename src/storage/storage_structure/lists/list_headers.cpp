@@ -1,6 +1,17 @@
 #include "storage/storage_structure/lists/list_headers.h"
 
-#include "common/utils.h"
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/file_handle.h"
+#include "storage/storage_structure/disk_array.h"
+#include "storage/storage_utils.h"
+#include "storage/wal/wal.h"
+#include "storage/wal/wal_record.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 

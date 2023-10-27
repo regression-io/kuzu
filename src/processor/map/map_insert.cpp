@@ -1,7 +1,21 @@
-#include "binder/expression/node_expression.h"
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
+#include "catalog/rel_table_schema.h"
+#include "expression_evaluator/expression_evaluator.h"
+#include "planner/operator/logical_operator.h"
 #include "planner/operator/persistent/logical_insert.h"
+#include "planner/operator/schema.h"
+#include "processor/data_pos.h"
+#include "processor/expression_mapper.h"
 #include "processor/operator/persistent/insert.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/plan_mapper.h"
+#include "storage/store/nodes_store.h"
+#include "storage/store/rel_table.h"
+#include "storage/store/rels_store.h"
 
 using namespace kuzu::evaluator;
 using namespace kuzu::planner;

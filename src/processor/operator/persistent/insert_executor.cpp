@@ -1,5 +1,18 @@
 #include "processor/operator/persistent/insert_executor.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "processor/data_pos.h"
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
+#include "transaction/transaction.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

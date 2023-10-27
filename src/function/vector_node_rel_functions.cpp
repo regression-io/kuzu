@@ -1,5 +1,12 @@
 #include "function/schema/vector_node_rel_functions.h"
 
+#include <memory>
+#include <vector>
+
+#include "common/expression_type.h"
+#include "common/types/types.h"
+#include "function/vector_functions.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

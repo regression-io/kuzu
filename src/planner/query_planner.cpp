@@ -1,6 +1,20 @@
 #include "planner/query_planner.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/bound_statement.h"
+#include "binder/expression/expression.h"
+#include "binder/expression/property_expression.h"
 #include "binder/query/bound_regular_query.h"
+#include "common/exception/not_implemented.h"
+#include "common/types/types.h"
+#include "planner/join_order_enumerator_context.h"
+#include "planner/operator/logical_operator.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/logical_union.h"
 
 using namespace kuzu::common;

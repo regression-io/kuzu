@@ -1,7 +1,19 @@
 #include "function/union/vector_union_functions.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
+#include "common/expression_type.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "function/function_definition.h"
 #include "function/struct/vector_struct_functions.h"
 #include "function/union/functions/union_tag.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

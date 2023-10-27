@@ -1,11 +1,29 @@
 #include "processor/operator/persistent/reader/parquet/parquet_reader.h"
 
+#include <fcntl.h>
+
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/constants.h"
+#include "common/data_chunk/data_chunk.h"
 #include "common/exception/copy.h"
-#include "common/exception/not_implemented.h"
 #include "common/file_utils.h"
 #include "common/string_format.h"
+#include "common/types/types.h"
+#include "parquet/parquet_types.h"
+#include "processor/operator/persistent/reader/parquet/column_reader.h"
 #include "processor/operator/persistent/reader/parquet/list_column_reader.h"
+#include "processor/operator/persistent/reader/parquet/resizable_buffer.h"
+#include "processor/operator/persistent/reader/parquet/struct_column_reader.h"
 #include "processor/operator/persistent/reader/parquet/thrift_tools.h"
+#include "storage/buffer_manager/memory_manager.h"
 
 using namespace kuzu_parquet::format;
 

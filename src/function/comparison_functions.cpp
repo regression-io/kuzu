@@ -1,5 +1,18 @@
 #include "function/comparison/comparison_functions.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+
+#include "common/exception/not_implemented.h"
+#include "common/int128_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

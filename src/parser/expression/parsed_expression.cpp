@@ -1,6 +1,11 @@
 #include "parser/expression/parsed_expression.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "common/exception/not_implemented.h"
+#include "common/expression_type.h"
 #include "common/serializer/deserializer.h"
 #include "common/serializer/serializer.h"
 #include "parser/expression/parsed_case_expression.h"

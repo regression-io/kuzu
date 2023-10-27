@@ -1,5 +1,19 @@
 #include "processor/operator/scan/generic_scan_rel_tables.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "common/types/internal_id_t.h"
+#include "common/vector/value_vector.h"
+#include "processor/execution_context.h"
+#include "processor/operator/physical_operator.h"
+#include "processor/operator/scan/scan_rel_table.h"
+#include "processor/result/result_set.h"
+#include "storage/store/rel_table.h"
+#include "transaction/transaction.h"
+
 using namespace kuzu::common;
 using namespace kuzu::storage;
 using namespace kuzu::transaction;

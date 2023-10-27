@@ -1,5 +1,10 @@
 #include "common/in_mem_overflow_buffer.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+
 namespace kuzu {
 namespace common {
 

@@ -1,9 +1,30 @@
+#include <cassert>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
+#include "binder/expression/property_expression.h"
+#include "binder/expression/rel_expression.h"
+#include "catalog/catalog.h"
+#include "catalog/rel_table_schema.h"
+#include "common/exception/not_implemented.h"
+#include "common/rel_direction.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "planner/operator/extend/extend_direction.h"
 #include "planner/operator/extend/logical_extend.h"
-#include "processor/operator/filter.h"
+#include "planner/operator/logical_operator.h"
+#include "processor/data_pos.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/operator/scan/generic_scan_rel_tables.h"
+#include "processor/operator/scan/scan_rel_table.h"
 #include "processor/operator/scan/scan_rel_table_columns.h"
 #include "processor/operator/scan/scan_rel_table_lists.h"
 #include "processor/plan_mapper.h"
+#include "storage/store/rel_table.h"
+#include "storage/store/rels_store.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;

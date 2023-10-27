@@ -1,6 +1,14 @@
 #include "planner/subplans_table.h"
 
-#include "common/assert.h"
+#include <bitset>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/query/query_graph.h"
+#include "planner/operator/logical_plan.h"
 
 namespace kuzu {
 namespace planner {

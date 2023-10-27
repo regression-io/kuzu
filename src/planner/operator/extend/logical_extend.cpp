@@ -1,6 +1,9 @@
 #include "planner/operator/extend/logical_extend.h"
 
-#include "planner/operator/factorization/flatten_resolver.h"
+#include <cassert>
+#include <cstdint>
+
+#include "planner/operator/schema.h"
 
 namespace kuzu {
 namespace planner {

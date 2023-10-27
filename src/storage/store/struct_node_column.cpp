@@ -1,7 +1,21 @@
 #include "storage/store/struct_node_column.h"
 
-#include "storage/stats/table_statistics.h"
+#include <cassert>
+#include <cstdint>
+#include <utility>
+
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/stats/metadata_dah_info.h"
+#include "storage/stats/property_statistics.h"
+#include "storage/store/column_chunk.h"
+#include "storage/store/node_column.h"
 #include "storage/store/struct_column_chunk.h"
+#include "storage/wal/wal.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

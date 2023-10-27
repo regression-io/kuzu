@@ -1,5 +1,12 @@
 #include "planner/operator/schema.h"
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <unordered_set>
+
+#include "binder/expression/expression.h"
 #include "binder/expression_visitor.h"
 #include "common/exception/internal.h"
 

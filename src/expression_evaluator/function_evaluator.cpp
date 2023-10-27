@@ -1,6 +1,17 @@
 #include "expression_evaluator/function_evaluator.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "binder/expression/function_expression.h"
+#include "common/data_chunk/sel_vector.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "expression_evaluator/expression_evaluator.h"
+#include "processor/result/result_set.h"
+#include "storage/buffer_manager/memory_manager.h"
 
 using namespace kuzu::common;
 using namespace kuzu::processor;

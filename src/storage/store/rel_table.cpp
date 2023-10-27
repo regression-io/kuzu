@@ -1,7 +1,30 @@
 #include "storage/store/rel_table.h"
 
+#include <cassert>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "catalog/catalog.h"
+#include "catalog/property.h"
+#include "catalog/rel_table_schema.h"
+#include "common/exception/runtime.h"
+#include "common/rel_direction.h"
 #include "common/string_format.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/storage_structure/column.h"
+#include "storage/storage_structure/lists/lists.h"
 #include "storage/storage_structure/lists/lists_update_iterator.h"
+#include "storage/storage_structure/lists/lists_update_store.h"
+#include "storage/storage_utils.h"
+#include "storage/wal/wal.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

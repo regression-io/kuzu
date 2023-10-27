@@ -1,6 +1,11 @@
+#include <memory>
+#include <utility>
+
 #include "binder/binder.h"
 #include "binder/expression/existential_subquery_expression.h"
+#include "binder/expression/expression.h"
 #include "binder/expression_binder.h"
+#include "parser/expression/parsed_expression.h"
 #include "parser/expression/parsed_subquery_expression.h"
 
 using namespace kuzu::parser;

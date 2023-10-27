@@ -1,6 +1,12 @@
 #include "storage/stats/rels_store_statistics.h"
 
+#include <cassert>
+#include <cstdint>
+#include <mutex>
+
+#include "common/types/internal_id_t.h"
 #include "storage/stats/rel_table_statistics.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 

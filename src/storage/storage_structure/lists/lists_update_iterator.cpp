@@ -1,6 +1,21 @@
 #include "storage/storage_structure/lists/lists_update_iterator.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <unordered_set>
+#include <utility>
+
+#include "common/constants.h"
+#include "common/null_mask.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "storage/storage_structure/lists/list_headers.h"
+#include "storage/storage_structure/lists/lists.h"
 #include "storage/storage_structure/storage_structure_utils.h"
+#include "storage/storage_utils.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;

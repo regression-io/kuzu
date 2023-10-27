@@ -1,4 +1,14 @@
+#include <cassert>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/query_rel_type.h"
+#include "cypher_parser.h"
+#include "parser/expression/parsed_expression.h"
 #include "parser/query/graph_pattern/pattern_element.h"
+#include "parser/query/graph_pattern/rel_pattern.h"
 #include "parser/transformer.h"
 
 using namespace kuzu::common;

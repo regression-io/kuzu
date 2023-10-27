@@ -1,8 +1,19 @@
 #include "storage/store/var_list_column_chunk.h"
 
-#include "arrow/array.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+
+#include "common/constants.h"
+#include "common/data_chunk/data_chunk_state.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 #include "common/types/value/nested.h"
 #include "common/types/value/value.h"
+#include "common/vector/value_vector.h"
+#include "storage/store/column_chunk.h"
 #include "storage/store/table_copy_utils.h"
 
 using namespace kuzu::common;

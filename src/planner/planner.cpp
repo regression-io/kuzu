@@ -1,14 +1,25 @@
 #include "planner/planner.h"
 
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "binder/bound_comment_on.h"
 #include "binder/bound_create_macro.h"
 #include "binder/bound_explain.h"
 #include "binder/bound_standalone_call.h"
-#include "binder/expression/variable_expression.h"
+#include "binder/bound_statement.h"
+#include "catalog/catalog.h"
+#include "common/exception/not_implemented.h"
+#include "common/statement_type.h"
 #include "planner/operator/logical_comment_on.h"
 #include "planner/operator/logical_create_macro.h"
 #include "planner/operator/logical_explain.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/logical_standalone_call.h"
+#include "planner/query_planner.h"
+#include "storage/stats/nodes_store_statistics.h"
+#include "storage/stats/rels_store_statistics.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

@@ -1,11 +1,16 @@
 #include "include/node_connection.h"
 
-#include <iostream>
+#include <cstddef>
+#include <exception>
+#include <memory>
+#include <string>
 
 #include "include/node_database.h"
+#include "include/node_prepared_statement.h"
 #include "include/node_query_result.h"
 #include "include/node_util.h"
-#include "main/kuzu.h"
+#include "main/connection.h"
+#include "napi.h"
 
 Napi::Object NodeConnection::Init(Napi::Env env, Napi::Object exports) {
     Napi::HandleScope scope(env);

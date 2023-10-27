@@ -1,5 +1,21 @@
 #include "processor/operator/persistent/reader.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+
+#include "common/constants.h"
+#include "common/copier_config/copier_config.h"
+#include "common/data_chunk/data_chunk.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "processor/data_pos.h"
+#include "processor/execution_context.h"
+#include "processor/operator/persistent/reader_functions.h"
+#include "processor/operator/persistent/reader_state.h"
+#include "processor/result/result_set.h"
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::storage;

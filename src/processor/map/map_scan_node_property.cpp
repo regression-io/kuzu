@@ -1,6 +1,19 @@
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/property_expression.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "planner/operator/logical_operator.h"
 #include "planner/operator/scan/logical_scan_node_property.h"
+#include "processor/data_pos.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/operator/scan/scan_node_table.h"
 #include "processor/plan_mapper.h"
+#include "storage/store/node_table.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;

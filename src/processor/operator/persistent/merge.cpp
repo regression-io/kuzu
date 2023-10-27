@@ -1,5 +1,10 @@
 #include "processor/operator/persistent/merge.h"
 
+#include <cassert>
+
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
+
 namespace kuzu {
 namespace processor {
 

@@ -1,5 +1,8 @@
 #include "processor/operator/scan/scan_columns.h"
 
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
+
 namespace kuzu {
 namespace processor {
 

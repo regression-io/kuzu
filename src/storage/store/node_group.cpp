@@ -1,7 +1,17 @@
 #include "storage/store/node_group.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 #include "common/constants.h"
-#include "storage/store/node_table.h"
+#include "common/data_chunk/data_chunk_state.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/store/column_chunk.h"
 
 using namespace kuzu::processor;
 using namespace kuzu::common;

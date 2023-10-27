@@ -1,10 +1,24 @@
 #include "storage/storage_utils.h"
 
+#include <fcntl.h>
+
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include "common/constants.h"
+#include "common/exception/not_implemented.h"
+#include "common/exception/runtime.h"
+#include "common/file_utils.h"
 #include "common/null_buffer.h"
+#include "common/rel_direction.h"
 #include "common/string_format.h"
-#include "storage/in_mem_storage_structure/in_mem_column.h"
-#include "storage/in_mem_storage_structure/in_mem_lists.h"
-#include "storage/storage_manager.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_list.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "storage/storage_structure/lists/list_headers.h"
+#include "storage/wal/wal_record.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

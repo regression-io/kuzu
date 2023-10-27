@@ -1,5 +1,8 @@
 #include "binder/visitor/statement_read_write_analyzer.h"
 
+#include "binder/bound_statement.h"
+#include "binder/query/normalized_query_part.h"
+
 namespace kuzu {
 namespace binder {
 

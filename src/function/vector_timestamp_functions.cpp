@@ -1,6 +1,14 @@
 #include "function/timestamp/vector_timestamp_functions.h"
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "common/expression_type.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
 #include "function/timestamp/timestamp_function.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

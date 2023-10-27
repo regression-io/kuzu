@@ -1,8 +1,17 @@
 #include "processor/operator/physical_operator.h"
 
-#include <regex>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include "common/exception/not_implemented.h"
+#include "common/profiler.h"
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
 
 using namespace kuzu::common;
 

@@ -1,5 +1,21 @@
 #include "processor/operator/persistent/parquet_column_writer.h"
 
+#include <cstdint>
+#include <map>
+#include <string>
+
+#include "common/exception/not_implemented.h"
+#include "common/types/date_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "parquet/column_writer.h"
+#include "parquet/file_writer.h"
+#include "parquet/types.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

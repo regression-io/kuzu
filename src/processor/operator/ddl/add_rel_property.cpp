@@ -1,8 +1,17 @@
 #include "processor/operator/ddl/add_rel_property.h"
 
+#include <cstdint>
+#include <memory>
+
+#include "catalog/property.h"
 #include "catalog/rel_table_schema.h"
+#include "common/rel_direction.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 #include "storage/in_mem_storage_structure/in_mem_column.h"
 #include "storage/in_mem_storage_structure/in_mem_lists.h"
+#include "storage/storage_manager.h"
+#include "storage/storage_utils.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::storage;

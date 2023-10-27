@@ -1,5 +1,13 @@
 #include "processor/result/flat_tuple.h"
 
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/exception/runtime.h"
 #include "common/string_format.h"
 #include "common/types/value/value.h"

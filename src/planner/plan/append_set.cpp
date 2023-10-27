@@ -1,6 +1,12 @@
-#include "binder/query/updating_clause/bound_set_clause.h"
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/node_expression.h"
 #include "planner/operator/factorization/flatten_resolver.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/persistent/logical_set.h"
+#include "planner/operator/schema.h"
 #include "planner/query_planner.h"
 
 using namespace kuzu::binder;

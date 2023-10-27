@@ -1,8 +1,22 @@
 #include "catalog/catalog.h"
 
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+
+#include "binder/ddl/bound_create_table_info.h"
+#include "catalog/catalog_content.h"
 #include "catalog/node_table_schema.h"
 #include "catalog/rel_table_group_schema.h"
 #include "catalog/rel_table_schema.h"
+#include "catalog/table_schema.h"
+#include "common/expression_type.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "function/scalar_macro_function.h"
+#include "function/vector_functions.h"
 #include "storage/wal/wal.h"
 #include "transaction/transaction_action.h"
 

@@ -1,5 +1,12 @@
 #include "processor/operator/scan/scan_rel_table_lists.h"
 
+#include <memory>
+
+#include "processor/execution_context.h"
+#include "processor/operator/scan/scan_rel_table.h"
+#include "processor/result/result_set.h"
+#include "storage/store/rel_table.h"
+
 namespace kuzu {
 namespace processor {
 

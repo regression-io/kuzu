@@ -1,5 +1,8 @@
 #include "planner/operator/logical_plan.h"
 
+#include <cassert>
+#include <memory>
+
 namespace kuzu {
 namespace planner {
 

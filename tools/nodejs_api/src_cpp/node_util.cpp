@@ -1,11 +1,26 @@
 #include "include/node_util.h"
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
 #include "common/exception/exception.h"
+#include "common/int128_t.h"
+#include "common/types/date_t.h"
+#include "common/types/int128_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
 #include "common/types/value/nested.h"
 #include "common/types/value/node.h"
 #include "common/types/value/recursive_rel.h"
 #include "common/types/value/rel.h"
 #include "common/types/value/value.h"
+#include "napi.h"
 
 Napi::Value Util::ConvertToNapiObject(const Value& value, Napi::Env env) {
     if (value.isNull()) {

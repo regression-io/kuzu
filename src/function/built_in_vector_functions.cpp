@@ -1,8 +1,18 @@
 #include "function/built_in_vector_functions.h"
 
+#include <cassert>
+#include <cstdint>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "common/exception/binder.h"
 #include "common/exception/catalog.h"
+#include "common/exception/internal.h"
+#include "common/expression_type.h"
 #include "common/string_format.h"
+#include "common/types/types.h"
 #include "function/arithmetic/vector_arithmetic_functions.h"
 #include "function/blob/vector_blob_functions.h"
 #include "function/cast/vector_cast_functions.h"
@@ -17,6 +27,7 @@
 #include "function/struct/vector_struct_functions.h"
 #include "function/timestamp/vector_timestamp_functions.h"
 #include "function/union/vector_union_functions.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

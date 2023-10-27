@@ -1,9 +1,12 @@
 #include "function/built_in_table_functions.h"
 
+#include <string>
+
 #include "common/exception/binder.h"
 #include "common/expression_type.h"
 #include "common/string_utils.h"
 #include "function/table_functions/call_functions.h"
+#include "function/table_functions/table_functions.h"
 
 using namespace kuzu::common;
 

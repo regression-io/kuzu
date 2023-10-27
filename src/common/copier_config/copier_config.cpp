@@ -1,5 +1,8 @@
 #include "common/copier_config/copier_config.h"
 
+#include <string>
+#include <unordered_map>
+
 #include "common/exception/copy.h"
 
 namespace kuzu {

@@ -1,10 +1,25 @@
 #include "processor/operator/persistent/reader_state.h"
 
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <utility>
+#include <vector>
+
+#include "arrow/chunked_array.h"
+#include "arrow/type_fwd.h"
+#include "common/copier_config/copier_config.h"
+#include "common/data_chunk/data_chunk.h"
+#include "common/table_type.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "processor/operator/persistent/reader_functions.h"
+#include "storage/buffer_manager/memory_manager.h"
+
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::storage;
-
-#include "arrow/array.h"
 
 namespace kuzu {
 namespace processor {

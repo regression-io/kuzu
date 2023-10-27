@@ -1,9 +1,21 @@
 #include "storage/storage_structure/lists/lists_metadata.h"
 
-#include "common/utils.h"
-#include "spdlog/spdlog.h"
+#include <algorithm>
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include "common/constants.h"
+#include "common/types/types.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/file_handle.h"
+#include "storage/storage_structure/disk_array.h"
 #include "storage/storage_structure/storage_structure_utils.h"
 #include "storage/storage_utils.h"
+#include "storage/wal/wal.h"
+#include "storage/wal/wal_record.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 

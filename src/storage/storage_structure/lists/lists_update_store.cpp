@@ -1,6 +1,26 @@
 #include "storage/storage_structure/lists/lists_update_store.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "catalog/rel_table_schema.h"
+#include "catalog/table_schema.h"
+#include "common/rel_direction.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/utils.h"
+#include "common/vector/value_vector.h"
+#include "processor/result/factorized_table.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/storage_structure/disk_overflow_file.h"
+#include "storage/storage_structure/lists/list_handle.h"
 #include "storage/storage_structure/lists/lists.h"
+#include "storage/storage_utils.h"
+#include "storage/wal/wal_record.h"
 
 using namespace kuzu::common;
 using namespace kuzu::catalog;

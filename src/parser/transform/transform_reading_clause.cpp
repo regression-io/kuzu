@@ -1,4 +1,11 @@
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "common/clause_type.h"
 #include "common/exception/not_implemented.h"
+#include "cypher_parser.h"
+#include "parser/expression/parsed_expression.h"
 #include "parser/query/reading_clause/in_query_call_clause.h"
 #include "parser/query/reading_clause/load_from.h"
 #include "parser/query/reading_clause/match_clause.h"

@@ -1,19 +1,30 @@
+#include <cstdint>
 #include <iostream>
+#include <memory>
+#include <string>
 #include <unordered_map>
+#include <utility>
 
-#include "binder/bound_statement_result.h"
 // This header is generated at build time. See CMakeLists.txt.
 #include "com_kuzudb_KuzuNative.h"
+#include "common/exception/conversion.h"
 #include "common/exception/exception.h"
+#include "common/types/date_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/timestamp_t.h"
 #include "common/types/types.h"
 #include "common/types/value/nested.h"
 #include "common/types/value/node.h"
 #include "common/types/value/rel.h"
 #include "common/types/value/value.h"
-#include "json.hpp"
-#include "main/kuzu.h"
+#include "jni_md.h"
+#include "main/connection.h"
+#include "main/database.h"
+#include "main/prepared_statement.h"
+#include "main/query_result.h"
 #include "main/query_summary.h"
-#include "planner/operator/logical_plan.h"
+#include "processor/result/flat_tuple.h"
 #include <jni.h>
 
 using namespace kuzu::main;

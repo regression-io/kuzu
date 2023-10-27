@@ -1,11 +1,36 @@
 #include "storage/in_mem_storage_structure/in_mem_column_chunk.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <utility>
+
+#include "arrow/array/array_base.h"
+#include "arrow/array/array_binary.h"
+#include "arrow/array/array_nested.h"
+#include "arrow/array/array_primitive.h"
+#include "arrow/record_batch.h"
+#include "arrow/type.h"
+#include "common/constants.h"
+#include "common/copier_config/copier_config.h"
 #include "common/exception/copy.h"
-#include "common/exception/message.h"
 #include "common/exception/not_implemented.h"
+#include "common/file_utils.h"
+#include "common/int128_t.h"
 #include "common/string_format.h"
 #include "common/types/blob.h"
+#include "common/types/date_t.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_list.h"
+#include "common/types/ku_string.h"
+#include "common/types/timestamp_t.h"
 #include "common/types/types.h"
+#include "storage/storage_utils.h"
+#include "storage/store/table_copy_utils.h"
 
 using namespace kuzu::common;
 

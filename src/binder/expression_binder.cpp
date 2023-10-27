@@ -1,14 +1,27 @@
 #include "binder/expression_binder.h"
 
+#include <cassert>
+#include <memory>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "binder/binder.h"
+#include "binder/expression/expression.h"
 #include "binder/expression/function_expression.h"
 #include "binder/expression/literal_expression.h"
 #include "binder/expression/parameter_expression.h"
 #include "binder/expression_visitor.h"
 #include "common/exception/binder.h"
 #include "common/exception/not_implemented.h"
+#include "common/expression_type.h"
+#include "common/string_format.h"
+#include "common/types/types.h"
 #include "expression_evaluator/expression_evaluator_utils.h"
 #include "function/cast/vector_cast_functions.h"
+#include "function/function_definition.h"
+#include "function/vector_functions.h"
+#include "parser/expression/parsed_expression.h"
 
 using namespace kuzu::common;
 using namespace kuzu::function;

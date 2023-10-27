@@ -1,6 +1,17 @@
+#include <memory>
+#include <utility>
+
+#include "binder/ddl/bound_alter_info.h"
+#include "common/alter_type.h"
+#include "common/exception/not_implemented.h"
+#include "common/table_type.h"
 #include "planner/operator/ddl/logical_alter.h"
 #include "planner/operator/ddl/logical_create_table.h"
+#include "planner/operator/ddl/logical_ddl.h"
 #include "planner/operator/ddl/logical_drop_table.h"
+#include "planner/operator/logical_operator.h"
+#include "processor/data_pos.h"
+#include "processor/expression_mapper.h"
 #include "processor/operator/ddl/add_node_property.h"
 #include "processor/operator/ddl/add_rel_property.h"
 #include "processor/operator/ddl/create_node_table.h"
@@ -11,7 +22,7 @@
 #include "processor/operator/ddl/drop_table.h"
 #include "processor/operator/ddl/rename_property.h"
 #include "processor/operator/ddl/rename_table.h"
-#include "processor/operator/table_scan/factorized_table_scan.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/plan_mapper.h"
 
 using namespace kuzu::binder;

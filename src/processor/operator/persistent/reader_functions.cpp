@@ -1,7 +1,26 @@
 #include "processor/operator/persistent/reader_functions.h"
 
-#include "common/exception/copy.h"
-#include "common/system_message.h"
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "arrow/record_batch.h"
+#include "common/copier_config/copier_config.h"
+#include "common/data_chunk/data_chunk.h"
+#include "common/exception/not_implemented.h"
+#include "common/table_type.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "parquet/arrow/reader.h"
+#include "processor/operator/persistent/reader/csv/parallel_csv_reader.h"
+#include "processor/operator/persistent/reader/csv/serial_csv_reader.h"
+#include "processor/operator/persistent/reader/npy_reader.h"
+#include "processor/operator/persistent/reader/parquet/parquet_reader.h"
+#include "processor/operator/persistent/reader/rdf/rdf_reader.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/store/table_copy_utils.h"
 #include <arrow/table.h>
 
 using namespace kuzu::common;

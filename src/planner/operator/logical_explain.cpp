@@ -1,6 +1,7 @@
 #include "planner/operator/logical_explain.h"
 
 #include "common/exception/not_implemented.h"
+#include "common/explain_type.h"
 
 using namespace kuzu::common;
 

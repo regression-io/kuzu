@@ -1,6 +1,18 @@
 #include "processor/operator/hash_join/hash_join_probe.h"
 
-#include "function/hash/hash_functions.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <numeric>
+
+#include "common/constants.h"
+#include "common/exception/internal.h"
+#include "common/join_type.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "processor/execution_context.h"
+#include "processor/result/result_set.h"
 
 using namespace kuzu::common;
 

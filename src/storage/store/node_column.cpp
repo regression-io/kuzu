@@ -1,14 +1,36 @@
 #include "storage/store/node_column.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
 #include <memory>
+#include <utility>
 
+#include "catalog/property.h"
+#include "common/constants.h"
+#include "common/exception/exception.h"
+#include "common/exception/not_implemented.h"
+#include "common/null_mask.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/stats/metadata_dah_info.h"
 #include "storage/stats/property_statistics.h"
+#include "storage/storage_structure/disk_array.h"
 #include "storage/storage_structure/storage_structure.h"
+#include "storage/storage_structure/storage_structure_utils.h"
+#include "storage/storage_utils.h"
 #include "storage/store/column_chunk.h"
 #include "storage/store/compression.h"
 #include "storage/store/string_node_column.h"
 #include "storage/store/struct_node_column.h"
 #include "storage/store/var_list_node_column.h"
+#include "storage/wal/wal.h"
+#include "storage/wal/wal_record.h"
 #include "transaction/transaction.h"
 
 using namespace kuzu::catalog;

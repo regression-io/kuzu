@@ -1,6 +1,21 @@
 #include "function/string/vector_string_functions.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "binder/expression/expression.h"
+#include "common/expression_type.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "function/function_definition.h"
 #include "function/string/functions/array_extract_function.h"
+#include "function/string/functions/base_lower_upper_function.h"
+#include "function/string/functions/base_str_function.h"
 #include "function/string/functions/concat_function.h"
 #include "function/string/functions/contains_function.h"
 #include "function/string/functions/ends_with_function.h"
@@ -12,10 +27,13 @@
 #include "function/string/functions/regexp_matches_function.h"
 #include "function/string/functions/regexp_replace_function.h"
 #include "function/string/functions/repeat_function.h"
+#include "function/string/functions/reverse_function.h"
 #include "function/string/functions/right_function.h"
 #include "function/string/functions/rpad_function.h"
 #include "function/string/functions/starts_with_function.h"
 #include "function/string/functions/substr_function.h"
+#include "function/vector_functions.h"
+#include "utf8proc.h"
 
 using namespace kuzu::common;
 

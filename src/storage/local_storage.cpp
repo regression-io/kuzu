@@ -1,5 +1,13 @@
 #include "storage/local_storage.h"
 
+#include <memory>
+#include <vector>
+
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/local_table.h"
 #include "storage/storage_manager.h"
 #include "storage/storage_utils.h"
 

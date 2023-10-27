@@ -1,11 +1,12 @@
 #include "common/types/int128_t.h"
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
+#include <string>
 
 #include "common/exception/overflow.h"
 #include "common/int128_t.h"
-#include "common/types/ku_string.h"
 
 namespace kuzu {
 namespace common {

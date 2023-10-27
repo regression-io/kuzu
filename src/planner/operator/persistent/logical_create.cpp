@@ -1,5 +1,10 @@
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "planner/operator/factorization/flatten_resolver.h"
 #include "planner/operator/persistent/logical_insert.h"
+#include "planner/operator/schema.h"
 
 namespace kuzu {
 namespace planner {

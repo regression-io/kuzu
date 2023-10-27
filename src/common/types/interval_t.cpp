@@ -1,6 +1,12 @@
 #include "common/types/interval_t.h"
 
+#include <cctype>
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
 #include "common/exception/conversion.h"
+#include "common/exception/exception.h"
 #include "common/string_utils.h"
 #include "common/types/cast_helpers.h"
 #include "common/types/timestamp_t.h"

@@ -1,6 +1,16 @@
 #include "function/aggregate/built_in_aggregate_functions.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/exception/binder.h"
+#include "common/expression_type.h"
+#include "common/types/types.h"
+#include "function/aggregate/aggregate_function.h"
 #include "function/aggregate/collect.h"
 #include "function/aggregate/count.h"
 

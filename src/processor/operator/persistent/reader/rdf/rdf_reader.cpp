@@ -1,14 +1,29 @@
 #include "processor/operator/persistent/reader/rdf/rdf_reader.h"
 
+#include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <string>
+#include <utility>
 
+#include "arrow/buffer.h"
+#include "arrow/chunked_array.h"
+#include "arrow/type.h"
+#include "arrow/type_fwd.h"
 #include "common/constants.h"
+#include "common/copier_config/rdf_config.h"
+#include "common/data_chunk/data_chunk.h"
 #include "common/exception/copy.h"
+#include "common/exception/not_implemented.h"
+#include "common/exception/runtime.h"
 #include "common/string_format.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 #include "common/vector/value_vector.h"
 #include "serd.h"
 #include "storage/index/hash_index.h"
 #include "storage/store/table_copy_utils.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::storage;

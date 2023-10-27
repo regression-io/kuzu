@@ -1,12 +1,17 @@
 #include "common/types/date_t.h"
 
+#include <cstdint>
+#include <memory>
+#include <string>
+
 #include "common/assert.h"
 #include "common/exception/conversion.h"
 #include "common/string_format.h"
 #include "common/string_utils.h"
 #include "common/types/cast_helpers.h"
+#include "common/types/dtime_t.h"
+#include "common/types/interval_t.h"
 #include "common/types/timestamp_t.h"
-#include "common/utils.h"
 
 namespace kuzu {
 namespace common {

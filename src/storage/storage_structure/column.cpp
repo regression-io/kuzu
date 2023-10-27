@@ -1,6 +1,27 @@
 #include "storage/storage_structure/column.h"
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <memory>
+
+#include "common/exception/exception.h"
+#include "common/exception/runtime.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_list.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/types/value/value.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/storage_structure/disk_overflow_file.h"
+#include "storage/storage_structure/storage_structure.h"
 #include "storage/storage_structure/storage_structure_utils.h"
+#include "storage/storage_utils.h"
+#include "storage/wal/wal.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;

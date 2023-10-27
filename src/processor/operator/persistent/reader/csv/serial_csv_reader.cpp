@@ -1,6 +1,14 @@
 #include "processor/operator/persistent/reader/csv/serial_csv_reader.h"
 
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/copier_config/copier_config.h"
+#include "common/data_chunk/data_chunk.h"
 #include "common/string_format.h"
+#include "common/types/types.h"
 #include "processor/operator/persistent/reader/csv/driver.h"
 
 using namespace kuzu::common;

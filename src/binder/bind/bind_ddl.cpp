@@ -1,16 +1,38 @@
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
 #include "binder/binder.h"
+#include "binder/bound_statement.h"
 #include "binder/ddl/bound_alter.h"
+#include "binder/ddl/bound_alter_info.h"
 #include "binder/ddl/bound_create_table.h"
+#include "binder/ddl/bound_create_table_info.h"
 #include "binder/ddl/bound_drop_table.h"
+#include "binder/expression_binder.h"
 #include "catalog/node_table_schema.h"
+#include "catalog/property.h"
 #include "catalog/rel_table_group_schema.h"
 #include "catalog/rel_table_schema.h"
+#include "catalog/table_schema.h"
+#include "common/alter_type.h"
+#include "common/constants.h"
 #include "common/exception/binder.h"
+#include "common/exception/not_implemented.h"
 #include "common/string_format.h"
 #include "common/string_utils.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 #include "parser/ddl/alter.h"
+#include "parser/ddl/alter_info.h"
 #include "parser/ddl/create_table.h"
+#include "parser/ddl/create_table_info.h"
 #include "parser/ddl/drop.h"
+#include "parser/statement.h"
 
 using namespace kuzu::common;
 using namespace kuzu::parser;

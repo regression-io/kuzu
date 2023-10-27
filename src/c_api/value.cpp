@@ -1,15 +1,25 @@
 #include "common/types/value/value.h"
 
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <string>
+
 #include "c_api/helpers.h"
 #include "c_api/kuzu.h"
+#include "common/exception/conversion.h"
+#include "common/int128_t.h"
+#include "common/type_utils.h"
+#include "common/types/date_t.h"
 #include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/timestamp_t.h"
 #include "common/types/types.h"
 #include "common/types/value/nested.h"
 #include "common/types/value/node.h"
 #include "common/types/value/recursive_rel.h"
 #include "common/types/value/rel.h"
 #include "function/cast/functions/cast_string_to_functions.h"
-#include "main/kuzu.h"
 
 using namespace kuzu::common;
 using namespace kuzu::main;

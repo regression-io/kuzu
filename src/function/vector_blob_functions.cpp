@@ -1,9 +1,18 @@
 #include "function/blob/vector_blob_functions.h"
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "common/expression_type.h"
+#include "common/types/blob.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
 #include "function/blob/functions/decode_function.h"
 #include "function/blob/functions/encode_function.h"
 #include "function/blob/functions/octet_length_function.h"
 #include "function/string/vector_string_functions.h"
+#include "function/vector_functions.h"
 
 using namespace kuzu::common;
 

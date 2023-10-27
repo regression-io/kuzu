@@ -1,6 +1,11 @@
+#include "main/database.h"
+
+#include <cstdlib>
+#include <string>
+
 #include "c_api/kuzu.h"
 #include "common/exception/exception.h"
-#include "main/kuzu.h"
+#include "main/database.h"
 
 using namespace kuzu::main;
 using namespace kuzu::common;

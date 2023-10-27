@@ -1,8 +1,20 @@
 #include "processor/operator/persistent/copy_rel.h"
 
+#include <memory>
+#include <mutex>
+#include <utility>
+
 #include "common/exception/copy.h"
 #include "common/exception/message.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "processor/execution_context.h"
 #include "processor/result/factorized_table.h"
+#include "processor/result/result_set.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/in_mem_storage_structure/in_mem_column_chunk.h"
+#include "storage/stats/rels_store_statistics.h"
+#include "storage/wal/wal.h"
 
 using namespace kuzu::common;
 using namespace kuzu::storage;

@@ -1,12 +1,33 @@
 #include "processor/operator/persistent/reader/parquet/column_reader.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <sstream>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include "common/constants.h"
+#include "common/exception/copy.h"
 #include "common/exception/not_implemented.h"
 #include "common/types/date_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "parquet/parquet_types.h"
 #include "processor/operator/persistent/reader/parquet/boolean_column_reader.h"
 #include "processor/operator/persistent/reader/parquet/callback_column_reader.h"
+#include "processor/operator/persistent/reader/parquet/decode_utils.h"
+#include "processor/operator/persistent/reader/parquet/parquet_dbp_decoder.h"
+#include "processor/operator/persistent/reader/parquet/parquet_rle_bp_decoder.h"
+#include "processor/operator/persistent/reader/parquet/resizable_buffer.h"
 #include "processor/operator/persistent/reader/parquet/string_column_reader.h"
 #include "processor/operator/persistent/reader/parquet/templated_column_reader.h"
+#include "processor/operator/persistent/reader/parquet/thrift_tools.h"
 #include "snappy/snappy.h"
+#include "thrift/protocol/TProtocol.h"
 
 namespace kuzu {
 namespace processor {

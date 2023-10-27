@@ -1,6 +1,17 @@
+#include <memory>
+#include <string>
+#include <unordered_set>
+#include <vector>
+
+#include "binder/expression/expression.h"
 #include "binder/expression_visitor.h"
 #include "binder/query/reading_clause/bound_load_from.h"
 #include "binder/query/reading_clause/bound_match_clause.h"
+#include "binder/query/reading_clause/bound_reading_clause.h"
+#include "common/clause_type.h"
+#include "common/exception/not_implemented.h"
+#include "common/join_type.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/query_planner.h"
 
 using namespace kuzu::common;

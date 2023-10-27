@@ -1,9 +1,20 @@
+#include <memory>
+#include <utility>
+
+#include "binder/expression/expression.h"
+#include "common/constants.h"
+#include "common/explain_type.h"
+#include "common/join_type.h"
 #include "common/profiler.h"
 #include "main/plan_printer.h"
 #include "planner/operator/logical_explain.h"
+#include "planner/operator/logical_operator.h"
+#include "processor/data_pos.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/operator/profile.h"
-#include "processor/operator/table_scan/factorized_table_scan.h"
+#include "processor/physical_plan.h"
 #include "processor/plan_mapper.h"
+#include "processor/result/factorized_table.h"
 
 using namespace kuzu::common;
 using namespace kuzu::planner;

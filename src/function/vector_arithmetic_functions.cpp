@@ -1,5 +1,18 @@
 #include "function/arithmetic/vector_arithmetic_functions.h"
 
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "common/expression_type.h"
+#include "common/types/date_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/timestamp_t.h"
+#include "common/types/types.h"
+#include "function/arithmetic/arithmetic_functions.h"
+#include "function/vector_functions.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

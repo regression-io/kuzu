@@ -1,5 +1,13 @@
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "planner/operator/logical_operator.h"
 #include "planner/operator/scan/logical_scan_file.h"
+#include "processor/data_pos.h"
 #include "processor/operator/persistent/reader.h"
+#include "processor/operator/persistent/reader_state.h"
+#include "processor/operator/physical_operator.h"
 #include "processor/plan_mapper.h"
 
 using namespace kuzu::storage;

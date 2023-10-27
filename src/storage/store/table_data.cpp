@@ -1,6 +1,24 @@
 #include "storage/store/table_data.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "catalog/property.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
 #include "storage/stats/nodes_store_statistics.h"
+#include "storage/stats/property_statistics.h"
+#include "storage/stats/table_statistics_collection.h"
+#include "storage/storage_utils.h"
+#include "storage/store/node_column.h"
+#include "storage/store/node_group.h"
+#include "storage/wal/wal.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;

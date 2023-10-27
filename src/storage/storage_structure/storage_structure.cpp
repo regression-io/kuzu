@@ -1,6 +1,21 @@
 #include "storage/storage_structure/storage_structure.h"
 
-#include "common/utils.h"
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <utility>
+
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/storage_structure/storage_structure_utils.h"
+#include "storage/storage_utils.h"
+#include "storage/wal/wal.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;

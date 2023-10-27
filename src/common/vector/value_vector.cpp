@@ -1,10 +1,31 @@
 #include "common/vector/value_vector.h"
 
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "common/api.h"
+#include "common/constants.h"
+#include "common/data_chunk/data_chunk_state.h"
+#include "common/exception/not_implemented.h"
+#include "common/in_mem_overflow_buffer.h"
+#include "common/int128_t.h"
 #include "common/null_buffer.h"
+#include "common/null_mask.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_list.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
 #include "common/types/value/nested.h"
 #include "common/types/value/value.h"
 #include "common/vector/auxiliary_buffer.h"
-#include <arrow/array.h>
+#include "storage/buffer_manager/memory_manager.h"
 
 namespace kuzu {
 namespace common {

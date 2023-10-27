@@ -1,9 +1,16 @@
-#include "binder/bound_statement_result.h"
-#include "c_api/helpers.h"
+#include "main/connection.h"
+
+#include <cstdint>
+#include <cstdlib>
+#include <memory>
+#include <string>
+#include <unordered_map>
+
 #include "c_api/kuzu.h"
 #include "common/exception/exception.h"
-#include "main/kuzu.h"
-#include "planner/operator/logical_plan.h"
+#include "main/connection.h"
+#include "main/database.h"
+#include "main/prepared_statement.h"
 
 namespace kuzu {
 namespace common {

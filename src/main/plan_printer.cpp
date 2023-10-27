@@ -1,8 +1,19 @@
 #include "main/plan_printer.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <ostream>
 #include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
 
+#include "common/profiler.h"
 #include "json.hpp"
+#include "json_fwd.hpp"
+#include "processor/operator/physical_operator.h"
 #include "processor/physical_plan.h"
 
 using namespace kuzu::common;

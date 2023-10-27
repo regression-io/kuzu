@@ -1,9 +1,23 @@
 #include "storage/wal_replayer_utils.h"
 
+#include <cstdint>
+#include <functional>
+#include <map>
+#include <memory>
+#include <string>
+
 #include "catalog/node_table_schema.h"
 #include "catalog/rel_table_schema.h"
+#include "common/exception/not_implemented.h"
+#include "common/file_utils.h"
+#include "common/rel_direction.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
 #include "storage/in_mem_storage_structure/in_mem_column.h"
+#include "storage/in_mem_storage_structure/in_mem_lists.h"
 #include "storage/index/hash_index_builder.h"
+#include "storage/storage_utils.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;

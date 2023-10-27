@@ -3,14 +3,25 @@
 #include <algorithm>
 #include <cctype>
 #include <csignal>
+#include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <exception>
+#include <memory>
 #include <regex>
+#include <sstream>
+#include <string>
+#include <vector>
 
 #include "catalog/catalog.h"
-#include "common/logging_level_utils.h"
+#include "common/exception/exception.h"
 #include "common/string_utils.h"
-#include "common/type_utils.h"
-#include "json.hpp"
-#include "processor/result/factorized_table.h"
+#include "linenoise.h"
+#include "main/connection.h"
+#include "main/database.h"
+#include "main/query_result.h"
 #include "utf8proc.h"
 #include "utf8proc_wrapper.h"
 

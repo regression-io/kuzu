@@ -1,5 +1,20 @@
 #include "binder/query/query_graph.h"
 
+#include <bitset>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "binder/expression/expression.h"
+#include "binder/expression/node_expression.h"
+#include "binder/expression/rel_expression.h"
 #include "binder/expression_visitor.h"
 
 namespace kuzu {

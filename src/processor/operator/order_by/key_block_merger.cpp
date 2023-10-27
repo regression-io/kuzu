@@ -1,6 +1,19 @@
 #include "processor/operator/order_by/key_block_merger.h"
 
-#include "function/comparison/comparison_functions.h"
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <mutex>
+#include <queue>
+#include <vector>
+
+#include "common/constants.h"
+#include "common/types/ku_string.h"
+#include "processor/operator/order_by/order_by_key_encoder.h"
+#include "processor/result/factorized_table.h"
+#include "storage/buffer_manager/memory_manager.h"
 
 using namespace kuzu::common;
 using namespace kuzu::processor;

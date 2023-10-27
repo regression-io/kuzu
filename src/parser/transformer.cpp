@@ -1,9 +1,18 @@
 #include "parser/transformer.h"
 
+#include <cassert>
+#include <memory>
+#include <string>
+#include <utility>
+
 #include "common/exception/not_implemented.h"
+#include "common/explain_type.h"
 #include "common/string_utils.h"
+#include "cypher_parser.h"
 #include "parser/explain_statement.h"
-#include "parser/query/regular_query.h"
+#include "parser/expression/parsed_expression.h"
+#include "parser/statement.h"
+#include "tree/TerminalNode.h"
 
 using namespace kuzu::common;
 

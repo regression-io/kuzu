@@ -1,13 +1,25 @@
 #include "storage/local_table.h"
 
+#include <cassert>
+#include <memory>
+#include <vector>
+
+#include "common/constants.h"
 #include "common/exception/message.h"
 #include "common/exception/runtime.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/memory_manager.h"
+#include "storage/storage_utils.h"
+#include "storage/store/column_chunk.h"
 #include "storage/store/node_table.h"
-#include "storage/store/string_column_chunk.h"
 #include "storage/store/string_node_column.h"
 #include "storage/store/struct_node_column.h"
 #include "storage/store/var_list_column_chunk.h"
 #include "storage/store/var_list_node_column.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;

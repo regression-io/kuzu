@@ -1,5 +1,9 @@
 #include "parser/query/reading_clause/in_query_call_clause.h"
 
+#include <vector>
+
+#include "parser/expression/parsed_expression.h"
+
 namespace kuzu {
 namespace parser {
 

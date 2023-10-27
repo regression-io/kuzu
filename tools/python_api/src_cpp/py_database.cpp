@@ -1,6 +1,17 @@
 #include "include/py_database.h"
 
+#include <cmath>
+#include <cstdint>
 #include <memory>
+#include <string>
+
+#include "common/types/internal_id_t.h"
+#include "main/database.h"
+#include "main/storage_driver.h"
+#include <pybind11/cast.h>
+#include <pybind11/numpy.h>
+#include <pybind11/pybind11.h>
+#include <pybind11/pytypes.h>
 
 using namespace kuzu::common;
 

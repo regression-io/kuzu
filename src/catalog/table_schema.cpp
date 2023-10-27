@@ -1,6 +1,12 @@
 #include "catalog/table_schema.h"
 
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "catalog/node_table_schema.h"
+#include "catalog/property.h"
 #include "catalog/rdf_graph_schema.h"
 #include "catalog/rel_table_group_schema.h"
 #include "catalog/rel_table_schema.h"
@@ -12,6 +18,9 @@
 #include "common/serializer/serializer.h"
 #include "common/string_format.h"
 #include "common/string_utils.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 
 using namespace kuzu::common;
 

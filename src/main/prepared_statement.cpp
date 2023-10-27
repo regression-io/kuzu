@@ -1,6 +1,7 @@
 #include "main/prepared_statement.h"
 
-#include "binder/bound_statement_result.h"
+#include <string>
+
 #include "common/statement_type.h"
 #include "planner/operator/logical_plan.h"
 

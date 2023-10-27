@@ -1,6 +1,14 @@
+#include "main/query_result.h"
+
+#include <cstdint>
+#include <cstdlib>
+#include <memory>
+
 #include "c_api/helpers.h"
 #include "c_api/kuzu.h"
-#include "main/kuzu.h"
+#include "common/types/types.h"
+#include "main/query_result.h"
+#include "processor/result/flat_tuple.h"
 
 using namespace kuzu::main;
 using namespace kuzu::common;

@@ -1,5 +1,11 @@
 #include "processor/operator/filtering_operator.h"
 
+#include <cstring>
+#include <memory>
+
+#include "common/data_chunk/sel_vector.h"
+#include "common/types/types.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {

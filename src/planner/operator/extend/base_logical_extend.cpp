@@ -1,6 +1,11 @@
 #include "planner/operator/extend/base_logical_extend.h"
 
+#include <string>
+
+#include "binder/expression/rel_expression.h"
 #include "common/exception/not_implemented.h"
+#include "common/query_rel_type.h"
+#include "planner/operator/extend/extend_direction.h"
 
 using namespace kuzu::common;
 

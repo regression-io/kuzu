@@ -1,3 +1,9 @@
+#include <cassert>
+#include <memory>
+#include <utility>
+
+#include "cypher_parser.h"
+#include "parser/expression/parsed_expression.h"
 #include "parser/query/updating_clause/delete_clause.h"
 #include "parser/query/updating_clause/insert_clause.h"
 #include "parser/query/updating_clause/merge_clause.h"

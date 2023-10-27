@@ -1,6 +1,19 @@
 #include "storage/buffer_manager/bm_file_handle.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <shared_mutex>
+#include <string>
+#include <utility>
+
+#include "common/constants.h"
+#include "common/file_utils.h"
+#include "common/types/types.h"
 #include "storage/buffer_manager/buffer_manager.h"
+#include "storage/file_handle.h"
+#include "storage/storage_utils.h"
 
 using namespace kuzu::common;
 

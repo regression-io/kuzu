@@ -1,7 +1,14 @@
 #include "parser/parsed_expression_visitor.h"
 
+#include <cstdint>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "common/exception/not_implemented.h"
+#include "common/expression_type.h"
 #include "parser/expression/parsed_case_expression.h"
+#include "parser/expression/parsed_expression.h"
 
 using namespace kuzu::common;
 

@@ -1,3 +1,7 @@
+#include <cassert>
+#include <utility>
+
+#include "processor/operator/physical_operator.h"
 #include "processor/operator/table_scan/factorized_table_scan.h"
 #include "processor/plan_mapper.h"
 

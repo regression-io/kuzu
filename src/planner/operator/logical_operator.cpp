@@ -1,5 +1,11 @@
 #include "planner/operator/logical_operator.h"
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "common/exception/not_implemented.h"
 
 using namespace kuzu::common;

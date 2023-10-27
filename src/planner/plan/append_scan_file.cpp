@@ -1,3 +1,8 @@
+#include <cassert>
+#include <memory>
+#include <utility>
+
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/scan/logical_scan_file.h"
 #include "planner/query_planner.h"
 

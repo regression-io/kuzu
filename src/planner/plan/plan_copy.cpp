@@ -1,11 +1,23 @@
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "binder/bound_statement.h"
 #include "binder/copy/bound_copy_from.h"
 #include "binder/copy/bound_copy_to.h"
-#include "binder/expression/variable_expression.h"
+#include "catalog/catalog.h"
 #include "catalog/node_table_schema.h"
+#include "common/copier_config/copier_config.h"
+#include "common/table_type.h"
+#include "planner/operator/logical_plan.h"
 #include "planner/operator/persistent/logical_copy_from.h"
 #include "planner/operator/persistent/logical_copy_to.h"
 #include "planner/operator/scan/logical_index_scan.h"
 #include "planner/planner.h"
+#include "planner/query_planner.h"
+#include "storage/stats/nodes_store_statistics.h"
+#include "storage/stats/rels_store_statistics.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::storage;

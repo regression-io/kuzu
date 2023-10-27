@@ -1,5 +1,7 @@
 #include "common/expression_type.h"
 
+#include <string>
+
 #include "common/exception/not_implemented.h"
 
 namespace kuzu {

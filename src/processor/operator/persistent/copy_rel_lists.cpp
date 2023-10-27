@@ -1,7 +1,22 @@
 #include "processor/operator/persistent/copy_rel_lists.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <vector>
+
+#include "arrow/buffer.h"
+#include "arrow/type.h"
+#include "catalog/rel_table_schema.h"
 #include "common/string_format.h"
+#include "common/types/internal_id_t.h"
+#include "common/vector/value_vector.h"
+#include "processor/data_pos.h"
+#include "processor/execution_context.h"
+#include "processor/operator/persistent/copy_rel.h"
 #include "processor/result/factorized_table.h"
+#include "storage/in_mem_storage_structure/in_mem_column_chunk.h"
+#include "storage/in_mem_storage_structure/in_mem_lists.h"
 #include "storage/store/table_copy_utils.h"
 
 using namespace kuzu::common;

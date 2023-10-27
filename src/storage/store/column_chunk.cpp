@@ -1,7 +1,26 @@
 #include "storage/store/column_chunk.h"
 
+#include <algorithm>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <utility>
+
+#include "common/constants.h"
+#include "common/data_chunk/data_chunk_state.h"
+#include "common/exception/not_implemented.h"
+#include "common/file_utils.h"
+#include "common/int128_t.h"
+#include "common/null_mask.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/interval_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
 #include "common/types/value/nested.h"
-#include "storage/storage_structure/storage_structure_utils.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/storage_utils.h"
 #include "storage/store/compression.h"
 #include "storage/store/string_column_chunk.h"
 #include "storage/store/struct_column_chunk.h"

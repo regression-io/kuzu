@@ -3,6 +3,21 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "common/constants.h"
+#include "common/data_chunk/data_chunk.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+
 #ifdef _WIN32
 #include <errhandlingapi.h>
 #include <handleapi.h>
@@ -12,7 +27,6 @@
 #include <unistd.h>
 #endif
 
-#include "common/exception/buffer_manager.h"
 #include "common/exception/copy.h"
 #include "common/string_format.h"
 #include "common/utils.h"

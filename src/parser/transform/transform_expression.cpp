@@ -1,6 +1,20 @@
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <utility>
+
+#include "common/constants.h"
+#include "common/expression_type.h"
+#include "common/int128_t.h"
 #include "common/string_utils.h"
+#include "common/types/types.h"
+#include "common/types/value/value.h"
+#include "cypher_parser.h"
 #include "function/cast/functions/cast_string_to_functions.h"
 #include "parser/expression/parsed_case_expression.h"
+#include "parser/expression/parsed_expression.h"
 #include "parser/expression/parsed_function_expression.h"
 #include "parser/expression/parsed_literal_expression.h"
 #include "parser/expression/parsed_parameter_expression.h"

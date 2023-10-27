@@ -1,8 +1,19 @@
 #include "processor/operator/persistent/reader/csv/parallel_csv_reader.h"
 
+#include <unistd.h>
+
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+
+#include "common/constants.h"
+#include "common/copier_config/copier_config.h"
+#include "common/data_chunk/data_chunk.h"
 #include "common/exception/copy.h"
 #include "common/string_format.h"
 #include "common/system_message.h"
+#include "common/types/types.h"
 #include "processor/operator/persistent/reader/csv/driver.h"
 
 using namespace kuzu::common;

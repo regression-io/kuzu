@@ -1,6 +1,13 @@
 #include "expression_evaluator/literal_evaluator.h"
 
+#include <cassert>
+#include <memory>
+
+#include "common/data_chunk/data_chunk_state.h"
+#include "common/data_chunk/sel_vector.h"
 #include "common/types/value/value.h"
+#include "processor/result/result_set.h"
+#include "storage/buffer_manager/memory_manager.h"
 
 using namespace kuzu::common;
 using namespace kuzu::storage;

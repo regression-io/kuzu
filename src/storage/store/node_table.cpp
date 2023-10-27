@@ -1,8 +1,26 @@
 #include "storage/store/node_table.h"
 
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
 #include "catalog/node_table_schema.h"
+#include "catalog/property.h"
 #include "common/exception/message.h"
 #include "common/exception/runtime.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/ku_string.h"
+#include "common/types/types.h"
+#include "common/vector/value_vector.h"
+#include "storage/buffer_manager/bm_file_handle.h"
+#include "storage/buffer_manager/buffer_manager.h"
+#include "storage/index/hash_index.h"
+#include "storage/stats/nodes_store_statistics.h"
+#include "storage/stats/property_statistics.h"
+#include "storage/storage_utils.h"
+#include "storage/store/table_data.h"
+#include "storage/wal/wal.h"
 #include "transaction/transaction.h"
 
 using namespace kuzu::catalog;

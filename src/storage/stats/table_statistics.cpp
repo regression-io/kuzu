@@ -1,9 +1,20 @@
 #include "storage/stats/table_statistics.h"
 
+#include <cassert>
+#include <cstdint>
+#include <memory>
+#include <unordered_map>
+#include <utility>
+
 #include "catalog/table_schema.h"
+#include "common/exception/not_implemented.h"
 #include "common/serializer/deserializer.h"
 #include "common/serializer/serializer.h"
+#include "common/table_type.h"
+#include "common/types/internal_id_t.h"
+#include "common/types/types.h"
 #include "storage/stats/node_table_statistics.h"
+#include "storage/stats/property_statistics.h"
 #include "storage/stats/rel_table_statistics.h"
 
 using namespace kuzu::common;

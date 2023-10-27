@@ -1,20 +1,30 @@
 #include "processor/expression_mapper.h"
 
+#include <cassert>
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "binder/expression/case_expression.h"
+#include "binder/expression/expression.h"
+#include "binder/expression/expression_util.h"
 #include "binder/expression/literal_expression.h"
 #include "binder/expression/node_expression.h"
 #include "binder/expression/parameter_expression.h"
-#include "binder/expression/path_expression.h"
 #include "binder/expression/rel_expression.h"
-#include "binder/expression_visitor.h"
+#include "common/exception/not_implemented.h"
+#include "common/expression_type.h"
 #include "common/string_format.h"
+#include "common/types/value/value.h"
 #include "expression_evaluator/case_evaluator.h"
+#include "expression_evaluator/expression_evaluator.h"
 #include "expression_evaluator/function_evaluator.h"
 #include "expression_evaluator/literal_evaluator.h"
 #include "expression_evaluator/node_rel_evaluator.h"
 #include "expression_evaluator/path_evaluator.h"
 #include "expression_evaluator/reference_evaluator.h"
 #include "planner/operator/schema.h"
+#include "processor/data_pos.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;

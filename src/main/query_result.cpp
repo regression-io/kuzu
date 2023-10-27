@@ -1,13 +1,23 @@
 #include "main/query_result.h"
 
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
 #include <fstream>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
-#include "binder/expression/node_rel_expression.h"
-#include "binder/expression/property_expression.h"
+#include "binder/expression/expression.h"
+#include "common/arrow/arrow.h"
 #include "common/arrow/arrow_converter.h"
+#include "common/exception/exception.h"
+#include "common/exception/runtime.h"
+#include "common/types/types.h"
 #include "common/types/value/node.h"
 #include "common/types/value/rel.h"
-#include "json.hpp"
+#include "main/query_summary.h"
 #include "processor/result/factorized_table.h"
 #include "processor/result/flat_tuple.h"
 

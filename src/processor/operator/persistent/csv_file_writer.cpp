@@ -1,6 +1,15 @@
 #include "processor/operator/persistent/csv_file_writer.h"
 
+#include <fcntl.h>
+
+#include <cassert>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 #include "common/constants.h"
+#include "common/exception/not_implemented.h"
+#include "common/file_utils.h"
 #include "common/string_utils.h"
 #include "common/type_utils.h"
 #include "common/types/date_t.h"
@@ -9,6 +18,7 @@
 #include "common/types/ku_string.h"
 #include "common/types/timestamp_t.h"
 #include "common/types/types.h"
+#include "common/vector/value_vector.h"
 
 using namespace kuzu::common;
 

@@ -1,11 +1,25 @@
 #include "processor/operator/persistent/reader/csv/base_csv_reader.h"
 
+#include <fcntl.h>
+#include <unistd.h>
+
+#include <algorithm>
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
-#include "common/data_chunk/data_chunk.h"
+#include "common/constants.h"
+#include "common/copier_config/copier_config.h"
 #include "common/exception/copy.h"
 #include "common/string_format.h"
 #include "common/system_message.h"
+#include "common/types/types.h"
 #include "processor/operator/persistent/reader/csv/driver.h"
 
 using namespace kuzu::common;
