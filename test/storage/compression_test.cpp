@@ -30,7 +30,8 @@ void test_compression(CompressionAlg& alg, std::vector<T> src) {
     EXPECT_EQ(decompressed[1], value);
 
     for (int i = 0; i < src.size(); i++) {
-        alg.getValue(dest.data(), i, (uint8_t*)decompressed.data(), i, metadata);
+        alg.decompressFromPage(
+            dest.data(), i, (uint8_t*)decompressed.data(), i, 1 /*numValues*/, metadata);
         EXPECT_EQ(decompressed[i], src[i]);
     }
     EXPECT_EQ(decompressed, src);
@@ -150,7 +151,8 @@ void integerPackingMultiPage(const std::vector<T>& src) {
         auto page = i / numValuesPerPage;
         auto indexInPage = i % numValuesPerPage;
         T value;
-        alg.getValue(dest[page].data(), indexInPage, (uint8_t*)&value, 0, metadata);
+        alg.decompressFromPage(
+            dest[page].data(), indexInPage, (uint8_t*)&value, 0, 1 /*numValues*/, metadata);
         EXPECT_EQ(src[i] - value, 0);
         EXPECT_EQ(src[i], value);
     }
