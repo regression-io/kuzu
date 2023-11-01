@@ -41,11 +41,14 @@ void StringColumn::scanValueToVector(Transaction* transaction, const ReadState& 
     string_offset_t startOffset, string_offset_t endOffset, ValueVector* resultVector,
     uint64_t offsetInVector) {
     KU_ASSERT(endOffset >= startOffset);
-    // TODO: Add string to vector first and read directly instead of using a temporary buffer
-    std::unique_ptr<char[]> stringRead = std::make_unique<char[]>(endOffset - startOffset);
-    dataColumn->scan(transaction, dataState, startOffset, endOffset, (uint8_t*)stringRead.get());
-    StringVector::addString(
-        resultVector, offsetInVector, stringRead.get(), endOffset - startOffset);
+    // Add string to vector first and read directly into the vector
+    auto& kuString =
+        StringVector::reserveString(resultVector, offsetInVector, endOffset - startOffset);
+    dataColumn->scan(transaction, dataState, startOffset, endOffset, (uint8_t*)kuString.getData());
+    // Update prefix to match the scanned string data
+    if (!ku_string_t::isShortString(kuString.len)) {
+        memcpy(kuString.prefix, kuString.getData(), ku_string_t::PREFIX_LENGTH);
+    }
 }
 
 void StringColumn::scan(Transaction* transaction, node_group_idx_t nodeGroupIdx,
