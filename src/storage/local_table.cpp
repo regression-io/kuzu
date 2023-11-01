@@ -184,7 +184,7 @@ void LocalColumn::prepareCommitForChunk(node_group_idx_t nodeGroupIdx) {
                 auto pos = vector->vector->state->selVector->selectedPositions[i];
                 KU_ASSERT(vector->validityMask[pos]);
                 if (!metadata.canUpdateInPlace(
-                        *vector->vector, pos, column->getDataType().getPhysicalType())) {
+                        vector->vector->getData(), pos, column->getDataType().getPhysicalType())) {
                     return commitLocalChunkOutOfPlace(nodeGroupIdx, chunk);
                 }
             }
@@ -225,6 +225,7 @@ void StringLocalColumn::prepareCommitForChunk(node_group_idx_t nodeGroupIdx) {
     KU_ASSERT(chunks.contains(nodeGroupIdx));
     auto localChunk = chunks.at(nodeGroupIdx).get();
     auto stringColumn = reinterpret_cast<StringColumn*>(column);
+    auto indexColumnMetadata = stringColumn->getMetadata(nodeGroupIdx, TransactionType::WRITE);
     auto dataColumnMetadata =
         stringColumn->getDataColumn()->getMetadata(nodeGroupIdx, TransactionType::WRITE);
     auto offsetColumnMetadata =
@@ -240,10 +241,19 @@ void StringLocalColumn::prepareCommitForChunk(node_group_idx_t nodeGroupIdx) {
         offsetColumnMetadata.compMeta.numValues(
             BufferPoolConstants::PAGE_4KB_SIZE, stringColumn->getOffsetColumn()->getDataType()) *
         offsetColumnMetadata.numPages;
-    // Write in-place as long as there is sufficient space in the data chunk
-    if (dataColumnMetadata.numValues + totalStringLengthInChunk <=
-            dataColumnMetadata.numPages * BufferPoolConstants::PAGE_4KB_SIZE &&
-        offsetColumnMetadata.numValues + newStrings < offsetCapacity
+
+    auto totalStringsAfterUpdate = offsetColumnMetadata.numValues + newStrings;
+    auto totalStringDataAfterUpdate = dataColumnMetadata.numValues + totalStringLengthInChunk;
+
+    // Make sure there is sufficient space in the data chunk (not currently compressed)
+    bool canUpdateDataInPlace = totalStringDataAfterUpdate <=
+                                dataColumnMetadata.numPages * BufferPoolConstants::PAGE_4KB_SIZE;
+    bool canUpdateIndicesInPlace =
+        totalStringsAfterUpdate < offsetCapacity &&
+        // If the index column can store the largest new index in-place
+        indexColumnMetadata.compMeta.canUpdateInPlace(
+            (const uint8_t*)&totalStringsAfterUpdate, 0, column->getDataType().getPhysicalType());
+    bool canUpdateOffsetsInPlace =
         // Indices are limited to 32 bits but in theory could be larger than that since the offset
         // column can grow beyond the node group size.
         //
@@ -252,8 +262,11 @@ void StringLocalColumn::prepareCommitForChunk(node_group_idx_t nodeGroupIdx) {
         // enough that 2^n minus the first string's size is large enough to fit the other strings,
         // for some n.
         // 32 bits should give plenty of space for updates.
-        && offsetColumnMetadata.numValues + newStrings <
-               std::numeric_limits<StringColumn::string_index_t>::max()) {
+        offsetColumnMetadata.numValues + newStrings <
+            std::numeric_limits<StringColumn::string_index_t>::max() &&
+        offsetColumnMetadata.compMeta.canUpdateInPlace((const uint8_t*)&totalStringDataAfterUpdate,
+            0, column->getDataType().getPhysicalType());
+    if (canUpdateDataInPlace && canUpdateIndicesInPlace && canUpdateOffsetsInPlace) {
         commitLocalChunkInPlace(nodeGroupIdx, localChunk);
     } else {
         commitLocalChunkOutOfPlace(nodeGroupIdx, localChunk);

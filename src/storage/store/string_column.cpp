@@ -13,13 +13,10 @@ StringColumn::StringColumn(LogicalType dataType, const MetadataDAHInfo& metaDAHe
     BMFileHandle* dataFH, BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
     transaction::Transaction* transaction, RWPropertyStats stats)
     : Column{std::move(dataType), metaDAHeaderInfo, dataFH, metadataFH, bufferManager, wal,
-          transaction, stats, false /* enableCompression */, true /* requireNullColumn */} {
-    // TODO(bmwinger): detecting if string child columns must be re-compressed when updating is not
-    // yet supported
-    auto enableCompression = false;
+          transaction, stats, true /* enableCompression */, true /* requireNullColumn */} {
     dataColumn = std::make_unique<AuxiliaryColumn>(LogicalType(LogicalTypeID::UINT8),
         *metaDAHeaderInfo.childrenInfos[0], dataFH, metadataFH, bufferManager, wal, transaction,
-        stats, enableCompression, false /*requireNullColumn*/);
+        stats, false, false /*requireNullColumn*/);
     offsetColumn = std::make_unique<AuxiliaryColumn>(LogicalType(LogicalTypeID::UINT64),
         *metaDAHeaderInfo.childrenInfos[1], dataFH, metadataFH, bufferManager, wal, transaction,
         stats, enableCompression, false /*requireNullColumn*/);

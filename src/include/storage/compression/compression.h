@@ -42,7 +42,7 @@ struct CompressionMetadata {
     // Returns true if and only if the provided value within the vector can be updated
     // in this chunk in-place.
     bool canUpdateInPlace(
-        const common::ValueVector& vector, uint32_t pos, common::PhysicalTypeID physicalType) const;
+        const uint8_t* data, uint32_t pos, common::PhysicalTypeID physicalType) const;
     bool canAlwaysUpdateInPlace() const;
 };
 

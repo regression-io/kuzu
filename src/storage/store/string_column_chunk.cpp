@@ -8,12 +8,11 @@ namespace kuzu {
 namespace storage {
 
 StringColumnChunk::StringColumnChunk(LogicalType dataType, uint64_t capacity)
-    : ColumnChunk{std::move(dataType), capacity, false /*enableCompression*/} {
+    : ColumnChunk{std::move(dataType), capacity, true /*enableCompression*/} {
+    bool enableCompression = true;
     // Bitpacking might save 1 bit per value with regular ascii compared to UTF-8
-    // Detecting when we need to re-compress the child chunks is not currently supported.
-    bool enableCompression = false;
     stringDataChunk =
-        ColumnChunkFactory::createColumnChunk(LogicalType(LogicalTypeID::UINT8), enableCompression);
+        ColumnChunkFactory::createColumnChunk(LogicalType(LogicalTypeID::UINT8), false);
     // The offset chunk is able to grow beyond the node group size.
     // We rely on appending to the dictionary when updating, however if the chunk is full,
     // there will be no space for in-place updates.

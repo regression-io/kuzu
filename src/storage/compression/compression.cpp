@@ -57,7 +57,7 @@ bool CompressionMetadata::canAlwaysUpdateInPlace() const {
     }
 }
 bool CompressionMetadata::canUpdateInPlace(
-    const ValueVector& vector, uint32_t pos, PhysicalTypeID physicalType) const {
+    const uint8_t* data, uint32_t pos, PhysicalTypeID physicalType) const {
     if (canAlwaysUpdateInPlace()) {
         return true;
     }
@@ -69,45 +69,46 @@ bool CompressionMetadata::canUpdateInPlace(
     case CompressionType::INTEGER_BITPACKING: {
         switch (physicalType) {
         case PhysicalTypeID::INT64: {
-            auto value = vector.getValue<int64_t>(pos);
+            auto value = ((int64_t*)data)[pos];
             return IntegerBitpacking<int64_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::INT32: {
-            auto value = vector.getValue<int32_t>(pos);
+            auto value = ((int32_t*)data)[pos];
             return IntegerBitpacking<int32_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::INT16: {
-            auto value = vector.getValue<int16_t>(pos);
+            auto value = ((int16_t*)data)[pos];
             return IntegerBitpacking<int16_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::INT8: {
-            auto value = vector.getValue<int8_t>(pos);
+            auto value = ((int8_t*)data)[pos];
             return IntegerBitpacking<int8_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::VAR_LIST:
         case PhysicalTypeID::UINT64: {
-            auto value = vector.getValue<uint64_t>(pos);
+            auto value = ((uint64_t*)data)[pos];
             return IntegerBitpacking<uint64_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
+        case PhysicalTypeID::STRING:
         case PhysicalTypeID::UINT32: {
-            auto value = vector.getValue<uint32_t>(pos);
+            auto value = ((uint32_t*)data)[pos];
             return IntegerBitpacking<uint32_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::UINT16: {
-            auto value = vector.getValue<uint16_t>(pos);
+            auto value = ((uint16_t*)data)[pos];
             return IntegerBitpacking<uint16_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         case PhysicalTypeID::UINT8: {
-            auto value = vector.getValue<uint8_t>(pos);
+            auto value = ((uint8_t*)data)[pos];
             return IntegerBitpacking<uint8_t>::canUpdateInPlace(
-                value, BitpackHeader::readHeader(data));
+                value, BitpackHeader::readHeader(this->data));
         }
         default: {
             throw common::StorageException(
@@ -143,6 +144,7 @@ uint64_t CompressionMetadata::numValues(uint64_t pageSize, const LogicalType& da
         case PhysicalTypeID::UINT64:
             return IntegerBitpacking<uint64_t>::numValues(
                 pageSize, BitpackHeader::readHeader(data));
+        case PhysicalTypeID::STRING:
         case PhysicalTypeID::UINT32:
             return IntegerBitpacking<uint32_t>::numValues(
                 pageSize, BitpackHeader::readHeader(data));
@@ -513,6 +515,7 @@ void ReadCompressedValuesFromPageToVector::operator()(uint8_t* frame, PageElemen
             return IntegerBitpacking<uint64_t>().decompressFromPage(frame, pageCursor.elemPosInPage,
                 resultVector->getData(), posInVector, numValuesToRead, metadata);
         }
+        case PhysicalTypeID::STRING:
         case PhysicalTypeID::UINT32: {
             return IntegerBitpacking<uint32_t>().decompressFromPage(frame, pageCursor.elemPosInPage,
                 resultVector->getData(), posInVector, numValuesToRead, metadata);
@@ -567,6 +570,7 @@ void ReadCompressedValuesFromPage::operator()(uint8_t* frame, PageElementCursor&
             return IntegerBitpacking<uint64_t>().decompressFromPage(frame, pageCursor.elemPosInPage,
                 result, startPosInResult, numValuesToRead, metadata);
         }
+        case PhysicalTypeID::STRING:
         case PhysicalTypeID::UINT32: {
             return IntegerBitpacking<uint32_t>().decompressFromPage(frame, pageCursor.elemPosInPage,
                 result, startPosInResult, numValuesToRead, metadata);
@@ -621,6 +625,7 @@ void WriteCompressedValuesToPage::operator()(uint8_t* frame, uint16_t posInFrame
             return IntegerBitpacking<uint64_t>().setValuesFromUncompressed(
                 data, dataOffset, frame, posInFrame, numValues, metadata);
         }
+        case PhysicalTypeID::STRING:
         case PhysicalTypeID::UINT32: {
             return IntegerBitpacking<uint32_t>().setValuesFromUncompressed(
                 data, dataOffset, frame, posInFrame, numValues, metadata);
