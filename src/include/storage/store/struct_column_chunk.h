@@ -7,12 +7,15 @@ namespace storage {
 
 class StructColumnChunk : public ColumnChunk {
 public:
-    StructColumnChunk(common::LogicalType dataType, uint64_t capacity, bool enableCompression);
+    StructColumnChunk(
+        common::LogicalType dataType, uint64_t capacity, bool enableCompression, bool needFinalize);
 
     inline ColumnChunk* getChild(common::vector_idx_t childIdx) {
         KU_ASSERT(childIdx < childChunks.size());
         return childChunks[childIdx].get();
     }
+
+    inline std::unique_ptr<ColumnChunk> finalize() final;
 
 protected:
     void append(ColumnChunk* other, common::offset_t startPosInOtherChunk,
