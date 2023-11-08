@@ -1,3 +1,5 @@
+add_subdirectory(hash)
+
 add_library(kuzu_storage_index
         OBJECT
         hash_index.cpp
