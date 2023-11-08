@@ -80,7 +80,10 @@ public:
         const uint8_t* buffer, uint64_t /*bufferSize*/, uint64_t capacity, uint64_t numValues) {
         auto metadata = alg->getCompressionMetadata(buffer, numValues);
         auto numValuesPerPage = metadata.numValues(BufferPoolConstants::PAGE_4KB_SIZE, dataType);
-        auto numPages = capacity / numValuesPerPage + (capacity % numValuesPerPage == 0 ? 0 : 1);
+        auto numPages =
+            numValuesPerPage == UINT64_MAX ?
+                0 :
+                capacity / numValuesPerPage + (capacity % numValuesPerPage == 0 ? 0 : 1);
         return ColumnChunkMetadata(INVALID_PAGE_IDX, numPages, numValues, metadata);
     }
 };
@@ -316,6 +319,7 @@ ColumnChunkMetadata ColumnChunk::flushBuffer(
     return flushBufferFunction(buffer.get(), bufferSize, dataFH, startPageIdx, metadata);
 }
 
+// TODO(Guodong/Ben): Do we still need this?
 uint32_t ColumnChunk::getDataTypeSizeInChunk(LogicalType& dataType) {
     switch (dataType.getLogicalTypeID()) {
     case LogicalTypeID::SERIAL:
@@ -427,7 +431,7 @@ public:
         numValues += numValuesToAppend;
     }
 
-    void write(ValueVector* valueVector, ValueVector* offsetInChunkVector) {
+    void write(ValueVector* valueVector, ValueVector* offsetInChunkVector) final {
         KU_ASSERT(valueVector->dataType.getPhysicalType() == PhysicalTypeID::FIXED_LIST &&
                   offsetInChunkVector->dataType.getPhysicalType() == PhysicalTypeID::INT64);
         auto offsets = (offset_t*)offsetInChunkVector->getData();
@@ -458,6 +462,28 @@ public:
     }
 };
 
+class SerialColumnChunk : public ColumnChunk {
+public:
+    SerialColumnChunk(uint64_t capacity)
+        : ColumnChunk(LogicalType{LogicalTypeID::SERIAL}, capacity, false /* enableCompression */,
+              false /* hasNullChunk */) {}
+
+    void copyVectorToBuffer(ValueVector* vector, offset_t startPosInChunk) final {
+        // DO NOTHING.
+    }
+    void append(ColumnChunk* other, common::offset_t startPosInOtherChunk,
+        common::offset_t startPosInChunk, uint32_t numValuesToAppend) final {
+        // Serial is not materialized, thus no data should be copied from other.
+        // `numValues` is updated to reflect the number of values appended.
+        numValues += numValuesToAppend;
+    }
+    void write(ValueVector* valueVector, ValueVector* offsetInChunkVector) {
+        // LCOV_EXCL_START
+        KU_UNREACHABLE;
+        // LCOV_EXCL_STOP
+    }
+};
+
 std::unique_ptr<ColumnChunk> ColumnChunkFactory::createColumnChunk(
     const LogicalType& dataType, bool enableCompression, bool needFinalize, uint64_t capacity) {
     switch (dataType.getPhysicalType()) {
@@ -477,8 +503,7 @@ std::unique_ptr<ColumnChunk> ColumnChunkFactory::createColumnChunk(
     case PhysicalTypeID::FLOAT:
     case PhysicalTypeID::INTERVAL: {
         if (dataType.getLogicalTypeID() == LogicalTypeID::SERIAL) {
-            return std::make_unique<ColumnChunk>(LogicalType(LogicalTypeID::SERIAL), capacity,
-                false /*enableCompression*/, false /* hasNullChunk */);
+            return std::make_unique<SerialColumnChunk>(capacity);
         } else {
             return std::make_unique<ColumnChunk>(dataType, capacity, enableCompression);
         }

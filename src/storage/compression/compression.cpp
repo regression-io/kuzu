@@ -20,6 +20,7 @@ namespace storage {
 uint32_t getDataTypeSizeInChunk(const common::LogicalType& dataType) {
     using namespace common;
     switch (dataType.getLogicalTypeID()) {
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::STRUCT: {
         return 0;
     }
@@ -29,9 +30,6 @@ uint32_t getDataTypeSizeInChunk(const common::LogicalType& dataType) {
     case LogicalTypeID::VAR_LIST:
     case LogicalTypeID::INTERNAL_ID: {
         return sizeof(offset_t);
-    }
-    case LogicalTypeID::SERIAL: {
-        return sizeof(int64_t);
     }
     default: {
         auto size = StorageUtils::getDataTypeSize(dataType);

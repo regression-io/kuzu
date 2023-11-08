@@ -263,8 +263,15 @@ public:
         }
     }
 
-    void append(ColumnChunk* /*columnChunk*/, uint64_t nodeGroupIdx) final {
+    void append(ColumnChunk* columnChunk, uint64_t nodeGroupIdx) final {
+        auto preScanMetadata = columnChunk->getMetadataToFlush();
+        auto startPageIdx = dataFH->addNewPages(preScanMetadata.numPages);
+        auto metadata = columnChunk->flushBuffer(dataFH, startPageIdx, preScanMetadata);
         metadataDA->resize(nodeGroupIdx + 1);
+        metadataDA->update(nodeGroupIdx, metadata);
+        if (static_cast<NullColumnChunk*>(columnChunk)->mayHaveNull()) {
+            propertyStatistics.setHasNull(DUMMY_WRITE_TRANSACTION);
+        }
     }
 };
 

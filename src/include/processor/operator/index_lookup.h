@@ -10,20 +10,17 @@ namespace processor {
 
 struct IndexLookupInfo {
     common::table_id_t tableID;
-    std::unique_ptr<common::LogicalType> pkDataType;
     storage::PrimaryKeyIndex* pkIndex; // NULL if the PK data type is SERIAL.
     DataPos keyVectorPos;
     DataPos resultVectorPos;
 
-    IndexLookupInfo(common::table_id_t tableID, std::unique_ptr<common::LogicalType> pkDataType,
-        storage::PrimaryKeyIndex* pkIndex, const DataPos& keyVectorPos,
-        const DataPos& resultVectorPos)
-        : tableID{tableID}, pkDataType{std::move(pkDataType)}, pkIndex{pkIndex},
-          keyVectorPos{keyVectorPos}, resultVectorPos{resultVectorPos} {}
+    IndexLookupInfo(common::table_id_t tableID, storage::PrimaryKeyIndex* pkIndex,
+        const DataPos& keyVectorPos, const DataPos& resultVectorPos)
+        : tableID{tableID}, pkIndex{pkIndex}, keyVectorPos{keyVectorPos}, resultVectorPos{
+                                                                              resultVectorPos} {}
 
     inline std::unique_ptr<IndexLookupInfo> copy() {
-        return std::make_unique<IndexLookupInfo>(
-            tableID, pkDataType->copy(), pkIndex, keyVectorPos, resultVectorPos);
+        return std::make_unique<IndexLookupInfo>(tableID, pkIndex, keyVectorPos, resultVectorPos);
     }
 };
 

@@ -38,3 +38,14 @@
 -STATEMENT MATCH (c:Comment)-[r:replyOf]->(c2:Comment) RETURN SUM(r.propy);
 ---- 1
 108027
+
+-CASE SerialAddNodeProperty
+-STATEMENT create node table Person (ID SERIAL, fName StRING, gender INT64, isStudent BoOLEAN, isWorker BOOLEAN, age INT64, eyeSight DOUBLE, birthdate DATE, registerTime TIMESTAMP, lastJobDuration interval, workedHours INT64[], usedNames STRING[], courseScoresPerTerm INT64[][], grades INT64[4], height float, PRIMARY KEY (ID));
+---- ok
+-STATEMENT copy Person from '${KUZU_ROOT_DIRECTORY}/dataset/tinysnb-serial/vPerson.csv' (HeaDER=true, deLim=',');
+---- ok
+-STATEMENT alter table Person add propx int64 default 1;
+---- ok
+-STATEMENT MATCH (p:Person) RETURN SUM(p.propx);
+---- 1
+8

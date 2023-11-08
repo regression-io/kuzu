@@ -51,17 +51,12 @@ uint64_t NodeGroup::append(const std::vector<ValueVector*>& columnVectors,
     DataChunkState* columnState, uint64_t numValuesToAppend) {
     auto numValuesToAppendInChunk =
         std::min(numValuesToAppend, StorageConstants::NODE_GROUP_SIZE - numNodes);
-    auto serialSkip = 0u;
     auto originalSize = columnState->selVector->selectedSize;
     columnState->selVector->selectedSize = numValuesToAppendInChunk;
     for (auto i = 0u; i < chunks.size(); i++) {
         auto chunk = chunks[i].get();
-        if (chunk->getDataType().getLogicalTypeID() == common::LogicalTypeID::SERIAL) {
-            serialSkip++;
-            continue;
-        }
-        KU_ASSERT(chunk->getDataType() == columnVectors[i - serialSkip]->dataType);
-        chunk->append(columnVectors[i - serialSkip], numNodes);
+        KU_ASSERT(chunk->getDataType() == columnVectors[i]->dataType);
+        chunk->append(columnVectors[i], numNodes);
     }
     columnState->selVector->selectedSize = originalSize;
     numNodes += numValuesToAppendInChunk;

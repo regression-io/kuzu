@@ -179,6 +179,8 @@ public:
             transaction, reinterpret_cast<const uint8_t*>(key), result);
     }
 
+    inline common::LogicalTypeID getKeyDataTypeID() const { return keyDataTypeID; }
+
     inline void checkpointInMemory() {
         keyDataTypeID == common::LogicalTypeID::INT64 ? hashIndexForInt64->checkpointInMemory() :
                                                         hashIndexForString->checkpointInMemory();

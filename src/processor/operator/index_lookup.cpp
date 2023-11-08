@@ -1,7 +1,6 @@
 #include "processor/operator/index_lookup.h"
 
 #include "common/exception/message.h"
-#include "common/exception/not_implemented.h"
 #include "storage/index/hash_index.h"
 
 using namespace kuzu::common;
@@ -57,36 +56,40 @@ void IndexLookup::fillOffsetArraysFromVector(transaction::Transaction* transacti
     KU_ASSERT(resultVector->dataType.getPhysicalType() == PhysicalTypeID::INT64);
     auto offsets = (offset_t*)resultVector->getData();
     auto numKeys = keyVector->state->selVector->selectedSize;
-    switch (info.pkDataType->getLogicalTypeID()) {
-    case LogicalTypeID::INT64: {
-        for (auto i = 0u; i < numKeys; i++) {
-            auto pos = keyVector->state->selVector->selectedPositions[i];
-            auto key = keyVector->getValue<int64_t>(pos);
-            if (!info.pkIndex->lookup(transaction, key, offsets[i])) {
-                throw RuntimeException(ExceptionMessage::nonExistPKException(std::to_string(key)));
+    if (info.pkIndex) {
+        switch (info.pkIndex->getKeyDataTypeID()) {
+        case LogicalTypeID::INT64: {
+            for (auto i = 0u; i < numKeys; i++) {
+                auto pos = keyVector->state->selVector->selectedPositions[i];
+                auto key = keyVector->getValue<int64_t>(pos);
+                if (!info.pkIndex->lookup(transaction, key, offsets[i])) {
+                    throw RuntimeException(
+                        ExceptionMessage::nonExistPKException(std::to_string(key)));
+                }
             }
-        }
-    } break;
-    case LogicalTypeID::STRING: {
-        for (auto i = 0u; i < numKeys; i++) {
-            auto key =
-                keyVector->getValue<ku_string_t>(keyVector->state->selVector->selectedPositions[i]);
-            if (!info.pkIndex->lookup(transaction, key.getAsString().c_str(), offsets[i])) {
-                throw RuntimeException(ExceptionMessage::nonExistPKException(key.getAsString()));
+        } break;
+        case LogicalTypeID::STRING: {
+            for (auto i = 0u; i < numKeys; i++) {
+                auto key = keyVector->getValue<ku_string_t>(
+                    keyVector->state->selVector->selectedPositions[i]);
+                if (!info.pkIndex->lookup(transaction, key.getAsString().c_str(), offsets[i])) {
+                    throw RuntimeException(
+                        ExceptionMessage::nonExistPKException(key.getAsString()));
+                }
             }
+        } break;
+            // LCOV_EXCL_START
+        default: {
+            KU_UNREACHABLE;
         }
-    } break;
-    case LogicalTypeID::SERIAL: {
+            // LCOV_EXCL_STOP
+        }
+    } else {
+        // Serial key type.
         for (auto i = 0u; i < numKeys; i++) {
             auto pos = keyVector->state->selVector->selectedPositions[i];
             offsets[i] = keyVector->getValue<int64_t>(pos);
         }
-    } break;
-        // LCOV_EXCL_START
-    default: {
-        throw NotImplementedException("IndexLookup::fillOffsetArraysFromVector");
-    }
-        // LCOV_EXCL_STOP
     }
 }
 
