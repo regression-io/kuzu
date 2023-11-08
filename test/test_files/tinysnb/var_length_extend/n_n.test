@@ -14,6 +14,11 @@
 
 -CASE VarLengthExtendNNTests
 
+-LOG ZeroHop
+-STATEMENT MATCH p = (a:person)-[e:knows*0..0]->(b:person) RETURN p
+---- 1
+108
+
 -LOG KnowsThreeHopMinLenEqualsMaxLen
 -STATEMENT MATCH (a:person)-[e:knows*3..3]->(b:person) RETURN COUNT(*)
 ---- 1

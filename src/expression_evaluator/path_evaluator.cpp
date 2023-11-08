@@ -86,8 +86,8 @@ void PathExpressionEvaluator::evaluate() {
     auto selVector = resultVector->state->selVector;
     for (auto i = 0; i < selVector->selectedSize; ++i) {
         auto pos = selVector->selectedPositions[i];
-        copyNodes(pos);
-        copyRels(pos);
+        auto numRels = copyRels(pos);
+        copyNodes(pos, numRels == 0);
     }
 }
 
@@ -98,9 +98,14 @@ static inline uint32_t getCurrentPos(ValueVector* vector, uint32_t pos) {
     return pos;
 }
 
-void PathExpressionEvaluator::copyNodes(sel_t resultPos) {
+void PathExpressionEvaluator::copyNodes(sel_t resultPos, bool isEmptyRels) {
     auto listSize = 0u;
     // Calculate list size.
+    if (isEmptyRels) {
+        listSize = 1;
+        auto child = expression->getChild(0).get();
+        
+    }
     for (auto i = 0; i < expression->getNumChildren(); ++i) {
         auto child = expression->getChild(i).get();
         switch (child->dataType.getLogicalTypeID()) {
@@ -143,7 +148,7 @@ void PathExpressionEvaluator::copyNodes(sel_t resultPos) {
     }
 }
 
-void PathExpressionEvaluator::copyRels(sel_t resultPos) {
+uint64_t PathExpressionEvaluator::copyRels(sel_t resultPos) {
     auto listSize = 0u;
     // Calculate list size.
     for (auto i = 0; i < expression->getNumChildren(); ++i) {
@@ -186,6 +191,7 @@ void PathExpressionEvaluator::copyRels(sel_t resultPos) {
             break;
         }
     }
+    return listSize;
 }
 
 void PathExpressionEvaluator::copyFieldVectors(offset_t inputVectorPos,
