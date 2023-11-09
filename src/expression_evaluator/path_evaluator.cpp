@@ -101,11 +101,6 @@ static inline uint32_t getCurrentPos(ValueVector* vector, uint32_t pos) {
 void PathExpressionEvaluator::copyNodes(sel_t resultPos, bool isEmptyRels) {
     auto listSize = 0u;
     // Calculate list size.
-    if (isEmptyRels) {
-        listSize = 1;
-        auto child = expression->getChild(0).get();
-        
-    }
     for (auto i = 0; i < expression->getNumChildren(); ++i) {
         auto child = expression->getChild(i).get();
         switch (child->dataType.getLogicalTypeID()) {
@@ -121,12 +116,16 @@ void PathExpressionEvaluator::copyNodes(sel_t resultPos, bool isEmptyRels) {
             break;
         }
     }
+    if (isEmptyRels) {
+        listSize = 1;
+    }
     // Add list entry.
     auto entry = ListVector::addList(resultNodesVector, listSize);
     resultNodesVector->setValue(resultPos, entry);
     // Copy field vectors
     offset_t resultDataPos = entry.offset;
-    for (auto i = 0; i < expression->getNumChildren(); ++i) {
+    auto numChildrenToCopy = isEmptyRels ? 1 : expression->getNumChildren();
+    for (auto i = 0; i < numChildrenToCopy; ++i) {
         auto child = expression->getChild(i).get();
         auto vectors = inputVectorsPerChild[i].get();
         auto inputPos = getCurrentPos(vectors->input, resultPos);

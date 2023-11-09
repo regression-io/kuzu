@@ -94,6 +94,8 @@ private:
     void writePathToVector(RecursiveJoinVectors* vectors, common::sel_t& vectorPos,
         common::sel_t& nodeIDDataVectorPos, common::sel_t& relIDDataVectorPos);
 
+     bool containsRelID(common::relID_t relID) const;
+
 private:
     // DFS states
     std::vector<common::nodeID_t> nodeIDs;
