@@ -37,7 +37,6 @@ void StringColumn::scanOffsets(Transaction* transaction, const ReadState& state,
 void StringColumn::scanValueToVector(Transaction* transaction, const ReadState& dataState,
     string_offset_t startOffset, string_offset_t endOffset, ValueVector* resultVector,
     uint64_t offsetInVector) {
-    // TODO: don't scan the same string multiple times when values are duplicated
     KU_ASSERT(endOffset >= startOffset);
     // Add string to vector first and read directly into the vector
     auto& kuString =
@@ -126,14 +125,33 @@ void StringColumn::scanUnfiltered(transaction::Transaction* transaction,
     auto dataState = dataColumn->getReadState(transaction->getType(), nodeGroupIdx);
     BaseColumn::scan(
         transaction, indexState, startOffsetInGroup, endOffsetInGroup, (uint8_t*)indices.get());
+    std::unordered_map<string_index_t, const ku_string_t&> valuesScanned;
+    // TODO: We can probably calculate some duplication threshold for caching results
+    // But this covers the worst case.
+    // Note that there could be more values in the dictionary than there are indices as a result
+    // of in-place updates. In this case we can't tell how much duplication there is,
+    // but there probably isn't very much.
+    // Note that if compression was disabled when the chunk was first written, this will be false
+    bool hasDuplication = indexState.metadata.numValues > offsetState.metadata.numValues;
     for (auto i = 0u; i < numValuesToRead; i++) {
         if (resultVector->isNull(startPosInVector + i)) {
             continue;
         }
-        string_offset_t offsets[2];
-        scanOffsets(transaction, offsetState, offsets, indices[i], dataState.metadata.numValues);
-        scanValueToVector(
-            transaction, dataState, offsets[0], offsets[1], resultVector, startPosInVector + i);
+        auto result = valuesScanned.end();
+        if (hasDuplication && enableCompression) {
+            result = valuesScanned.find(indices[i]);
+        }
+        if (result != valuesScanned.end()) {
+            resultVector->setValue<ku_string_t>(startPosInVector + i, result->second);
+        } else {
+            string_offset_t offsets[2];
+            scanOffsets(
+                transaction, offsetState, offsets, indices[i], dataState.metadata.numValues);
+            scanValueToVector(
+                transaction, dataState, offsets[0], offsets[1], resultVector, startPosInVector + i);
+            valuesScanned.emplace(
+                indices[i], resultVector->getValue<ku_string_t>(startPosInVector + i));
+        }
     }
 }
 
@@ -144,6 +162,8 @@ void StringColumn::scanFiltered(transaction::Transaction* transaction,
     auto indexState = getReadState(transaction->getType(), nodeGroupIdx);
     auto offsetState = offsetColumn->getReadState(transaction->getType(), nodeGroupIdx);
     auto dataState = dataColumn->getReadState(transaction->getType(), nodeGroupIdx);
+    std::unordered_map<string_index_t, const ku_string_t&> valuesScanned;
+    bool hasDuplication = indexState.metadata.numValues > offsetState.metadata.numValues;
     for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; i++) {
         auto pos = nodeIDVector->state->selVector->selectedPositions[i];
         if (resultVector->isNull(pos)) {
@@ -154,9 +174,18 @@ void StringColumn::scanFiltered(transaction::Transaction* transaction,
         string_index_t index;
         BaseColumn::scan(
             transaction, indexState, offsetInGroup, offsetInGroup + 1, (uint8_t*)&index);
-        string_offset_t offsets[2];
-        scanOffsets(transaction, offsetState, offsets, index, dataState.metadata.numValues);
-        scanValueToVector(transaction, dataState, offsets[0], offsets[1], resultVector, pos);
+        auto result = valuesScanned.end();
+        if (hasDuplication) {
+            result = valuesScanned.find(index);
+        }
+        if (result != valuesScanned.end()) {
+            resultVector->setValue<ku_string_t>(pos, result->second);
+        } else {
+            string_offset_t offsets[2];
+            scanOffsets(transaction, offsetState, offsets, index, dataState.metadata.numValues);
+            scanValueToVector(transaction, dataState, offsets[0], offsets[1], resultVector, pos);
+            valuesScanned.emplace(index, resultVector->getValue<ku_string_t>(pos));
+        }
     }
 }
 
@@ -169,20 +198,31 @@ void StringColumn::lookupInternal(
     auto indexState = getReadState(transaction->getType(), nodeGroupIdx);
     auto offsetState = offsetColumn->getReadState(transaction->getType(), nodeGroupIdx);
     auto dataState = dataColumn->getReadState(transaction->getType(), nodeGroupIdx);
+    std::unordered_map<string_index_t, const ku_string_t&> valuesScanned;
+    bool hasDuplication = indexState.metadata.numValues <= offsetState.metadata.numValues;
     for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; i++) {
         auto pos = resultVector->state->selVector->selectedPositions[i];
         if (resultVector->isNull(pos)) {
             // Ignore positions which were scanned as null
             continue;
         }
-        string_offset_t offsets[2];
         auto offsetInGroup =
             startNodeOffset - StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx) + pos;
         string_index_t index;
         BaseColumn::scan(
             transaction, indexState, offsetInGroup, offsetInGroup + 1, (uint8_t*)&index);
-        scanOffsets(transaction, offsetState, offsets, index, dataState.metadata.numValues);
-        scanValueToVector(transaction, dataState, offsets[0], offsets[1], resultVector, pos);
+        auto result = valuesScanned.end();
+        if (hasDuplication) {
+            result = valuesScanned.find(index);
+        }
+        if (result != valuesScanned.end()) {
+            resultVector->setValue<ku_string_t>(pos, result->second);
+        } else {
+            string_offset_t offsets[2];
+            scanOffsets(transaction, offsetState, offsets, index, dataState.metadata.numValues);
+            scanValueToVector(transaction, dataState, offsets[0], offsets[1], resultVector, pos);
+            valuesScanned.emplace(index, resultVector->getValue<ku_string_t>(pos));
+        }
     }
 }
 
