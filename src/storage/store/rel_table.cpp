@@ -56,14 +56,16 @@ void RelTable::addColumn(
         *relsStats->getPropertyMetadataDAHInfo(
             transaction, tableID, bwdRelTableData->getNumColumns(), RelDataDirection::BWD),
         property, defaultValueVector, relsStats);
+    // TODO(Guodong): addColumn is not going through localStorage design for now. So it needs to add
+    // tableID into the wal's updated table set separately, as it won't trigger prepareCommit.
     wal->addToUpdatedTables(tableID);
 }
 
-void RelTable::prepareCommit() {
-    // DO NOTHING
+void RelTable::prepareCommit(LocalTable* localTable) {
+    wal->addToUpdatedTables(tableID);
 }
 
-void RelTable::prepareRollback() {
+void RelTable::prepareRollback(LocalTable* localTable) {
     // DO NOTHING
 }
 

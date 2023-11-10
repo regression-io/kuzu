@@ -44,9 +44,8 @@ void WALReplayer::replay() {
             replayWALRecord(walRecord);
         }
     }
-
     // We next perform an in-memory checkpointing or rolling back of node/relTables.
-    if (!wal->updatedTables.empty()) {
+    if (!wal->getUpdatedTables().empty()) {
         if (isCheckpoint) {
             storageManager->checkpointInMemory();
         } else {

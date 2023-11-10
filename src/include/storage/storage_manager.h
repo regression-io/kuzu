@@ -21,8 +21,8 @@ public:
         common::table_id_t tableID, BufferManager* bufferManager, catalog::Catalog* catalog);
     void dropTable(common::table_id_t tableID);
 
-    void prepareCommit();
-    void prepareRollback();
+    void prepareCommit(transaction::Transaction* transaction);
+    void prepareRollback(transaction::Transaction* transaction);
     void checkpointInMemory();
     void rollbackInMemory();
 

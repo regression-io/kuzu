@@ -8,10 +8,14 @@
 namespace kuzu {
 namespace storage {
 
+class LocalTable;
+
 class Table {
 public:
     Table(catalog::TableSchema* tableSchema, TablesStatistics* tablesStatistics,
-        BufferManager& bufferManager, WAL* wal);
+        BufferManager& bufferManager, WAL* wal)
+        : tableType{tableSchema->tableType}, tablesStatistics{tablesStatistics},
+          tableID{tableSchema->tableID}, bufferManager{bufferManager}, wal{wal} {}
     virtual ~Table() = default;
 
     inline common::TableType getTableType() const { return tableType; }
@@ -25,8 +29,8 @@ public:
         common::ValueVector* defaultValueVector) = 0;
     virtual void dropColumn(common::column_id_t columnID) = 0;
 
-    virtual void prepareCommit() = 0;
-    virtual void prepareRollback() = 0;
+    virtual void prepareCommit(LocalTable* localTable) = 0;
+    virtual void prepareRollback(LocalTable* localTable) = 0;
     virtual void checkpointInMemory() = 0;
     virtual void rollbackInMemory() = 0;
 

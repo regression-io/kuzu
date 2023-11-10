@@ -92,7 +92,13 @@ void StorageManager::dropTable(table_id_t tableID) {
     tables.erase(tableID);
 }
 
-void StorageManager::prepareCommit() {
+void StorageManager::prepareCommit(transaction::Transaction* transaction) {
+    auto localStorage = transaction->getLocalStorage();
+    auto tablesToUpdate = localStorage->getTablesToUpdate();
+    for (auto tableID : tablesToUpdate) {
+        KU_ASSERT(tables.contains(tableID));
+        tables.at(tableID)->prepareCommit(localStorage->getLocalTable(tableID));
+    }
     if (nodesStatisticsAndDeletedIDs->hasUpdates()) {
         wal->logTableStatisticsRecord(true /* isNodeTable */);
         nodesStatisticsAndDeletedIDs->writeTablesStatisticsFileForWALRecord(wal->getDirectory());
@@ -101,32 +107,32 @@ void StorageManager::prepareCommit() {
         wal->logTableStatisticsRecord(false /* isNodeTable */);
         relsStatistics->writeTablesStatisticsFileForWALRecord(wal->getDirectory());
     }
-    for (auto& [_, table] : tables) {
-        table->prepareCommit();
-    }
 }
 
-void StorageManager::prepareRollback() {
+void StorageManager::prepareRollback(transaction::Transaction* transaction) {
     if (nodesStatisticsAndDeletedIDs->hasUpdates()) {
         wal->logTableStatisticsRecord(true /* isNodeTable */);
     }
     if (relsStatistics->hasUpdates()) {
         wal->logTableStatisticsRecord(false /* isNodeTable */);
     }
-    for (auto& [_, table] : tables) {
-        table->prepareRollback();
+    auto localStorage = transaction->getLocalStorage();
+    auto tablesToUpdate = localStorage->getTablesToUpdate();
+    for (auto tableID : tablesToUpdate) {
+        KU_ASSERT(tables.contains(tableID));
+        tables.at(tableID)->prepareRollback(localStorage->getLocalTable(tableID));
     }
 }
 
 void StorageManager::checkpointInMemory() {
-    for (auto tableID : wal->updatedTables) {
+    for (auto tableID : wal->getUpdatedTables()) {
         KU_ASSERT(tables.contains(tableID));
         tables.at(tableID)->checkpointInMemory();
     }
 }
 
 void StorageManager::rollbackInMemory() {
-    for (auto tableID : wal->updatedTables) {
+    for (auto tableID : wal->getUpdatedTables()) {
         KU_ASSERT(tables.contains(tableID));
         tables.at(tableID)->rollbackInMemory();
     }

@@ -1,6 +1,7 @@
 #include "storage/store/rel_table_data.h"
 
 #include "common/assert.h"
+#include "common/exception/not_implemented.h"
 #include "storage/stats/rels_store_statistics.h"
 
 using namespace kuzu::catalog;
@@ -171,6 +172,10 @@ void RelTableData::append(NodeGroup* nodeGroup) {
         columns[columnID]->append(
             nodeGroup->getColumnChunk(columnID + 1), nodeGroup->getNodeGroupIdx());
     }
+}
+
+void RelTableData::prepareLocalTableToCommit(LocalTable* localTable) {
+    throw NotImplementedException("RelTableData::prepareLocalTableToCommit");
 }
 
 void RelTableData::checkpointInMemory() {

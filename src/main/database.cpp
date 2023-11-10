@@ -71,8 +71,8 @@ Database::Database(std::string databasePath, SystemConfig systemConfig)
     catalog = std::make_unique<catalog::Catalog>(wal.get());
     storageManager = std::make_unique<storage::StorageManager>(systemConfig.accessMode, *catalog,
         *memoryManager, wal.get(), systemConfig.enableCompression);
-    transactionManager = std::make_unique<transaction::TransactionManager>(
-        *wal, storageManager.get(), memoryManager.get());
+    transactionManager =
+        std::make_unique<transaction::TransactionManager>(*wal, memoryManager.get());
 }
 
 Database::~Database() {
@@ -150,8 +150,7 @@ void Database::commit(Transaction* transaction, bool skipCheckpointForTestingRec
     }
     KU_ASSERT(transaction->isWriteTransaction());
     catalog->prepareCommitOrRollback(TransactionAction::COMMIT);
-    transaction->getLocalStorage()->prepareCommit();
-    storageManager->prepareCommit();
+    storageManager->prepareCommit(transaction);
     // Note: It is enough to stop and wait transactions to leave the system instead of
     // for example checking on the query processor's task scheduler. This is because the
     // first and last steps that a connection performs when executing a query is to
@@ -181,7 +180,7 @@ void Database::rollback(
     }
     KU_ASSERT(transaction->isWriteTransaction());
     catalog->prepareCommitOrRollback(TransactionAction::ROLLBACK);
-    storageManager->prepareRollback();
+    storageManager->prepareRollback(transaction);
     if (skipCheckpointForTestingRecovery) {
         wal->flushAllPages();
         return;

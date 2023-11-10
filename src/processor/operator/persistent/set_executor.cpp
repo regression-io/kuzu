@@ -1,5 +1,7 @@
 #include "processor/operator/persistent/set_executor.h"
 
+#include "storage/store/table_data.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {
@@ -48,41 +50,45 @@ void SingleLabelNodeSetExecutor::set(ExecutionContext* context) {
         return;
     }
     evaluator->evaluate();
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1);
+    auto lhsPos = nodeIDVector->state->selVector->selectedPositions[0];
+    auto rhsPos = rhsVector->state->selVector->selectedPositions[0];
+    if (setInfo.columnID == setInfo.table->getPKColumnID() && setInfo.table->getPKIndex()) {
+        auto pkVector = std::make_unique<ValueVector>(rhsVector->dataType, context->memoryManager);
+        pkVector->state = rhsVector->state;
+        auto readState = std::make_unique<storage::TableReadState>();
+        setInfo.table->initializeReadState(context->clientContext->getActiveTransaction(),
+            {setInfo.columnID}, nodeIDVector, readState.get());
+        setInfo.table->read(context->clientContext->getActiveTransaction(), *readState,
+            nodeIDVector, {pkVector.get()});
+        setInfo.table->getPKIndex()->delete_(pkVector.get());
+    }
     setInfo.table->update(
         context->clientContext->getActiveTransaction(), setInfo.columnID, nodeIDVector, rhsVector);
-    for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; ++i) {
-        auto lhsPos = nodeIDVector->state->selVector->selectedPositions[i];
-        auto rhsPos = lhsPos;
-        if (rhsVector->state->selVector->selectedSize == 1) {
-            rhsPos = rhsVector->state->selVector->selectedPositions[0];
-        }
-        if (lhsVector != nullptr) {
-            writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
-        }
+    if (lhsVector != nullptr) {
+        writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
     }
 }
 
 void MultiLabelNodeSetExecutor::set(ExecutionContext* context) {
     evaluator->evaluate();
-    for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; ++i) {
-        auto lhsPos = nodeIDVector->state->selVector->selectedPositions[i];
-        auto& nodeID = nodeIDVector->getValue<internalID_t>(lhsPos);
-        if (!tableIDToSetInfo.contains(nodeID.tableID)) {
-            if (lhsVector != nullptr) {
-                lhsVector->setNull(lhsPos, true);
-            }
-            continue;
-        }
-        auto rhsPos = lhsPos;
-        if (rhsVector->state->selVector->selectedSize == 1) {
-            rhsPos = rhsVector->state->selVector->selectedPositions[0];
-        }
-        auto& setInfo = tableIDToSetInfo.at(nodeID.tableID);
-        setInfo.table->update(context->clientContext->getActiveTransaction(), setInfo.columnID,
-            nodeID.offset, rhsVector, rhsPos);
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1 &&
+              rhsVector->state->selVector->selectedSize == 1);
+    auto lhsPos = nodeIDVector->state->selVector->selectedPositions[0];
+    auto& nodeID = nodeIDVector->getValue<internalID_t>(lhsPos);
+    if (!tableIDToSetInfo.contains(nodeID.tableID)) {
         if (lhsVector != nullptr) {
-            writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
+            lhsVector->setNull(lhsPos, true);
         }
+        return;
+    }
+    auto rhsPos = rhsVector->state->selVector->selectedPositions[0];
+    auto& setInfo = tableIDToSetInfo.at(nodeID.tableID);
+    setInfo.table->update(
+        context->clientContext->getActiveTransaction(), setInfo.columnID, nodeIDVector, rhsVector);
+    if (lhsVector != nullptr) {
+        KU_ASSERT(lhsVector->state->selVector->selectedSize == 1);
+        writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
     }
 }
 
