@@ -60,6 +60,19 @@ void NodeTable::insert(Transaction* transaction, ValueVector* nodeIDVector,
     wal->addToUpdatedTables(tableID);
 }
 
+void NodeTable::update(Transaction* transaction, column_id_t columnID, ValueVector* nodeIDVector,
+    ValueVector* propertyVector) {
+    // NOTE: We assume all input all flatten now. This is to simplify the implementation.
+    // We should optimize this to take unflat input later.
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1 &&
+              propertyVector->state->selVector->selectedSize == 1);
+    if (columnID == pkColumnID && pkIndex) {
+        insertPK(nodeIDVector, propertyVector);
+    }
+    tableData->update(transaction, columnID, nodeIDVector, propertyVector);
+    wal->addToUpdatedTables(tableID);
+}
+
 void NodeTable::delete_(
     Transaction* transaction, ValueVector* nodeIDVector, ValueVector* pkVector) {
     auto readState = std::make_unique<TableReadState>();

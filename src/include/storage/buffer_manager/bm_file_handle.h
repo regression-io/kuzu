@@ -57,7 +57,7 @@ public:
     }
     inline void unlock() {
         // TODO(Keenan / Guodong): Track down this rare bug and re-enable the assert. Ref #2289.
-        // KU_ASSERT(getState(stateAndVersion.load()) == LOCKED);
+         KU_ASSERT(getState(stateAndVersion.load()) == LOCKED);
         stateAndVersion.store(updateStateAndIncrementVersion(stateAndVersion.load(), UNLOCKED),
             std::memory_order_release);
     }

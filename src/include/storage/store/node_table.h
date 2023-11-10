@@ -47,15 +47,8 @@ public:
 
     void insert(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         const std::vector<common::ValueVector*>& propertyVectors);
-    inline void update(transaction::Transaction* transaction, common::column_id_t columnID,
-        common::ValueVector* nodeIDVector, common::ValueVector* propertyVector) {
-        tableData->update(transaction, columnID, nodeIDVector, propertyVector);
-    }
-    inline void update(transaction::Transaction* transaction, common::column_id_t columnID,
-        common::offset_t nodeOffset, common::ValueVector* propertyVector,
-        common::sel_t posInPropertyVector) const {
-        tableData->update(transaction, columnID, nodeOffset, propertyVector, posInPropertyVector);
-    }
+    void update(transaction::Transaction* transaction, common::column_id_t columnID,
+        common::ValueVector* nodeIDVector, common::ValueVector* propertyVector);
     void delete_(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         common::ValueVector* pkVector);
     inline void append(NodeGroup* nodeGroup) { tableData->append(nodeGroup); }

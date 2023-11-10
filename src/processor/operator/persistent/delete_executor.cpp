@@ -18,6 +18,7 @@ void SingleLabelNodeDeleteExecutor::init(ResultSet* resultSet, ExecutionContext*
 }
 
 void SingleLabelNodeDeleteExecutor::delete_(ExecutionContext* context) {
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1);
     table->delete_(context->clientContext->getActiveTransaction(), nodeIDVector, pkVector.get());
 }
 

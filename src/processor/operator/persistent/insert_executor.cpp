@@ -48,11 +48,8 @@ void NodeInsertExecutor::insert(transaction::Transaction* transaction) {
     for (auto& evaluator : propertyRhsEvaluators) {
         evaluator->evaluate();
     }
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1);
     table->insert(transaction, nodeIDVector, propertyRhsVectors);
-    for (auto& relTable : relTablesToInit) {
-        // TODO(Guodong): Fix insert.
-        //        relTable->initEmptyRelsForNewNode(nodeIDVector);
-    }
     for (auto i = 0u; i < propertyLhsVectors.size(); ++i) {
         auto lhsVector = propertyLhsVectors[i];
         auto rhsVector = propertyRhsVectors[i];

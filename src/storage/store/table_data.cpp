@@ -33,12 +33,6 @@ void TableData::update(transaction::Transaction* transaction, column_id_t column
     transaction->getLocalStorage()->update(tableID, columnID, nodeIDVector, propertyVector);
 }
 
-void TableData::update(transaction::Transaction* transaction, column_id_t columnID,
-    offset_t nodeOffset, ValueVector* propertyVector, sel_t posInPropertyVector) const {
-    transaction->getLocalStorage()->update(
-        tableID, columnID, nodeOffset, propertyVector, posInPropertyVector);
-}
-
 void TableData::addColumn(Transaction* transaction, InMemDiskArray<ColumnChunkMetadata>* metadataDA,
     const MetadataDAHInfo& metadataDAHInfo, const catalog::Property& property,
     ValueVector* defaultValueVector, TablesStatistics* tablesStats) {

@@ -30,6 +30,12 @@ NodeTableData::NodeTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH, tab
 void NodeTableData::scan(transaction::Transaction* transaction, TableReadState& readState,
     ValueVector* nodeIDVector, const std::vector<ValueVector*>& outputVectors) {
     KU_ASSERT(readState.columnIDs.size() == outputVectors.size() && !nodeIDVector->state->isFlat());
+    // TODO(Guodong): Here is the bug: when nodeIDVector contains node offsets larger than
+    // maxNodeOffset, when it scans a column, it can trigger undefined behaviour, which might lead
+    // to seg-fault. We need to fix this by checking the node offsets in nodeIDVector, and pass an
+    // extra SelVector if necessary, which is to record which pos in nodeIDVector should be read.
+    // Inside the scan function, we need to check the SelVector and slice it over the nodeIDVector's
+    // own selVector.
     for (auto i = 0u; i < readState.columnIDs.size(); i++) {
         if (readState.columnIDs[i] == INVALID_COLUMN_ID) {
             outputVectors[i]->setAllNull();

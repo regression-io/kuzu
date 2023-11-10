@@ -27,9 +27,6 @@ public:
         const std::vector<common::ValueVector*>& propertyVectors);
     void update(transaction::Transaction* transaction, common::column_id_t columnID,
         common::ValueVector* nodeIDVector, common::ValueVector* propertyVector);
-    void update(transaction::Transaction* transaction, common::column_id_t columnID,
-        common::offset_t nodeOffset, common::ValueVector* propertyVector,
-        common::sel_t posInPropertyVector) const;
 
     virtual void append(NodeGroup* nodeGroup) = 0;
 

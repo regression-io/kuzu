@@ -48,22 +48,30 @@ void SingleLabelNodeSetExecutor::set(ExecutionContext* context) {
         return;
     }
     evaluator->evaluate();
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1 &&
+              nodeIDVector->state == lhsVector->state);
+    if (setInfo.columnID == setInfo.table->getPKColumnID() && setInfo.table->getPKIndex()) {
+        auto pkVector = std::make_unique<ValueVector>(rhsVector->dataType, context->memoryManager);
+        pkVector->state = rhsVector->state;
+        auto readState = std::make_unique<storage::TableReadState>();
+        setInfo.table->initializeReadState(context->clientContext->getActiveTransaction(),
+            {setInfo.columnID}, nodeIDVector, readState.get());
+        setInfo.table->read(context->clientContext->getActiveTransaction(), *readState,
+            nodeIDVector, {pkVector.get()});
+        setInfo.table->getPKIndex()->delete_(pkVector.get());
+    }
     setInfo.table->update(
         context->clientContext->getActiveTransaction(), setInfo.columnID, nodeIDVector, rhsVector);
-    for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; ++i) {
-        auto lhsPos = nodeIDVector->state->selVector->selectedPositions[i];
-        auto rhsPos = lhsPos;
-        if (rhsVector->state->selVector->selectedSize == 1) {
-            rhsPos = rhsVector->state->selVector->selectedPositions[0];
-        }
-        if (lhsVector != nullptr) {
-            writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
-        }
+    auto lhsPos = nodeIDVector->state->selVector->selectedPositions[0];
+    auto rhsPos = rhsVector->state->selVector->selectedPositions[0];
+    if (lhsVector != nullptr) {
+        writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
     }
 }
 
 void MultiLabelNodeSetExecutor::set(ExecutionContext* context) {
     evaluator->evaluate();
+    KU_ASSERT(nodeIDVector->state->selVector->selectedSize == 1);
     for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; ++i) {
         auto lhsPos = nodeIDVector->state->selVector->selectedPositions[i];
         auto& nodeID = nodeIDVector->getValue<internalID_t>(lhsPos);
@@ -78,8 +86,9 @@ void MultiLabelNodeSetExecutor::set(ExecutionContext* context) {
             rhsPos = rhsVector->state->selVector->selectedPositions[0];
         }
         auto& setInfo = tableIDToSetInfo.at(nodeID.tableID);
+        // TODO(Guodong): Fix multi-label one too.
         setInfo.table->update(context->clientContext->getActiveTransaction(), setInfo.columnID,
-            nodeID.offset, rhsVector, rhsPos);
+            nodeIDVector, rhsVector);
         if (lhsVector != nullptr) {
             writeToPropertyVector(nodeIDVector, lhsVector, lhsPos, rhsVector, rhsPos);
         }

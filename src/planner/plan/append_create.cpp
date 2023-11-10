@@ -33,6 +33,7 @@ void QueryPlanner::appendInsertNode(
     auto insertNode =
         std::make_shared<LogicalInsertNode>(std::move(logicalInfos), plan.getLastOperator());
     appendFlattens(insertNode->getGroupsPosToFlatten(), plan);
+    // TODO(Xiyang): Is the below line necessary?
     insertNode->setChild(0, plan.getLastOperator());
     insertNode->computeFactorizedSchema();
     plan.setLastOperator(insertNode);
@@ -48,6 +49,7 @@ void QueryPlanner::appendInsertRel(
     auto insertRel =
         std::make_shared<LogicalInsertRel>(std::move(logicalInfos), plan.getLastOperator());
     appendFlattens(insertRel->getGroupsPosToFlatten(), plan);
+    // TODO(Xiyang): Is the below line necessary?
     insertRel->setChild(0, plan.getLastOperator());
     insertRel->computeFactorizedSchema();
     plan.setLastOperator(insertRel);

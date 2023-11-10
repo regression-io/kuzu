@@ -14,6 +14,7 @@ void QueryPlanner::appendDeleteNode(
         nodes.push_back(std::static_pointer_cast<NodeExpression>(boundInfo->nodeOrRel));
     }
     auto deleteNode = std::make_shared<LogicalDeleteNode>(std::move(nodes), plan.getLastOperator());
+    appendFlattens(deleteNode->getGroupsPosToFlatten(), plan);
     deleteNode->computeFactorizedSchema();
     plan.setLastOperator(std::move(deleteNode));
 }
@@ -28,6 +29,7 @@ void QueryPlanner::appendDeleteRel(
     auto deleteRel = std::make_shared<LogicalDeleteRel>(rels, plan.getLastOperator());
     for (auto i = 0u; i < boundInfos.size(); ++i) {
         appendFlattens(deleteRel->getGroupsPosToFlatten(i), plan);
+        // TODO(Xiyang): Is the below line needed? Seems unnecessary.
         deleteRel->setChild(0, plan.getLastOperator());
     }
     deleteRel->computeFactorizedSchema();
