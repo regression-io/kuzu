@@ -952,7 +952,7 @@ TEST_F(CApiValueTest, RelValGetProperty) {
     auto rel = kuzu_flat_tuple_get_value(flatTuple, 0);
     ASSERT_TRUE(rel->_is_owned_by_cpp);
     auto propertiesSize = kuzu_rel_val_get_property_size(rel);
-    ASSERT_EQ(propertiesSize, 3);
+    ASSERT_EQ(propertiesSize, 4);
 
     auto propertyName = kuzu_rel_val_get_property_name_at(rel, 0);
     ASSERT_STREQ(propertyName, "year");
@@ -962,6 +962,9 @@ TEST_F(CApiValueTest, RelValGetProperty) {
     free(propertyName);
     propertyName = kuzu_rel_val_get_property_name_at(rel, 2);
     ASSERT_STREQ(propertyName, "rating");
+    free(propertyName);
+    propertyName = kuzu_rel_val_get_property_name_at(rel, 2);
+    ASSERT_STREQ(propertyName, "experiences");
     free(propertyName);
 
     auto propertyValue = kuzu_rel_val_get_property_value_at(rel, 0);

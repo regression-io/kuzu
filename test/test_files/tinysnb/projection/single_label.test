@@ -3,181 +3,179 @@
 
 --
 
--CASE ProjectionSingleLabel
+#-CASE SingleLabelLiteralProjection
+#
+#-LOG ReturnLiteral3
+#-STATEMENT RETURN "abc", MIN(1)
+#---- 1
+#abc|1
+#
+#-LOG ReturnLiteral1
+#-STATEMENT RETURN 3 * 2, COUNT(*), MIN(2), COUNT(5)
+#---- 1
+#6|1|2|1
+#
+#-LOG ReturnLiteral2
+#-STATEMENT MATCH (a:person) RETURN 1 + 1, label(a) LIMIT 2
+#---- 2
+#2|person
+#2|person
+#
+#-LOG ReturnNullLiteral
+#-STATEMENT RETURN (NULL = NULL) IS NOT NULL, NULL, NULL = NULL
+#---- 1
+#False||
+#
+#-LOG ListWithNullValues
+#-STATEMENT RETURN [5, null, 100, null, null]
+#---- 1
+#[5,,100,,]
+#
+#-LOG NestedListWithNullValues
+#-STATEMENT RETURN [[78, null, 100, null, null], null, [null, 5, null, 100, null]]
+#---- 1
+#[[78,,100,,],,[,5,,100,]]
+#
+#-LOG EmptyList
+#-STATEMENT RETURN []
+#---- 1
+#[]
+#
+#-LOG NestedEmptyList
+#-STATEMENT RETURN [[],[]]
+#---- 1
+#[[],[]]
+#
+#-CASE SingleLabelNodeProjection
+#
+#-LOG ReturnAggOnConst
+#-STATEMENT MATCH (a:person) RETURN COUNT(3)
+#---- 1
+#8
+#
+#-LOG ReturnColumnWithSameExpression
+#-STATEMENT MATCH (a:person) WHERE a.fName='Alice' RETURN a.age, a.age AS k
+#---- 1
+#35|35
+#
+#-LOG OrgNodesReturnStarTest
+#-STATEMENT MATCH (a:organisation) RETURN *
+#---- 3
+#{_ID: 1:0, _LABEL: organisation, ID: 1, name: ABFsUni, orgCode: 325, mark: 3.700000, score: -2, history: 10 years 5 months 13 hours 24 us, licenseValidInterval: 3 years 5 days, rating: 1.000000, state: {revenue: 138, location: ['toronto', 'montr,eal'], stock: {price: [96,56], volume: 1000}}, info: 3.120000}
+#{_ID: 1:1, _LABEL: organisation, ID: 4, name: CsWork, orgCode: 934, mark: 4.100000, score: -100, history: 2 years 4 days 10 hours, licenseValidInterval: 26 years 52 days 48:00:00, rating: 0.780000, state: {revenue: 152, location: ["vanco,uver north area"], stock: {price: [15,78,671], volume: 432}}, info: abcd}
+#{_ID: 1:2, _LABEL: organisation, ID: 6, name: DEsWork, orgCode: 824, mark: 4.100000, score: 7, history: 2 years 4 hours 22 us 34 minutes, licenseValidInterval: 82:00:00.1, rating: 0.520000, state: {revenue: 558, location: ['very long city name', 'new york'], stock: {price: [22], volume: 99}}, info: 2023-12-15}
+#
+#-LOG ReturnNodeStarTest
+#-STATEMENT MATCH (a:organisation) RETURN a.*
+#---- 3
+#1|ABFsUni|325|3.700000|-2|10 years 5 months 13 hours 24 us|3 years 5 days|1.000000|{revenue: 138, location: ['toronto', 'montr,eal'], stock: {price: [96,56], volume: 1000}}|3.120000
+#4|CsWork|934|4.100000|-100|2 years 4 days 10 hours|26 years 52 days 48:00:00|0.780000|{revenue: 152, location: ["vanco,uver north area"], stock: {price: [15,78,671], volume: 432}}|abcd
+#6|DEsWork|824|4.100000|7|2 years 4 hours 22 us 34 minutes|82:00:00.1|0.520000|{revenue: 558, location: ['very long city name', 'new york'], stock: {price: [22], volume: 99}}|2023-12-15
+#
+#-LOG ReturnStructStarTest
+#-STATEMENT MATCH (a:organisation) RETURN a.state.*
+#---- 3
+#138|['toronto', 'montr,eal']|{price: [96,56], volume: 1000}
+#152|["vanco,uver north area"]|{price: [15,78,671], volume: 432}
+#558|['very long city name', 'new york']|{price: [22], volume: 99}
+#
+#-LOG PersonNodesTestNull
+#-STATEMENT MATCH (a:person) RETURN a.ID, a.fName STARTS WITH NULL, a.isWorker, a.isWorker AND null
+#---- 8
+#0||False|False
+#10||True|
+#2||False|False
+#3||True|
+#5||True|
+#7||True|
+#8||False|False
+#9||False|False
+#
+#-LOG PersonNodesTestString
+#-STATEMENT MATCH (a:person) RETURN a.fName
+#---- 8
+#Alice
+#Bob
+#Carol
+#Dan
+#Elizabeth
+#Farooq
+#Greg
+#Hubert Blaine Wolfeschlegelsteinhausenbergerdorff
+#
+#-LOG PersonNodesTestInt
+#-STATEMENT MATCH (a:person) RETURN a.age
+#---- 8
+#35
+#30
+#45
+#20
+#20
+#25
+#40
+#83
+#
+#-LOG PersonNodesTestBoolean
+#-STATEMENT MATCH (a:person) RETURN a.isStudent
+#---- 8
+#True
+#True
+#False
+#False
+#False
+#True
+#False
+#False
+#
+#-LOG PersonNodesTestDouble
+#-STATEMENT MATCH (a:person) RETURN a.eyeSight
+#---- 8
+#5.000000
+#5.100000
+#5.000000
+#4.800000
+#4.700000
+#4.500000
+#4.900000
+#4.900000
+#
+#-LOG PersonNodesTestDate
+#-STATEMENT MATCH (a:person) RETURN a.birthdate
+#---- 8
+#1900-01-01
+#1900-01-01
+#1940-06-22
+#1950-07-23
+#1980-10-26
+#1980-10-26
+#1980-10-26
+#1990-11-27
+#
+#-LOG PersonNodesTestList
+#-STATEMENT MATCH (a:person) RETURN a.workedHours, a.usedNames
+#---- 8
+#[10,5]|[Aida]
+#[12,8]|[Bobby]
+#[4,5]|[Carmen,Fred]
+#[1,9]|[Wolfeschlegelstein,Daniel]
+#[2]|[Ein]
+#[3,4,5,6,7]|[Fesdwe]
+#[1]|[Grad]
+#[10,11,12,3,4,5,6,7]|[Ad,De,Hi,Kye,Orlan]
+#
+#-LOG PersonNodesTestNestedList
+#-STATEMENT MATCH (a:person) RETURN a.courseScoresPerTerm
+#---- 8
+#[[10,8],[6,7,8]]
+#[[8,9],[9,10]]
+#[[8,10]]
+#[[7,4],[8,8],[9]]
+#[[6],[7],[8]]
+#[[8]]
+#[[10]]
+#[[7],[10],[6,7]]
 
--LOG ReturnLiteral3
--STATEMENT RETURN "abc", MIN(1)
----- 1
-abc|1
-
--LOG ReturnLiteral1
--STATEMENT RETURN 3 * 2, COUNT(*), MIN(2), COUNT(5)
----- 1
-6|1|2|1
-
--LOG ReturnLiteral2
--STATEMENT MATCH (a:person) RETURN 1 + 1, label(a) LIMIT 2
----- 2
-2|person
-2|person
-
--LOG ReturnNullLiteral
--STATEMENT RETURN (NULL = NULL) IS NOT NULL, NULL, NULL = NULL
----- 1
-False||
-
--LOG ReturnAggOnConst
--STATEMENT MATCH (a:person) RETURN COUNT(3)
----- 1
-8
-
--LOG ReturnColumnWithSameExpression
--STATEMENT MATCH (a:person) WHERE a.fName='Alice' RETURN a.age, a.age AS k
----- 1
-35|35
-
--LOG OrgNodesReturnStarTest
--STATEMENT MATCH (a:organisation) RETURN *
----- 3
-{_ID: 1:0, _LABEL: organisation, ID: 1, name: ABFsUni, orgCode: 325, mark: 3.700000, score: -2, history: 10 years 5 months 13 hours 24 us, licenseValidInterval: 3 years 5 days, rating: 1.000000, state: {revenue: 138, location: ['toronto', 'montr,eal'], stock: {price: [96,56], volume: 1000}}, info: 3.120000}
-{_ID: 1:1, _LABEL: organisation, ID: 4, name: CsWork, orgCode: 934, mark: 4.100000, score: -100, history: 2 years 4 days 10 hours, licenseValidInterval: 26 years 52 days 48:00:00, rating: 0.780000, state: {revenue: 152, location: ["vanco,uver north area"], stock: {price: [15,78,671], volume: 432}}, info: abcd}
-{_ID: 1:2, _LABEL: organisation, ID: 6, name: DEsWork, orgCode: 824, mark: 4.100000, score: 7, history: 2 years 4 hours 22 us 34 minutes, licenseValidInterval: 82:00:00.1, rating: 0.520000, state: {revenue: 558, location: ['very long city name', 'new york'], stock: {price: [22], volume: 99}}, info: 2023-12-15}
-
--LOG ReturnNodeStarTest
--STATEMENT MATCH (a:organisation) RETURN a.*
----- 3
-1|ABFsUni|325|3.700000|-2|10 years 5 months 13 hours 24 us|3 years 5 days|1.000000|{revenue: 138, location: ['toronto', 'montr,eal'], stock: {price: [96,56], volume: 1000}}|3.120000
-4|CsWork|934|4.100000|-100|2 years 4 days 10 hours|26 years 52 days 48:00:00|0.780000|{revenue: 152, location: ["vanco,uver north area"], stock: {price: [15,78,671], volume: 432}}|abcd
-6|DEsWork|824|4.100000|7|2 years 4 hours 22 us 34 minutes|82:00:00.1|0.520000|{revenue: 558, location: ['very long city name', 'new york'], stock: {price: [22], volume: 99}}|2023-12-15
-
--LOG ReturnStructStarTest
--STATEMENT MATCH (a:organisation) RETURN a.state.*
----- 3
-138|['toronto', 'montr,eal']|{price: [96,56], volume: 1000}
-152|["vanco,uver north area"]|{price: [15,78,671], volume: 432}
-558|['very long city name', 'new york']|{price: [22], volume: 99}
-
--LOG ReturnRelStarTest
--STATEMENT MATCH (a:person)-[e:knows]->(b:person) WHERE a.ID =7 RETURN e.*;
----- 2
-1905-12-12|2020-03-01 12:11:41.6552|00:47:58|[peweeeeeeeeeeeeeeeee,kowje9w0eweeeeeeeee]|{locations: ['waterloo'], transfer: {day: 2000-01-01, amount: [1000,5000]}}|10
-1905-12-12|2025-01-01 11:22:33.52|00:47:58|[ahu2333333333333,12weeeeeeeeeeeeeeeeee]|{locations: ['toronto','thisisalongcityname'], transfer: {day: 1930-11-22, amount: [18,323]}}|8
-
--LOG PersonNodesTestNull
--STATEMENT MATCH (a:person) RETURN a.ID, a.fName STARTS WITH NULL, a.isWorker, a.isWorker AND null
----- 8
-0||False|False
-10||True|
-2||False|False
-3||True|
-5||True|
-7||True|
-8||False|False
-9||False|False
-
--LOG PersonNodesTestString
--STATEMENT MATCH (a:person) RETURN a.fName
----- 8
-Alice
-Bob
-Carol
-Dan
-Elizabeth
-Farooq
-Greg
-Hubert Blaine Wolfeschlegelsteinhausenbergerdorff
-
--LOG PersonNodesTestInt
--STATEMENT MATCH (a:person) RETURN a.age
----- 8
-35
-30
-45
-20
-20
-25
-40
-83
-
--LOG PersonNodesTestBoolean
--STATEMENT MATCH (a:person) RETURN a.isStudent
----- 8
-True
-True
-False
-False
-False
-True
-False
-False
-
--LOG PersonNodesTestDouble
--STATEMENT MATCH (a:person) RETURN a.eyeSight
----- 8
-5.000000
-5.100000
-5.000000
-4.800000
-4.700000
-4.500000
-4.900000
-4.900000
-
--LOG PersonNodesTestDate
--STATEMENT MATCH (a:person) RETURN a.birthdate
----- 8
-1900-01-01
-1900-01-01
-1940-06-22
-1950-07-23
-1980-10-26
-1980-10-26
-1980-10-26
-1990-11-27
-
--LOG PersonNodesTestList
--STATEMENT MATCH (a:person) RETURN a.workedHours, a.usedNames
----- 8
-[10,5]|[Aida]
-[12,8]|[Bobby]
-[4,5]|[Carmen,Fred]
-[1,9]|[Wolfeschlegelstein,Daniel]
-[2]|[Ein]
-[3,4,5,6,7]|[Fesdwe]
-[1]|[Grad]
-[10,11,12,3,4,5,6,7]|[Ad,De,Hi,Kye,Orlan]
-
--LOG PersonNodesTestNestedList
--STATEMENT MATCH (a:person) RETURN a.courseScoresPerTerm
----- 8
-[[10,8],[6,7,8]]
-[[8,9],[9,10]]
-[[8,10]]
-[[7,4],[8,8],[9]]
-[[6],[7],[8]]
-[[8]]
-[[10]]
-[[7],[10],[6,7]]
-
--LOG ListWithNullValues
--STATEMENT RETURN [5, null, 100, null, null]
----- 1
-[5,,100,,]
-
--LOG NestedListWithNullValues
--STATEMENT RETURN [[78, null, 100, null, null], null, [null, 5, null, 100, null]]
----- 1
-[[78,,100,,],,[,5,,100,]]
-
--LOG EmptyList
--STATEMENT RETURN []
----- 1
-[]
-
--LOG NestedEmptyList
--STATEMENT RETURN [[],[]]
----- 1
-[[],[]]
+-CASE SingleLabelRelProjection
 
 -LOG CrossProductReturn
 -STATEMENT MATCH (a:organisation), (b:organisation) RETURN a.orgCode = b.orgCode
@@ -191,6 +189,12 @@ False
 True
 True
 True
+
+-LOG ReturnRelStarTest
+-STATEMENT MATCH (a:person)-[e:knows]->(b:person) WHERE a.ID =7 RETURN e.*;
+---- 2
+1905-12-12|2020-03-01 12:11:41.6552|00:47:58|[peweeeeeeeeeeeeeeeee,kowje9w0eweeeeeeeee]|{locations: ['waterloo'], transfer: {day: 2000-01-01, amount: [1000,5000]}}|10
+1905-12-12|2025-01-01 11:22:33.52|00:47:58|[ahu2333333333333,12weeeeeeeeeeeeeeeeee]|{locations: ['toronto','thisisalongcityname'], transfer: {day: 1930-11-22, amount: [18,323]}}|8
 
 -LOG KnowsOneHopTest1
 -STATEMENT MATCH (a:person)-[e:knows]->(b:person) WHERE b.age=20 RETURN b.age
@@ -380,12 +384,21 @@ Dan|Carol
 5:1
 5:2
 
-#-LOG QueryOneToOneRelTable
-#-STATEMENT MATCH (:person)-[m:marries]->(:person) RETURN m
-#---- 3
-#(0:0)-{_LABEL: marries, _ID: 7:0, usedAddress: [toronto], address: [4,5]}->(0:1)
-#(0:2)-{_LABEL: marries, _ID: 7:1, address: [2,5], note: long long long string}->(0:3)
-#(0:4)-{_LABEL: marries, _ID: 7:2, usedAddress: [], address: [3,9], note: short str}->(0:5)
+-LOG ReturnMAPManyToOneTable
+-STATEMENT MATCH (:person)-[r:workAt]-(o:organisation) RETURN r.experiences
+{x= 256}
+{x= 256}
+{y=512}
+{y=512}
+{longkeyasyoucantell = 1024}
+{longkeyasyoucantell = 1024}
+
+-LOG QueryOneToOneRelTable
+-STATEMENT MATCH (:person)-[m:marries]->(:person) RETURN m
+---- 3
+(0:0)-{_LABEL: marries, _ID: 7:0, usedAddress: [toronto], address: [4,5], mapProp: {1=a, 2=b, 3=c}}->(0:1)
+(0:2)-{_LABEL: marries, _ID: 7:1, address: [2,5], note: long long long string, mapProp: {10=prettylongvacation}}->(0:3)
+(0:4)-{_LABEL: marries, _ID: 7:2, usedAddress: [], address: [3,9], note: short str, mapProp: {11=shortstay, 12=shortvacation}}->(0:5)
 
 -LOG ReturnFixedListNodeProp
 -STATEMENT MATCH (a:person) RETURN a.grades

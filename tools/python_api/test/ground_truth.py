@@ -259,9 +259,9 @@ TINY_SNB_WORKS_AT_GROUND_TRUTH = {
 }
 
 TINY_SNB_WORKS_AT_PROPERTIES_GROUND_TRUTH = {
-    (3, 4): {'year': 2015},
-    (5, 6): {'year': 2010},
-    (7, 6): {'year': 2015}
+    (3, 4): {'year': 2015, 'grading': [3.8, 2.5], 'rating': 8.2, 'experiences': {'x': 256}},
+    (5, 6): {'year': 2010, 'grading': [2.1, 4.4], 'rating': 7.6, 'experiences': {'y': 512}},
+    (7, 6): {'year': 2015, 'grading': [9.2, 3.1], 'rating': 9.2, 'experiences': {'longkeyasyoucantell': 1024}}
 }
 
 TENSOR_LIST_GROUND_TRUTH = {

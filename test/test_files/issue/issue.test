@@ -70,9 +70,6 @@
 ---- ok
 -STATEMENT CREATE NODE TABLE T2(name STRING, myprops MAP(STRING,STRING), PRIMARY KEY(name));
 ---- ok
--STATEMENT CREATE REL TABLE KIND_OF3(FROM T TO T, myprops MAP(STRING,STRING));
----- error
-Binder exception: MAP(STRING: STRING) property is not supported in rel table.
 -STATEMENT CREATE REL TABLE KIND_OF3(FROM T TO T, myprops SERIAL);
 ---- error
 Binder exception: SERIAL property is not supported in rel table.
