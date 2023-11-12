@@ -59,19 +59,19 @@ static void validateCopyNpyNotForRelTables(TableSchema* schema) {
     }
 }
 
-static bool bindContainsSerial(TableSchema* tableSchema) {
-    bool containsSerial = false;
-    for (auto& property : tableSchema->properties) {
-        if (property->getDataType()->getLogicalTypeID() == LogicalTypeID::SERIAL) {
-            containsSerial = true;
-            break;
-        }
-    }
-    return containsSerial;
-}
+//static bool bindContainsSerial(TableSchema* tableSchema) {
+//    bool containsSerial = false;
+//    for (auto& property : tableSchema->properties) {
+//        if (property->getDataType()->getLogicalTypeID() == LogicalTypeID::SERIAL) {
+//            containsSerial = true;
+//            break;
+//        }
+//    }
+//    return containsSerial;
+//}
 
 std::unique_ptr<BoundStatement> Binder::bindCopyFromClause(const Statement& statement) {
-    auto& copyStatement = (CopyFrom&)statement;
+    auto& copyStatement = (const CopyFrom&)statement;
     auto catalogContent = catalog.getReadOnlyVersion();
     auto tableName = copyStatement.getTableName();
     validateTableExist(tableName);
@@ -92,7 +92,6 @@ std::unique_ptr<BoundStatement> Binder::bindCopyFromClause(const Statement& stat
     auto fileType = bindFileType(filePaths);
     auto readerConfig =
         std::make_unique<ReaderConfig>(fileType, std::move(filePaths), std::move(csvReaderConfig));
-    auto scanFunction = getScanFunction(fileType, readerConfig->csvReaderConfig->parallel);
     validateByColumnKeyword(readerConfig->fileType, copyStatement.byColumn());
     if (readerConfig->fileType == FileType::NPY) {
         validateCopyNpyNotForRelTables(tableSchema);
@@ -100,15 +99,15 @@ std::unique_ptr<BoundStatement> Binder::bindCopyFromClause(const Statement& stat
     switch (tableSchema->tableType) {
     case TableType::NODE:
         if (readerConfig->fileType == FileType::TURTLE) {
-            return bindCopyRdfNodeFrom(scanFunction, std::move(readerConfig), tableSchema);
+            return bindCopyRdfNodeFrom(statement, std::move(readerConfig), tableSchema);
         } else {
-            return bindCopyNodeFrom(scanFunction, std::move(readerConfig), tableSchema);
+            return bindCopyNodeFrom(statement, std::move(readerConfig), tableSchema);
         }
     case TableType::REL: {
         if (readerConfig->fileType == FileType::TURTLE) {
-            return bindCopyRdfRelFrom(scanFunction, std::move(readerConfig), tableSchema);
+            return bindCopyRdfRelFrom(statement, std::move(readerConfig), tableSchema);
         } else {
-            return bindCopyRelFrom(scanFunction, std::move(readerConfig), tableSchema);
+            return bindCopyRelFrom(statement, std::move(readerConfig), tableSchema);
         }
     }
         // LCOV_EXCL_START
@@ -119,42 +118,46 @@ std::unique_ptr<BoundStatement> Binder::bindCopyFromClause(const Statement& stat
     }
 }
 
-std::unique_ptr<BoundStatement> Binder::bindCopyNodeFrom(function::TableFunction* copyFunc,
-    std::unique_ptr<common::ReaderConfig> readerConfig, TableSchema* tableSchema) {
+std::unique_ptr<BoundStatement> Binder::bindCopyNodeFrom(const Statement& statement,
+    std::unique_ptr<common::ReaderConfig> config, TableSchema* tableSchema) {
+    auto& copyStatement = reinterpret_cast<const CopyFrom&>(statement);
+    auto func = getScanFunction(config->fileType, config->csvReaderConfig->parallel);
     // For table with SERIAL columns, we need to read in serial from files.
-    auto containsSerial = bindContainsSerial(tableSchema);
+    auto containsSerial = tableSchema->containsColumnType(LogicalType(LogicalTypeID::SERIAL));
     std::vector<std::string> expectedColumnNames;
     std::vector<std::unique_ptr<common::LogicalType>> expectedColumnTypes;
-    bindExpectedNodeColumns(tableSchema, expectedColumnNames, expectedColumnTypes);
+    bindExpectedNodeColumns(tableSchema, copyStatement.getColumnNames(), expectedColumnNames, expectedColumnTypes);
     auto bindInput = std::make_unique<function::ScanTableFuncBindInput>(memoryManager,
-        *readerConfig, std::move(expectedColumnNames), std::move(expectedColumnTypes));
+        *config, std::move(expectedColumnNames), std::move(expectedColumnTypes));
     auto bindData =
-        copyFunc->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
+        func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
     expression_vector columns;
     for (auto i = 0u; i < bindData->columnTypes.size(); i++) {
         columns.push_back(createVariable(bindData->columnNames[i], *bindData->columnTypes[i]));
     }
     auto offset = expressionBinder.createVariableExpression(
-        LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
+        LogicalType(LogicalTypeID::INT64), InternalKeyword::ANONYMOUS);
     auto boundFileScanInfo = std::make_unique<BoundFileScanInfo>(
-        copyFunc, std::move(bindData), columns, std::move(offset), TableType::NODE);
+        func, std::move(bindData), columns, std::move(offset));
     auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(tableSchema,
         std::move(boundFileScanInfo), containsSerial, std::move(columns), nullptr /* extraInfo */);
     return std::make_unique<BoundCopyFrom>(std::move(boundCopyFromInfo));
 }
 
-std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(function::TableFunction* copyFunc,
-    std::unique_ptr<common::ReaderConfig> readerConfig, TableSchema* tableSchema) {
+std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(const parser::Statement& statement,
+    std::unique_ptr<common::ReaderConfig> config, TableSchema* tableSchema) {
+    auto& copyStatement = reinterpret_cast<const CopyFrom&>(statement);
+    auto func = getScanFunction(config->fileType, config->csvReaderConfig->parallel);
     // For table with SERIAL columns, we need to read in serial from files.
-    auto containsSerial = bindContainsSerial(tableSchema);
+    auto containsSerial =  tableSchema->containsColumnType(LogicalType(LogicalTypeID::SERIAL));
     KU_ASSERT(containsSerial == false);
     std::vector<std::string> expectedColumnNames;
     std::vector<std::unique_ptr<common::LogicalType>> expectedColumnTypes;
-    bindExpectedRelColumns(tableSchema, expectedColumnNames, expectedColumnTypes);
+    bindExpectedRelColumns(tableSchema,copyStatement.getColumnNames(), expectedColumnNames, expectedColumnTypes);
     auto bindInput = std::make_unique<function::ScanTableFuncBindInput>(memoryManager,
-        std::move(*readerConfig), std::move(expectedColumnNames), std::move(expectedColumnTypes));
+        std::move(*config), std::move(expectedColumnNames), std::move(expectedColumnTypes));
     auto bindData =
-        copyFunc->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
+        func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
     expression_vector columns;
     for (auto i = 0u; i < bindData->columnTypes.size(); i++) {
         columns.push_back(createVariable(bindData->columnNames[i], *bindData->columnTypes[i]));
@@ -162,7 +165,7 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(function::TableFunction*
     auto offset = expressionBinder.createVariableExpression(
         LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
     auto boundFileScanInfo = std::make_unique<BoundFileScanInfo>(
-        copyFunc, std::move(bindData), columns, offset, TableType::REL);
+        func, std::move(bindData), columns, offset);
     auto relTableSchema = reinterpret_cast<RelTableSchema*>(tableSchema);
     auto srcTableSchema =
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getSrcTableID());
@@ -192,30 +195,56 @@ static bool skipPropertyInFile(const Property& property) {
            TableSchema::isReservedPropertyName(property.getName());
 }
 
-void Binder::bindExpectedNodeColumns(catalog::TableSchema* tableSchema,
-    std::vector<std::string>& columnNames,
-    std::vector<std::unique_ptr<common::LogicalType>>& columnTypes) {
-    for (auto& property : tableSchema->properties) {
-        if (skipPropertyInFile(*property)) {
-            continue;
+static void bindExpectedColumns(TableSchema* tableSchema, const std::vector<std::string>& inputColumnNames,
+    std::vector<std::string>& columnNames, logical_types_t& columnTypes) {
+    if (!inputColumnNames.empty()) {
+        // Search column data type for each input column.
+        for (auto& columnName : inputColumnNames) {
+            if (!tableSchema->containProperty(columnName)) {
+                continue;
+            }
+            auto propertyID = tableSchema->getPropertyID(columnName);
+            auto property = tableSchema->getProperty(propertyID);
+            if (skipPropertyInFile(*property)) {
+                continue;
+            }
+            columnNames.push_back(columnName);
+            columnTypes.push_back(property->getDataType()->copy());
         }
-        columnNames.push_back(property->getName());
-        columnTypes.push_back(property->getDataType()->copy());
+    } else {
+        // No column specified. Fall back to schema columns.
+        for (auto& property : tableSchema->properties) {
+            if (skipPropertyInFile(*property)) {
+                continue;
+            }
+            columnNames.push_back(property->getName());
+            columnTypes.push_back(property->getDataType()->copy());
+        }
     }
+
 }
 
-void Binder::bindExpectedRelColumns(catalog::TableSchema* tableSchema,
+
+void Binder::bindExpectedNodeColumns(catalog::TableSchema* tableSchema,
+    const std::vector<std::string>& inputColumnNames,
     std::vector<std::string>& columnNames,
     std::vector<std::unique_ptr<common::LogicalType>>& columnTypes) {
+    KU_ASSERT(columnNames.empty() && columnTypes.empty());
+    bindExpectedColumns(tableSchema, inputColumnNames, columnNames, columnTypes);
+}
+
+void Binder::bindExpectedRelColumns(TableSchema* tableSchema,
+    const std::vector<std::string>& inputColumnNames,
+    std::vector<std::string>& columnNames,
+    std::vector<std::unique_ptr<common::LogicalType>>& columnTypes) {
+    KU_ASSERT(columnNames.empty() && columnTypes.empty());
     auto relTableSchema = reinterpret_cast<RelTableSchema*>(tableSchema);
     auto srcTable = reinterpret_cast<NodeTableSchema*>(
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getSrcTableID()));
     auto dstTable = reinterpret_cast<NodeTableSchema*>(
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getDstTableID()));
-    auto srcColumnName = std::string(Property::REL_FROM_PROPERTY_NAME);
-    auto dstColumnName = std::string(Property::REL_TO_PROPERTY_NAME);
-    columnNames.push_back(srcColumnName);
-    columnNames.push_back(dstColumnName);
+    columnNames.push_back(std::string(Property::REL_FROM_PROPERTY_NAME));
+    columnNames.push_back(std::string(Property::REL_TO_PROPERTY_NAME));
     auto srcPKColumnType = srcTable->getPrimaryKey()->getDataType()->copy();
     if (srcPKColumnType->getLogicalTypeID() == LogicalTypeID::SERIAL) {
         srcPKColumnType = std::make_unique<LogicalType>(LogicalTypeID::INT64);
@@ -226,13 +255,7 @@ void Binder::bindExpectedRelColumns(catalog::TableSchema* tableSchema,
     }
     columnTypes.push_back(std::move(srcPKColumnType));
     columnTypes.push_back(std::move(dstPKColumnType));
-    for (auto& property : tableSchema->properties) {
-        if (skipPropertyInFile(*property)) {
-            continue;
-        }
-        columnNames.push_back(property->getName());
-        columnTypes.push_back(property->getDataType()->copy());
-    }
+    bindExpectedColumns(tableSchema, inputColumnNames, columnNames, columnTypes);
 }
 
 } // namespace binder

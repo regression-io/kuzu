@@ -3,27 +3,34 @@
 #include "parser/expression/parsed_expression.h"
 #include "parser/query/regular_query.h"
 #include "parser/statement.h"
+#include <vector>
 
 namespace kuzu {
 namespace parser {
 
 class CopyFrom : public Statement {
 public:
-    explicit CopyFrom(bool byColumn_, std::vector<std::string> filePaths, std::string tableName,
-        parsing_option_t parsingOptions)
-        : Statement{common::StatementType::COPY_FROM}, byColumn_{byColumn_}, filePaths{std::move(
-                                                                                 filePaths)},
-          tableName{std::move(tableName)}, parsingOptions{std::move(parsingOptions)} {}
+    explicit CopyFrom(std::vector<std::string> filePaths, std::string tableName)
+        : Statement{common::StatementType::COPY_FROM}, byColumn_{false}, filePaths{std::move(filePaths)},
+          tableName{std::move(tableName)}  {}
 
+    inline void setByColumn() { byColumn_ = true; }
     inline bool byColumn() const { return byColumn_; }
+
     inline std::vector<std::string> getFilePaths() const { return filePaths; }
     inline std::string getTableName() const { return tableName; }
+
+    inline void setColumnNames(std::vector<std::string> names) {columnNames = std::move(names);}
+    inline std::vector<std::string> getColumnNames() const { return columnNames; }
+
+    inline void setParsingOption(parsing_option_t options) { parsingOptions = std::move(options); }
     inline const parsing_option_t& getParsingOptionsRef() const { return parsingOptions; }
 
 private:
     bool byColumn_;
     std::vector<std::string> filePaths;
     std::string tableName;
+    std::vector<std::string> columnNames;
     parsing_option_t parsingOptions;
 };
 

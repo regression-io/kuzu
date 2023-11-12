@@ -59,12 +59,23 @@ void CopyNode::initGlobalStateInternal(ExecutionContext* /*context*/) {
 }
 
 void CopyNode::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* /*context*/) {
-    for (auto& pos : info->columnPositions) {
-        columnVectors.push_back(resultSet->getValueVector(pos).get());
+    auto state = resultSet->getDataChunk(info->columnPositions[0].dataChunkPos)->state;
+    for (auto i = 0; i < info->columnPositions.size(); ++i) {
+        auto pos = info->columnPositions[i];
+        if (pos.isValid()) {
+            columnVectors.push_back(resultSet->getValueVector(pos).get());
+        } else {
+            auto columnType = sharedState->columnTypes[i].get();
+            auto nullVector = std::make_shared<ValueVector>(*columnType);
+            nullVector->state = state;
+            nullVector->setAllNull();
+            nullColumnVectors.push_back(nullVector);
+            columnVectors.push_back(nullVector.get());
+        }
     }
     localNodeGroup = NodeGroupFactory::createNodeGroup(
         ColumnDataFormat::REGULAR, sharedState->columnTypes, info->compressionEnabled);
-    columnState = resultSet->getDataChunk(info->columnPositions[0].dataChunkPos)->state.get();
+    columnState = state.get();
 }
 
 void CopyNode::executeInternal(ExecutionContext* context) {

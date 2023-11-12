@@ -33,23 +33,10 @@ public:
     inline common::table_id_t getTableID() const { return tableID; }
 
     inline uint32_t getNumProperties() const { return properties.size(); }
-
-    inline void dropProperty(common::property_id_t propertyID) {
-        properties.erase(std::remove_if(properties.begin(), properties.end(),
-                             [propertyID](const std::unique_ptr<Property>& property) {
-                                 return property->getPropertyID() == propertyID;
-                             }),
-            properties.end());
-    }
-
-    inline bool containProperty(std::string propertyName) const {
-        return std::any_of(properties.begin(), properties.end(),
-            [&propertyName](const std::unique_ptr<Property>& property) {
-                return property->getName() == propertyName;
-            });
-    }
-
     std::vector<Property*> getProperties() const;
+    bool containProperty(const std::string& propertyName) const;
+    bool containsColumnType(const common::LogicalType& logicalType) const;
+    void dropProperty(common::property_id_t propertyID);
 
     inline void addNodeProperty(
         std::string propertyName, std::unique_ptr<common::LogicalType> dataType) {
@@ -65,6 +52,7 @@ public:
     common::property_id_t getPropertyID(const std::string& propertyName) const;
     common::column_id_t getColumnID(common::property_id_t propertyID) const;
 
+    Property* getProperty(const std::string& name) const;
     Property* getProperty(common::property_id_t propertyID) const;
 
     void renameProperty(common::property_id_t propertyID, const std::string& newName);

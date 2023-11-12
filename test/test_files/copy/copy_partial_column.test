@@ -1,0 +1,21 @@
+-GROUP CopyPartialColumnsTest
+-DATASET CSV empty
+
+--
+
+-CASE PartialColumnsTest
+-STATEMENT CREATE NODE TABLE tableOfTypes3 (id INT64, int64Column INT64, doubleColumn DOUBLE, booleanColumn BOOLEAN,
+        nullInt64Column INT64, nullDoubleColumn DOUBLE, nullBooleanColumn BOOLEAN,dateColumn DATE,
+        timestampColumn TIMESTAMP, stringColumn STRING, nullDateColumn DATE, nullTimestampColumn TIMESTAMP,
+        nullStringColumn STRING, listOfInt INT64[], nullListOfInt INT64[], PRIMARY KEY (id));
+---- ok
+-STATEMENT COPY tableOfTypes3 (id, int64Column, doubleColumn, booleanColumn, dateColumn, timestampColumn, stringColumn,
+      listOfInt) FROM "${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/csv/types_50k.csv" (HEADER=true);
+---- ok
+-STATEMENT MATCH (row:tableOfTypes3) WHERE row.id >= 20 AND row.id <= 24 RETURN row.*;
+---- 5
+20|0|57.579280|True||||1731-09-26|1731-09-26 03:30:08|OdM||||[93,,86,37]|
+21|7|64.630960|False||||1307-01-26|1307-01-26 03:31:08|AjbxHQThEtDDlOjbzMjCQSXlvGQEjcFLykESrnFHwPKX||||[]|
+22|71|37.963386|True||||1455-07-26|1455-07-26 03:07:03|dRvHHdyNXYfSUcicaxBoQEKQUfgex||||[72,,45,,81]|
+23|58|42.774957|False||||1181-10-16|1181-10-16 18:19:43|ISImRVpUjynGMFRQyYmeIUVjM|||||
+24|75|53.813224|False||||1942-10-24|1942-10-24 09:30:16|naDlQ||||[97,91,28,26,]|

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/column_data_format.h"
+#include "catalog/table_schema.h"
 #include "planner/operator/logical_operator.h"
 
 namespace kuzu {
@@ -10,6 +11,7 @@ struct LogicalPartitionerInfo {
     std::shared_ptr<binder::Expression> key;
     binder::expression_vector payloads;
     common::ColumnDataFormat dataFormat;
+    catalog::TableSchema* tableSchema;
 
     LogicalPartitionerInfo(std::shared_ptr<binder::Expression> key,
         binder::expression_vector payloads, common::ColumnDataFormat dataFormat)
