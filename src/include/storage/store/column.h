@@ -25,6 +25,7 @@ using batch_lookup_func_t = read_values_to_page_func_t;
 
 class NullColumn;
 class StructColumn;
+struct TableReadState;
 class Column {
     friend class LocalColumn;
     friend class StringLocalColumn;
@@ -42,8 +43,8 @@ public:
     virtual void batchLookup(transaction::Transaction* transaction,
         const common::offset_t* nodeOffsets, size_t size, uint8_t* result);
 
-    virtual void scan(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
-        common::ValueVector* resultVector);
+    virtual void scan(transaction::Transaction* transaction, const TableReadState& readState,
+        common::ValueVector* nodeIDVector, common::ValueVector* resultVector);
     virtual void scan(transaction::Transaction* transaction, common::node_group_idx_t nodeGroupIdx,
         common::offset_t startOffsetInGroup, common::offset_t endOffsetInGroup,
         common::ValueVector* resultVector, uint64_t offsetInVector);
@@ -79,12 +80,13 @@ public:
 
 protected:
     virtual void scanInternal(transaction::Transaction* transaction,
-        common::ValueVector* nodeIDVector, common::ValueVector* resultVector);
+        const TableReadState& readState, common::ValueVector* nodeIDVector,
+        common::ValueVector* resultVector);
     void scanUnfiltered(transaction::Transaction* transaction, PageElementCursor& pageCursor,
-        uint64_t numValuesToScan, common::ValueVector* resultVector,
+        const TableReadState& readState, common::ValueVector* resultVector,
         const ColumnChunkMetadata& chunkMeta, uint64_t startPosInVector = 0);
     void scanFiltered(transaction::Transaction* transaction, PageElementCursor& pageCursor,
-        common::ValueVector* nodeIDVector, common::ValueVector* resultVector,
+        const TableReadState& readState, common::ValueVector* resultVector,
         const ColumnChunkMetadata& chunkMeta);
     virtual void lookupInternal(transaction::Transaction* transaction,
         common::ValueVector* nodeIDVector, common::ValueVector* resultVector);
@@ -133,9 +135,9 @@ public:
         BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
         transaction::Transaction* transaction, RWPropertyStats stats);
 
-    inline void scan(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
-        common::ValueVector* resultVector) {
-        Column::scan(transaction, nodeIDVector, resultVector);
+    inline void scan(transaction::Transaction* transaction, const TableReadState& readState,
+        common::ValueVector* nodeIDVector, common::ValueVector* resultVector) {
+        Column::scan(transaction, readState, nodeIDVector, resultVector);
         populateCommonTableID(resultVector);
     }
 

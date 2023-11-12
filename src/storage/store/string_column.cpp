@@ -2,6 +2,7 @@
 
 #include "common/type_utils.h"
 #include "storage/store/string_column_chunk.h"
+#include "storage/store/table_data.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;
@@ -110,13 +111,12 @@ void StringColumn::rollbackInMemory() {
     overflowMetadataDA->rollbackInMemoryIfNecessary();
 }
 
-void StringColumn::scanInternal(
-    Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
+void StringColumn::scanInternal(Transaction* transaction, const TableReadState& readState,
+    ValueVector* nodeIDVector, ValueVector* resultVector) {
     KU_ASSERT(resultVector->dataType.getPhysicalType() == PhysicalTypeID::STRING);
-    auto startNodeOffset = nodeIDVector->readNodeOffset(0);
-    KU_ASSERT(startNodeOffset % DEFAULT_VECTOR_CAPACITY == 0);
-    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(startNodeOffset);
-    Column::scanInternal(transaction, nodeIDVector, resultVector);
+    KU_ASSERT(readState.startNodeOffset % DEFAULT_VECTOR_CAPACITY == 0);
+    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(readState.startNodeOffset);
+    Column::scanInternal(transaction, readState, nodeIDVector, resultVector);
     auto overflowPageIdx = overflowMetadataDA->get(nodeGroupIdx, transaction->getType()).pageIdx;
     for (auto i = 0u; i < nodeIDVector->state->selVector->selectedSize; i++) {
         auto pos = nodeIDVector->state->selVector->selectedPositions[i];

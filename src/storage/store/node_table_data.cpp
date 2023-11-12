@@ -1,5 +1,6 @@
 #include "storage/store/node_table_data.h"
 
+#include "common/cast.h"
 #include "storage/stats/nodes_store_statistics.h"
 
 using namespace kuzu::catalog;
@@ -25,9 +26,24 @@ NodeTableData::NodeTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH, tab
             RWPropertyStats(tablesStatistics, tableID, property->getPropertyID()),
             enableCompression));
     }
+    nodesStats =
+        ku_dynamic_cast<TablesStatistics*, NodesStoreStatsAndDeletedIDs*>(tablesStatistics);
 }
 
-void NodeTableData::scan(transaction::Transaction* transaction, TableReadState& readState,
+void NodeTableData::initializeReadState(Transaction* transaction,
+    std::vector<column_id_t> columnIDs, ValueVector* inNodeIDVector, TableReadState* readState) {
+    readState->startNodeOffset = inNodeIDVector->readNodeOffset(0);
+    if (transaction->isWriteTransaction()) {
+        auto maxNodeOffset = nodesStats->getMaxNodeOffset(&DUMMY_READ_TRANSACTION, tableID);
+        readState->numNodes = std::min(maxNodeOffset - readState->startNodeOffset + 1,
+            inNodeIDVector->state->getOriginalSize());
+    } else {
+        readState->numNodes = inNodeIDVector->state->getOriginalSize();
+    }
+    readState->columnIDs = std::move(columnIDs);
+}
+
+void NodeTableData::scan(Transaction* transaction, TableReadState& readState,
     ValueVector* nodeIDVector, const std::vector<ValueVector*>& outputVectors) {
     KU_ASSERT(readState.columnIDs.size() == outputVectors.size() && !nodeIDVector->state->isFlat());
     for (auto i = 0u; i < readState.columnIDs.size(); i++) {
@@ -35,7 +51,8 @@ void NodeTableData::scan(transaction::Transaction* transaction, TableReadState& 
             outputVectors[i]->setAllNull();
         } else {
             KU_ASSERT(readState.columnIDs[i] < columns.size());
-            columns[readState.columnIDs[i]]->scan(transaction, nodeIDVector, outputVectors[i]);
+            columns[readState.columnIDs[i]]->scan(
+                transaction, readState, nodeIDVector, outputVectors[i]);
         }
     }
     if (transaction->isWriteTransaction()) {

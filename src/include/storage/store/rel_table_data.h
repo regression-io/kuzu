@@ -10,8 +10,6 @@ namespace storage {
 struct RelDataReadState : public TableReadState {
     common::RelDataDirection direction;
     common::ColumnDataFormat dataFormat;
-    common::offset_t startNodeOffsetInState;
-    common::offset_t numNodesInState;
     common::offset_t currentCSRNodeOffset;
     common::offset_t posInCurrentCSR;
     std::vector<common::list_entry_t> csrListEntries;
@@ -19,15 +17,15 @@ struct RelDataReadState : public TableReadState {
     std::unique_ptr<ColumnChunk> csrOffsetChunk;
 
     RelDataReadState(common::ColumnDataFormat dataFormat);
+
     inline bool isOutOfRange(common::offset_t nodeOffset) {
-        return nodeOffset < startNodeOffsetInState ||
-               nodeOffset >= (startNodeOffsetInState + numNodesInState);
+        return nodeOffset < startNodeOffset || nodeOffset >= (startNodeOffset + numNodes);
     }
     inline bool hasMoreToRead() {
         return dataFormat == common::ColumnDataFormat::CSR &&
-               posInCurrentCSR <
-                   csrListEntries[(currentCSRNodeOffset - startNodeOffsetInState)].size;
+               posInCurrentCSR < csrListEntries[(currentCSRNodeOffset - startNodeOffset)].size;
     }
+
     void populateCSRListEntries();
     std::pair<common::offset_t, common::offset_t> getStartAndEndOffset();
 };

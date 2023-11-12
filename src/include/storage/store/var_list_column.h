@@ -35,6 +35,7 @@ struct ListOffsetInfoInStorage {
     common::offset_t getListOffset(uint64_t nodePos) const;
 
     inline uint64_t getListLength(uint64_t nodePos) const {
+        KU_ASSERT(getListOffset(nodePos + 1) >= getListOffset(nodePos));
         return getListOffset(nodePos + 1) - getListOffset(nodePos);
     }
 };
@@ -62,8 +63,8 @@ public:
     void scan(common::node_group_idx_t nodeGroupIdx, ColumnChunk* columnChunk) final;
 
 protected:
-    void scanInternal(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
-        common::ValueVector* resultVector) final;
+    void scanInternal(transaction::Transaction* transaction, const TableReadState& readState,
+        common::ValueVector* nodeIDVector, common::ValueVector* resultVector) final;
 
     void lookupValue(transaction::Transaction* transaction, common::offset_t nodeOffset,
         common::ValueVector* resultVector, uint32_t posInVector) final;

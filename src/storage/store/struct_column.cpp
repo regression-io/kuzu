@@ -36,11 +36,11 @@ void StructColumn::scan(transaction::Transaction* transaction, node_group_idx_t 
     }
 }
 
-void StructColumn::scanInternal(
-    Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
+void StructColumn::scanInternal(Transaction* transaction, const TableReadState& readState,
+    ValueVector* nodeIDVector, ValueVector* resultVector) {
     for (auto i = 0u; i < childColumns.size(); i++) {
         auto fieldVector = StructVector::getFieldVector(resultVector, i).get();
-        childColumns[i]->scan(transaction, nodeIDVector, fieldVector);
+        childColumns[i]->scan(transaction, readState, nodeIDVector, fieldVector);
     }
 }
 

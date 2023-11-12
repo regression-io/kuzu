@@ -1,6 +1,7 @@
 #include "storage/store/var_list_column.h"
 
 #include "storage/store/column.h"
+#include "storage/store/table_data.h"
 #include "storage/store/var_list_column_chunk.h"
 
 using namespace kuzu::common;
@@ -59,13 +60,12 @@ void VarListColumn::scan(node_group_idx_t nodeGroupIdx, kuzu::storage::ColumnChu
     }
 }
 
-void VarListColumn::scanInternal(
-    Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
+void VarListColumn::scanInternal(Transaction* transaction, const TableReadState& readState,
+    ValueVector* nodeIDVector, ValueVector* resultVector) {
     resultVector->resetAuxiliaryBuffer();
-    auto startNodeOffset = nodeIDVector->readNodeOffset(0);
-    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(startNodeOffset);
+    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(readState.startNodeOffset);
     auto startNodeOffsetInGroup =
-        startNodeOffset - StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
+        readState.startNodeOffset - StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
     auto listOffsetInfoInStorage =
         getListOffsetInfoInStorage(transaction, nodeGroupIdx, startNodeOffsetInGroup,
             startNodeOffsetInGroup + nodeIDVector->state->getOriginalSize(), resultVector->state);

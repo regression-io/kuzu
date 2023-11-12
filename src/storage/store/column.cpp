@@ -8,6 +8,7 @@
 #include "storage/store/column_chunk.h"
 #include "storage/store/string_column.h"
 #include "storage/store/struct_column.h"
+#include "storage/store/table_data.h"
 #include "storage/store/var_list_column.h"
 #include "transaction/transaction.h"
 
@@ -160,10 +161,10 @@ public:
         writeFromVectorFunc = NullColumnFunc::writeValueToPage;
     }
 
-    void scan(
-        Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) final {
+    void scan(Transaction* transaction, const TableReadState& readState, ValueVector* nodeIDVector,
+        ValueVector* resultVector) final {
         if (propertyStatistics.mayHaveNull(*transaction)) {
-            scanInternal(transaction, nodeIDVector, resultVector);
+            scanInternal(transaction, readState, nodeIDVector, resultVector);
         } else {
             resultVector->setAllNonNull();
         }
@@ -243,14 +244,11 @@ public:
               bufferManager, wal, transaction, RWPropertyStats::empty(),
               false /* enableCompression */, false /*requireNullColumn*/} {}
 
-    void scan(
-        Transaction* /*transaction*/, ValueVector* nodeIDVector, ValueVector* resultVector) final {
+    void scan(Transaction* /*transaction*/, const TableReadState& readState,
+        ValueVector* nodeIDVector, ValueVector* resultVector) final {
         // Serial column cannot contain null values.
-        for (auto i = 0ul; i < nodeIDVector->state->selVector->selectedSize; i++) {
-            auto pos = nodeIDVector->state->selVector->selectedPositions[i];
-            auto offset = nodeIDVector->readNodeOffset(pos);
-            KU_ASSERT(!resultVector->isNull(pos));
-            resultVector->setValue<offset_t>(pos, offset);
+        for (auto i = 0ul; i < readState.numNodes; i++) {
+            resultVector->setValue<offset_t>(i, readState.startNodeOffset + i);
         }
     }
 
@@ -320,11 +318,12 @@ void Column::batchLookup(
     }
 }
 
-void Column::scan(Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
+void Column::scan(Transaction* transaction, const TableReadState& readState,
+    ValueVector* nodeIDVector, ValueVector* resultVector) {
     if (nullColumn) {
-        nullColumn->scan(transaction, nodeIDVector, resultVector);
+        nullColumn->scan(transaction, readState, nodeIDVector, resultVector);
     }
-    scanInternal(transaction, nodeIDVector, resultVector);
+    scanInternal(transaction, readState, nodeIDVector, resultVector);
 }
 
 void Column::scan(transaction::Transaction* transaction, node_group_idx_t nodeGroupIdx,
@@ -338,9 +337,9 @@ void Column::scan(transaction::Transaction* transaction, node_group_idx_t nodeGr
     auto pageCursor = PageUtils::getPageElementCursorForPos(startOffsetInGroup,
         chunkMeta.compMeta.numValues(BufferPoolConstants::PAGE_4KB_SIZE, dataType));
     pageCursor.pageIdx += chunkMeta.pageIdx;
-    auto numValuesToScan = endOffsetInGroup - startOffsetInGroup;
-    scanUnfiltered(
-        transaction, pageCursor, numValuesToScan, resultVector, chunkMeta, offsetInVector);
+    TableReadState scanState;
+    scanState.numNodes = endOffsetInGroup - startOffsetInGroup;
+    scanUnfiltered(transaction, pageCursor, scanState, resultVector, chunkMeta, offsetInVector);
 }
 
 void Column::scan(node_group_idx_t nodeGroupIdx, ColumnChunk* columnChunk) {
@@ -370,31 +369,29 @@ void Column::scan(node_group_idx_t nodeGroupIdx, ColumnChunk* columnChunk) {
     }
 }
 
-void Column::scanInternal(
-    Transaction* transaction, ValueVector* nodeIDVector, ValueVector* resultVector) {
-    auto startNodeOffset = nodeIDVector->readNodeOffset(0);
-    KU_ASSERT(startNodeOffset % DEFAULT_VECTOR_CAPACITY == 0);
-    auto cursor = getPageCursorForOffset(transaction->getType(), startNodeOffset);
-    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(startNodeOffset);
+void Column::scanInternal(Transaction* transaction, const TableReadState& readState,
+    ValueVector* nodeIDVector, ValueVector* resultVector) {
+    KU_ASSERT(readState.startNodeOffset % DEFAULT_VECTOR_CAPACITY == 0);
+    auto cursor = getPageCursorForOffset(transaction->getType(), readState.startNodeOffset);
+    auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(readState.startNodeOffset);
     auto chunkMeta = metadataDA->get(nodeGroupIdx, transaction->getType());
     if (nodeIDVector->state->selVector->isUnfiltered()) {
-        scanUnfiltered(transaction, cursor, nodeIDVector->state->selVector->selectedSize,
-            resultVector, chunkMeta);
+        scanUnfiltered(transaction, cursor, readState, resultVector, chunkMeta);
     } else {
-        scanFiltered(transaction, cursor, nodeIDVector, resultVector, chunkMeta);
+        scanFiltered(transaction, cursor, readState, resultVector, chunkMeta);
     }
 }
 
 void Column::scanUnfiltered(Transaction* transaction, PageElementCursor& pageCursor,
-    uint64_t numValuesToScan, ValueVector* resultVector, const ColumnChunkMetadata& chunkMeta,
-    uint64_t startPosInVector) {
+    const TableReadState& readState, ValueVector* resultVector,
+    const ColumnChunkMetadata& chunkMeta, uint64_t startPosInVector) {
     uint64_t numValuesScanned = 0;
     auto numValuesPerPage =
         chunkMeta.compMeta.numValues(BufferPoolConstants::PAGE_4KB_SIZE, dataType);
-    while (numValuesScanned < numValuesToScan) {
+    while (numValuesScanned < readState.numNodes) {
         uint64_t numValuesToScanInPage =
             std::min((uint64_t)numValuesPerPage - pageCursor.elemPosInPage,
-                numValuesToScan - numValuesScanned);
+                readState.numNodes - numValuesScanned);
         KU_ASSERT(pageCursor.pageIdx < chunkMeta.pageIdx + chunkMeta.numPages);
         readFromPage(transaction, pageCursor.pageIdx, [&](uint8_t* frame) -> void {
             readToVectorFunc(frame, pageCursor, resultVector, numValuesScanned + startPosInVector,
@@ -406,18 +403,18 @@ void Column::scanUnfiltered(Transaction* transaction, PageElementCursor& pageCur
 }
 
 void Column::scanFiltered(Transaction* transaction, PageElementCursor& pageCursor,
-    ValueVector* nodeIDVector, ValueVector* resultVector, const ColumnChunkMetadata& chunkMeta) {
-    auto numValuesToScan = nodeIDVector->state->getOriginalSize();
+    const TableReadState& readState, ValueVector* resultVector,
+    const ColumnChunkMetadata& chunkMeta) {
     auto numValuesScanned = 0u;
     auto posInSelVector = 0u;
     auto numValuesPerPage =
         chunkMeta.compMeta.numValues(BufferPoolConstants::PAGE_4KB_SIZE, dataType);
-    while (numValuesScanned < numValuesToScan) {
+    while (numValuesScanned < readState.numNodes) {
         uint64_t numValuesToScanInPage =
             std::min((uint64_t)numValuesPerPage - pageCursor.elemPosInPage,
-                numValuesToScan - numValuesScanned);
-        if (isInRange(nodeIDVector->state->selVector->selectedPositions[posInSelVector],
-                numValuesScanned, numValuesScanned + numValuesToScanInPage)) {
+                readState.numNodes - numValuesScanned);
+        if (isInRange(readState.startNodeOffset + posInSelVector, numValuesScanned,
+                numValuesScanned + numValuesToScanInPage)) {
             KU_ASSERT(pageCursor.pageIdx < chunkMeta.pageIdx + chunkMeta.numPages);
             readFromPage(transaction, pageCursor.pageIdx, [&](uint8_t* frame) -> void {
                 readToVectorFunc(frame, pageCursor, resultVector, numValuesScanned,
@@ -426,9 +423,8 @@ void Column::scanFiltered(Transaction* transaction, PageElementCursor& pageCurso
         }
         numValuesScanned += numValuesToScanInPage;
         pageCursor.nextPage();
-        while (
-            posInSelVector < nodeIDVector->state->selVector->selectedSize &&
-            nodeIDVector->state->selVector->selectedPositions[posInSelVector] < numValuesScanned) {
+        while (posInSelVector < readState.numNodes &&
+               (readState.numNodes + posInSelVector) < numValuesScanned) {
             posInSelVector++;
         }
     }

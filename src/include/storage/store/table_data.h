@@ -9,6 +9,8 @@ namespace storage {
 struct TableReadState {
     virtual ~TableReadState() = default;
 
+    common::offset_t startNodeOffset = 0;
+    common::offset_t numNodes = 0;
     std::vector<common::column_id_t> columnIDs;
 };
 

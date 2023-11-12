@@ -11,8 +11,7 @@ namespace kuzu {
 namespace storage {
 
 RelDataReadState::RelDataReadState(ColumnDataFormat dataFormat)
-    : dataFormat{dataFormat}, startNodeOffsetInState{0}, numNodesInState{0},
-      currentCSRNodeOffset{0}, posInCurrentCSR{0} {
+    : dataFormat{dataFormat}, currentCSRNodeOffset{0}, posInCurrentCSR{0} {
     csrListEntries.resize(StorageConstants::NODE_GROUP_SIZE, {0, 0});
     csrOffsetChunk = ColumnChunkFactory::createColumnChunk(
         LogicalType{LogicalTypeID::INT64}, false /* enableCompression */);
@@ -22,14 +21,14 @@ void RelDataReadState::populateCSRListEntries() {
     auto csrOffsets = (common::offset_t*)csrOffsetChunk->getData();
     csrListEntries[0].offset = 0;
     csrListEntries[0].size = csrOffsets[0];
-    for (auto i = 1; i < numNodesInState; i++) {
+    for (auto i = 1; i < numNodes; i++) {
         csrListEntries[i].offset = csrOffsets[i - 1];
         csrListEntries[i].size = csrOffsets[i] - csrOffsets[i - 1];
     }
 }
 
 std::pair<common::offset_t, common::offset_t> RelDataReadState::getStartAndEndOffset() {
-    auto currCSRListEntry = csrListEntries[currentCSRNodeOffset - startNodeOffsetInState];
+    auto currCSRListEntry = csrListEntries[currentCSRNodeOffset - startNodeOffset];
     auto currCSRSize = currCSRListEntry.size;
     auto startOffset = currCSRListEntry.offset + posInCurrentCSR;
     auto numRowsToRead = std::min(currCSRSize - posInCurrentCSR, common::DEFAULT_VECTOR_CAPACITY);
@@ -83,6 +82,8 @@ void RelTableData::initializeReadState(Transaction* /*transaction*/, RelDataDire
     readState->direction = direction;
     readState->columnIDs = std::move(columnIDs);
     if (dataFormat == ColumnDataFormat::REGULAR) {
+        readState->startNodeOffset = inNodeIDVector->readNodeOffset(0);
+        readState->numNodes = inNodeIDVector->state->getOriginalSize();
         return;
     }
     auto nodeOffset =
@@ -92,9 +93,9 @@ void RelTableData::initializeReadState(Transaction* /*transaction*/, RelDataDire
     readState->posInCurrentCSR = 0;
     if (readState->isOutOfRange(nodeOffset)) {
         // Scan csr offsets and populate csr list entries for the new node group.
-        readState->startNodeOffsetInState = startNodeOffset;
+        readState->startNodeOffset = startNodeOffset;
         csrOffsetColumn->scan(nodeGroupIdx, readState->csrOffsetChunk.get());
-        readState->numNodesInState = readState->csrOffsetChunk->getNumValues();
+        readState->numNodes = readState->csrOffsetChunk->getNumValues();
         readState->populateCSRListEntries();
     }
     if (nodeOffset != readState->currentCSRNodeOffset) {
@@ -104,7 +105,7 @@ void RelTableData::initializeReadState(Transaction* /*transaction*/, RelDataDire
 
 void RelTableData::scanRegularColumns(Transaction* transaction, RelDataReadState& readState,
     ValueVector* inNodeIDVector, const std::vector<ValueVector*>& outputVectors) {
-    adjColumn->scan(transaction, inNodeIDVector, outputVectors[0]);
+    adjColumn->scan(transaction, readState, inNodeIDVector, outputVectors[0]);
     if (!ValueVector::discardNull(*outputVectors[0])) {
         return;
     }
@@ -116,7 +117,7 @@ void RelTableData::scanRegularColumns(Transaction* transaction, RelDataReadState
             continue;
         }
         columns[readState.columnIDs[i]]->scan(
-            transaction, inNodeIDVector, outputVectors[outputVectorId]);
+            transaction, readState, inNodeIDVector, outputVectors[outputVectorId]);
     }
 }
 

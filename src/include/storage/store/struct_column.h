@@ -29,8 +29,8 @@ public:
         uint32_t posInVectorToWriteFrom) final;
 
 protected:
-    void scanInternal(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
-        common::ValueVector* resultVector) final;
+    void scanInternal(transaction::Transaction* transaction, const TableReadState& readState,
+        common::ValueVector* nodeIDVector, common::ValueVector* resultVector) final;
     void lookupInternal(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         common::ValueVector* resultVector) final;
 
