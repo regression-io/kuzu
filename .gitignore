@@ -51,3 +51,6 @@ tools/java_api/test_db/
 tools/java_api/*.jar
 tools/java_api/*.class
 tools/java_api/*.log
+
+# WASM
+tools/wasm/server/node_modules
