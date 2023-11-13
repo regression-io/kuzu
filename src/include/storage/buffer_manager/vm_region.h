@@ -39,7 +39,11 @@ public:
 
 private:
     inline uint64_t getMaxRegionSize() const {
+#ifdef EMSCRIPTEN
+        return 4294967296; // 4 GB
+#else
         return maxNumFrameGroups * frameSize * common::StorageConstants::PAGE_GROUP_SIZE;
+#endif
     }
 
 private:
