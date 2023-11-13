@@ -168,8 +168,13 @@ static bool trySimpleInt128Cast(const char* input, uint64_t len, common::int128_
 
 static void simpleInt128Cast(const char* input, uint64_t len, common::int128_t& result) {
     if (!trySimpleInt128Cast(input, len, result)) {
-        throw common::ConversionException(
-            "Cast failed. " + std::string{input, len} + " is not within INT128 range.");
+#ifdef EMSCRIPTEN
+        auto str = std::string{input};
+#else
+        auto str = std::string{input, len};
+#endif
+
+        throw common::ConversionException("Cast failed. " + str + " is not within INT128 range.");
     }
 }
 
@@ -188,8 +193,13 @@ template<class T, bool IS_SIGNED = true>
 static void simpleIntegerCast(const char* input, uint64_t len, T& result,
     const common::LogicalType& type = common::LogicalType{common::LogicalTypeID::ANY}) {
     if (!trySimpleIntegerCast<T, IS_SIGNED>(input, len, result)) {
-        throw common::ConversionException("Cast failed. " + std::string{input, len} +
-                                          " is not in " + type.toString() + " range.");
+#ifdef EMSCRIPTEN
+        auto str = std::string{input};
+#else
+        auto str = std::string{input, len};
+#endif
+        throw common::ConversionException(
+            "Cast failed. " + str + " is not in " + type.toString() + " range.");
     }
 }
 
@@ -217,7 +227,12 @@ template<class T>
 static void doubleCast(const char* input, uint64_t len, T& result,
     const common::LogicalType& type = common::LogicalType{common::LogicalTypeID::ANY}) {
     if (!tryDoubleCast<T>(input, len, result)) {
-        throw common::ConversionException("Cast failed. " + std::string{input, len} +
+#ifdef EMSCRIPTEN
+        auto str = std::string{input};
+#else
+        auto str = std::string{input, len};
+#endif
+        throw common::ConversionException("Cast failed. " + str +
                                           " is not in " + type.toString() + " range.");
     }
 }

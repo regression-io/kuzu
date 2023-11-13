@@ -50,8 +50,13 @@ bool tryCastToBool(const char* input, uint64_t len, bool& result) {
 
 void castStringToBool(const char* input, uint64_t len, bool& result) {
     if (!tryCastToBool(input, len, result)) {
+#ifdef EMSCRIPTEN
+        auto str = std::string{input};
+#else
+        auto str = std::string{input, len};
+#endif
         throw common::ConversionException{
-            common::stringFormat("Value {} is not a valid boolean", std::string{input, len})};
+            common::stringFormat("Value {} is not a valid boolean", str)};
     }
 }
 

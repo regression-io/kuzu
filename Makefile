@@ -148,6 +148,11 @@ else
 	CARGO_BUILD_JOBS=$(NUM_THREADS) cargo test --features arrow -- --test-threads=1
 endif
 
+wasm:
+	$(call mkdirp,build/wasm) && cd build/wasm && \
+	emcmake cmake $(GENERATOR) $(FORCE_COLOR) $(SANITIZER_FLAG) $(WERROR_FLAG) $(RUNTIME_CHECK_FLAG) -DCMAKE_BUILD_TYPE=Release -DBUILD_WASM=TRUE -DBUILD_BENCHMARK=FALSE -DBUILD_TESTS=FALSE -DBUILD_SHELL=FALSE -DBUILD_PYTHON_API=FALSE -DENABLE_WERROR=FALSE ../.. && \
+	cmake --build . --config Release
+
 clean-python-api:
 ifeq ($(OS),Windows_NT)
 	if exist tools\python_api\build rmdir /s /q tools\python_api\build
