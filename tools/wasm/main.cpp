@@ -7,10 +7,11 @@ int main() {
     try {
         std::cout << "Hello, World!" << std::endl;
         std::cout << "Printed from C++." << std::endl;
-        std::cout << "Test 4" << std::endl;
+        std::cout << "Test 5" << std::endl;
         auto systemConfig = SystemConfig();
         systemConfig.bufferPoolSize = 1024 * 1024 * 50; // 50 MB
-        auto database = std::make_unique<Database>("tmp");
+        systemConfig.maxNumThreads = 1;
+        auto database = std::make_unique<Database>("tmp", systemConfig);
         std::cout << "Database created." << std::endl;
         auto connection = std::make_unique<Connection>(database.get());
 
