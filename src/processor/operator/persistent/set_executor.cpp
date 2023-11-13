@@ -123,7 +123,7 @@ static void writeToPropertyVector(
     writeToPropertyVector(relIDVector, propertyVector, propertyVectorPos, rhsVector, rhsVectorPos);
 }
 
-void SingleLabelRelSetExecutor::set() {
+void SingleLabelRelSetExecutor::set(ExecutionContext* context) {
     if (propertyID == INVALID_PROPERTY_ID) {
         if (lhsVector != nullptr) {
             auto pos = relIDVector->state->selVector->selectedPositions[0];
@@ -132,14 +132,14 @@ void SingleLabelRelSetExecutor::set() {
         return;
     }
     evaluator->evaluate();
-    // TODO(Guodong): Fix set.
-    //    table->updateRel(srcNodeIDVector, dstNodeIDVector, relIDVector, rhsVector, propertyID);
+    table->update(context->clientContext->getActiveTransaction(), propertyID, srcNodeIDVector,
+        dstNodeIDVector, relIDVector, rhsVector);
     if (lhsVector != nullptr) {
         writeToPropertyVector(relIDVector, lhsVector, rhsVector);
     }
 }
 
-void MultiLabelRelSetExecutor::set() {
+void MultiLabelRelSetExecutor::set(ExecutionContext* context) {
     evaluator->evaluate();
     KU_ASSERT(relIDVector->state->isFlat());
     auto pos = relIDVector->state->selVector->selectedPositions[0];
@@ -151,8 +151,8 @@ void MultiLabelRelSetExecutor::set() {
         return;
     }
     auto [table, propertyID] = tableIDToTableAndPropertyID.at(relID.tableID);
-    // TODO(Guodong): Fix set.
-    //    table->updateRel(srcNodeIDVector, dstNodeIDVector, relIDVector, rhsVector, propertyID);
+    table->update(context->clientContext->getActiveTransaction(), propertyID, srcNodeIDVector,
+        dstNodeIDVector, relIDVector, rhsVector);
     if (lhsVector != nullptr) {
         writeToPropertyVector(relIDVector, lhsVector, rhsVector);
     }

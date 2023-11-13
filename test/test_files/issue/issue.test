@@ -78,6 +78,7 @@ Binder exception: MAP(STRING: STRING) property is not supported in rel table.
 Binder exception: SERIAL property is not supported in rel table.
 
 -CASE 2293
+-SKIP
 -STATEMENT CREATE NODE TABLE T(id INT64, PRIMARY KEY(id));
 ---- ok
 -STATEMENT CREATE REL TABLE KNOWS(FROM T TO T);

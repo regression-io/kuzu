@@ -1,9 +1,9 @@
 -GROUP TinySnbDeleteRelTest
 -DATASET CSV tinysnb
--SKIP
 --
 
 -CASE DeleteRelMultiLabel1
+-SKIP
 -STATEMENT MATCH (a:person)-[e]->(b:person) WHERE a.ID = 0 RETURN COUNT(*)
 ---- 1
 5
@@ -15,6 +15,7 @@
 
 
 -CASE DeleteRelMultiLabel2
+-SKIP
 -STATEMENT MATCH (a)-[e]->(b) WHERE a.ID = 0 RETURN a.ID, b.ID, id(e)
 ---- 6
 0|1|4:0
@@ -38,6 +39,7 @@ Binder exception: Delete undirected rel is not supported.
 
 
 -CASE RedundantRelDeletions
+-SKIP
 -STATEMENT MATCH (a:person)-[:knows]->(b:person)-[e:knows]->(c:person) DELETE e
 ---- ok
 -STATEMENT MATCH (:person)-[:knows]->(:person) RETURN COUNT(*)
@@ -45,6 +47,7 @@ Binder exception: Delete undirected rel is not supported.
 2
 
 -CASE OptionalMatchDelete
+-SKIP
 -STATEMENT OPTIONAL MATCH (a:person) WHERE a.ID > 5 OPTIONAL MATCH (a)-[e:knows]->(b) DELETE e
 ---- ok
 -STATEMENT MATCH (:person)-[:knows]->(:person) RETURN COUNT(*)
@@ -56,5 +59,15 @@ Binder exception: Delete undirected rel is not supported.
 -STATEMENT OPTIONAL MATCH (a) WHERE a.ID =1 OPTIONAL MATCH (a)<-[e]-(b) DELETE e
 ---- ok
 -STATEMENT MATCH (a)<-[e]-(b) WHERE a.ID=1 RETURN COUNT(*)
+---- 1
+0
+
+-CASE DeleteMarriesRel
+-STATEMENT MATCH (a:person)-[e:marries]->(b:person) WHERE a.ID = 0 RETURN COUNT(*)
+---- 1
+1
+-STATEMENT MATCH (a:person)-[e:marries]->(b:person) WHERE a.ID = 0 DELETE e
+---- ok
+-STATEMENT MATCH (a:person)-[e:marries]->(b:person) WHERE a.ID = 0 RETURN COUNT(*)
 ---- 1
 0

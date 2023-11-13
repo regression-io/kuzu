@@ -20,7 +20,7 @@ RelDataReadState::RelDataReadState(ColumnDataFormat dataFormat)
 }
 
 void RelDataReadState::populateCSRListEntries() {
-    auto csrOffsets = (common::offset_t*)csrOffsetChunk->getData();
+    auto csrOffsets = (offset_t*)csrOffsetChunk->getData();
     csrListEntries[0].offset = 0;
     csrListEntries[0].size = csrOffsets[0];
     for (auto i = 1; i < numNodesInState; i++) {
@@ -29,11 +29,11 @@ void RelDataReadState::populateCSRListEntries() {
     }
 }
 
-std::pair<common::offset_t, common::offset_t> RelDataReadState::getStartAndEndOffset() {
+std::pair<offset_t, offset_t> RelDataReadState::getStartAndEndOffset() {
     auto currCSRListEntry = csrListEntries[currentCSRNodeOffset - startNodeOffsetInState];
     auto currCSRSize = currCSRListEntry.size;
     auto startOffset = currCSRListEntry.offset + posInCurrentCSR;
-    auto numRowsToRead = std::min(currCSRSize - posInCurrentCSR, common::DEFAULT_VECTOR_CAPACITY);
+    auto numRowsToRead = std::min(currCSRSize - posInCurrentCSR, DEFAULT_VECTOR_CAPACITY);
     posInCurrentCSR += numRowsToRead;
     return {startOffset, startOffset + numRowsToRead};
 }
@@ -43,7 +43,7 @@ RelTableData::RelTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH,
     RelsStoreStats* relsStoreStats, RelDataDirection direction, bool enableCompression)
     : TableData{dataFH, metadataFH, tableSchema->tableID, bufferManager, wal, enableCompression,
           getDataFormatFromSchema(tableSchema, direction)},
-      csrOffsetColumn{nullptr} {
+      direction{direction}, csrOffsetColumn{nullptr} {
     if (dataFormat == ColumnDataFormat::CSR) {
         auto csrOffsetMetadataDAHInfo = relsStoreStats->getCSROffsetMetadataDAHInfo(
             Transaction::getDummyWriteTrx().get(), tableID, direction);
@@ -78,11 +78,11 @@ RelTableData::RelTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH,
     dynamic_cast<InternalIDColumn*>(columns[REL_ID_COLUMN_ID].get())->setCommonTableID(tableID);
 }
 
-void RelTableData::initializeReadState(Transaction* /*transaction*/, RelDataDirection direction,
-    std::vector<common::column_id_t> columnIDs, ValueVector* inNodeIDVector,
-    RelDataReadState* readState) {
-    readState->direction = direction;
-    readState->columnIDs = std::move(columnIDs);
+void RelTableData::initializeReadState(Transaction* /*transaction*/,
+    std::vector<column_id_t> columnIDs, ValueVector* inNodeIDVector, TableReadState* readState) {
+    auto relReadState = ku_dynamic_cast<TableReadState*, RelDataReadState*>(readState);
+    relReadState->direction = direction;
+    relReadState->columnIDs = std::move(columnIDs);
     if (dataFormat == ColumnDataFormat::REGULAR) {
         return;
     }
@@ -90,21 +90,22 @@ void RelTableData::initializeReadState(Transaction* /*transaction*/, RelDataDire
         inNodeIDVector->readNodeOffset(inNodeIDVector->state->selVector->selectedPositions[0]);
     auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(nodeOffset);
     auto startNodeOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
-    readState->posInCurrentCSR = 0;
-    if (readState->isOutOfRange(nodeOffset)) {
+    relReadState->posInCurrentCSR = 0;
+    if (relReadState->isOutOfRange(nodeOffset)) {
         // Scan csr offsets and populate csr list entries for the new node group.
-        readState->startNodeOffsetInState = startNodeOffset;
-        csrOffsetColumn->scan(nodeGroupIdx, readState->csrOffsetChunk.get());
-        readState->numNodesInState = readState->csrOffsetChunk->getNumValues();
-        readState->populateCSRListEntries();
+        relReadState->startNodeOffsetInState = startNodeOffset;
+        csrOffsetColumn->scan(nodeGroupIdx, relReadState->csrOffsetChunk.get());
+        relReadState->numNodesInState = relReadState->csrOffsetChunk->getNumValues();
+        relReadState->populateCSRListEntries();
     }
-    if (nodeOffset != readState->currentCSRNodeOffset) {
-        readState->currentCSRNodeOffset = nodeOffset;
+    if (nodeOffset != relReadState->currentCSRNodeOffset) {
+        relReadState->currentCSRNodeOffset = nodeOffset;
     }
 }
 
 void RelTableData::scanRegularColumns(Transaction* transaction, RelDataReadState& readState,
     ValueVector* inNodeIDVector, const std::vector<ValueVector*>& outputVectors) {
+    // TODO: If write transaction, apply local changes.
     adjColumn->scan(transaction, inNodeIDVector, outputVectors[0]);
     if (!ValueVector::discardNull(*outputVectors[0])) {
         return;
@@ -123,6 +124,7 @@ void RelTableData::scanRegularColumns(Transaction* transaction, RelDataReadState
 
 void RelTableData::scanCSRColumns(Transaction* transaction, RelDataReadState& readState,
     ValueVector* /*inNodeIDVector*/, const std::vector<ValueVector*>& outputVectors) {
+    // TODO: If write transaction, apply local changes.
     KU_ASSERT(dataFormat == ColumnDataFormat::CSR);
     auto [startOffset, endOffset] = readState.getStartAndEndOffset();
     auto numRowsToRead = endOffset - startOffset;
@@ -145,6 +147,7 @@ void RelTableData::scanCSRColumns(Transaction* transaction, RelDataReadState& re
 
 void RelTableData::lookup(Transaction* transaction, TableReadState& readState,
     ValueVector* inNodeIDVector, const std::vector<ValueVector*>& outputVectors) {
+    // TODO: If write transaction, apply local changes.
     // Note: The scan operator should guarantee that the first property in the output is adj column.
     adjColumn->lookup(transaction, inNodeIDVector, outputVectors[0]);
     if (!ValueVector::discardNull(*outputVectors[0])) {
@@ -162,6 +165,33 @@ void RelTableData::lookup(Transaction* transaction, TableReadState& readState,
     }
 }
 
+void RelTableData::insert(transaction::Transaction* transaction, ValueVector* srcNodeIDVector,
+    ValueVector* dstNodeIDVector, const std::vector<ValueVector*>& propertyVectors) {
+    auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
+        tableID, direction, dataFormat, columns);
+
+    localTableData->insert(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
+        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, propertyVectors);
+}
+
+void RelTableData::update(transaction::Transaction* transaction, column_id_t columnID,
+    ValueVector* srcNodeIDVector, ValueVector* dstNodeIDVector, ValueVector* relIDVector,
+    ValueVector* propertyVector) {
+    auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
+        tableID, direction, dataFormat, columns);
+    localTableData->update(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
+        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, relIDVector,
+        columnID, propertyVector);
+}
+
+void RelTableData::delete_(transaction::Transaction* transaction, ValueVector* srcNodeIDVector,
+    ValueVector* dstNodeIDVector, ValueVector* relIDVector) {
+    auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
+        tableID, direction, dataFormat, columns);
+    localTableData->delete_(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
+        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, relIDVector);
+}
+
 void RelTableData::append(NodeGroup* nodeGroup) {
     if (dataFormat == ColumnDataFormat::CSR) {
         auto csrNodeGroup = static_cast<CSRNodeGroup*>(nodeGroup);
@@ -174,8 +204,48 @@ void RelTableData::append(NodeGroup* nodeGroup) {
     }
 }
 
-void RelTableData::prepareLocalTableToCommit(LocalTable* localTable) {
-    throw NotImplementedException("RelTableData::prepareLocalTableToCommit");
+void RelTableData::prepareCommit(LocalTable* localTable) {
+    auto localRelTable = ku_dynamic_cast<LocalTable*, LocalRelTable*>(localTable);
+    KU_ASSERT(localRelTable);
+    auto localRelTableData = localRelTable->getRelTableData(direction);
+    if (dataFormat == ColumnDataFormat::REGULAR) {
+        prepareCommitRegularColumns(localRelTableData);
+    } else {
+        prepareCommitCSRColumns(localRelTableData);
+    }
+}
+
+void RelTableData::prepareCommitRegularColumns(LocalRelTableData* localTableData) {
+    for (auto& [nodeGroupIdx, nodeGroup] : localTableData->nodeGroups) {
+        auto relNodeGroupInfo =
+            ku_dynamic_cast<RelNGInfo*, RegularRelNGInfo*>(nodeGroup->getRelNodeGroupInfo());
+        // TODO(Guodong): Should apply constratin check here. Cannot create a rel if already exists.
+        adjColumn->prepareCommitForChunk(nodeGroupIdx, nodeGroup->getAdjColumn(),
+            relNodeGroupInfo->adjInsertInfo, {} /* updateInfo */, relNodeGroupInfo->deleteInfo);
+        for (auto columnID = 0; columnID < columns.size(); columnID++) {
+            auto column = columns[columnID].get();
+            auto columnChunk = nodeGroup->getLocalColumnChunk(columnID);
+            columns[columnID]->prepareCommitForChunk(nodeGroupIdx, columnChunk,
+                relNodeGroupInfo->insertInfoPerColumn[columnID],
+                relNodeGroupInfo->updateInfoPerColumn[columnID], relNodeGroupInfo->deleteInfo);
+        }
+    }
+}
+
+void RelTableData::prepareCommitCSRColumns(LocalRelTableData* localTableData) {
+    KU_UNREACHABLE;
+    for (auto& [nodeGroupIdx, nodeGroup] : localTableData->nodeGroups) {
+        auto relNodeGroupInfo =
+            ku_dynamic_cast<RelNGInfo*, CSRRelNGInfo*>(nodeGroup->getRelNodeGroupInfo());
+        if (relNodeGroupInfo->deleteInfo.empty() && relNodeGroupInfo->adjInsertInfo.empty()) {
+            // We don't need to update the csr offset column if there is no deletion or insertion.
+            // Thus, we can fall back to directly update the adj column and property columns based
+            // on csr offsets.
+            // 1): we need to first scan csr and relID chunks out.
+            // 2): then we can figure out the actual csr offset of each value to be updated based on
+            // csr and relID chunks.
+        }
+    }
 }
 
 void RelTableData::checkpointInMemory() {

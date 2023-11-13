@@ -1,9 +1,9 @@
 -GROUP TinySnbCreateReadRelTest
 -DATASET CSV tinysnb
--SKIP
 --
 
--CASE CreateRelRead1
+-CASE CreateKnowsRead1
+-SKIP
 -STATEMENT MATCH (a:person), (b:person) WHERE a.ID = 0 AND b.ID = 2 CREATE (a)-[e:knows {date:date('2023-03-03')}]->(b) RETURN id(e), e.date;
 ---- 1
 0:14|2023-03-03
@@ -16,7 +16,8 @@
 (0:0)-{_LABEL: knows, _ID: 3:14, date: 2023-03-03}->(0:1)
 (0:0)-{_LABEL: knows, _ID: 3:15, date: 2023-04-04}->(0:1)
 
--CASE CreateRelRead2
+-CASE CreateKnowsRead2
+-SKIP
 -STATEMENT MATCH (a:person)-[e:knows]->(b:person) WHERE a.ID = 0 CREATE (a)-[f:knows {date:date('2023-04-04')}]->(b) RETURN f;
 ---- 3
 (0:0)-{_LABEL: knows, _ID: 0:14, date: 2023-04-04}->(0:1)
@@ -31,7 +32,8 @@
 (0:0)-{_LABEL: knows, _ID: 3:15, date: 2023-04-04}->(0:2)
 (0:0)-{_LABEL: knows, _ID: 3:16, date: 2023-04-04}->(0:3)
 
--CASE OptionalCreate
+-CASE OptionalCreateKnows
+-SKIP
 -STATEMENT OPTIONAL MATCH (a:person), (b:person) WHERE a.ID = 0 AND b.ID = 100 CREATE (a)-[e:knows {date:date("2023-01-01")}]->(b) RETURN e.date;
 ---- 1
 
@@ -49,3 +51,11 @@
 2021-06-30
 2021-06-30
 2021-06-30
+
+-CASE CreateMarriesRead
+-STATEMENT MATCH (a:person), (b:person) WHERE a.ID=9 AND b.ID=10 CREATE (a)-[e:marries {usedAddress: ['aka', 'fas'], note: 'new rel inserted and this is long'}]->(b) RETURN e.note;
+---- 1
+new rel inserted and this is long
+-STATEMENT MATCH (a:person)-[e:marries]->(b:person) WHERE a.ID=9 RETURN e.usedAddress, e.address, e.note;
+---- 1
+[aka,fas]||new rel inserted and this is long

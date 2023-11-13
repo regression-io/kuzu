@@ -90,6 +90,9 @@ void NodeTable::delete_(
         ku_dynamic_cast<TablesStatistics*, NodesStoreStatsAndDeletedIDs*>(tablesStatistics)
             ->deleteNode(tableID, nodeOffset);
     }
+    // TODO(Guodong): Check if the node has connected edges. To do this, we should keep a set of
+    // connected rel tables along with the direction under which the node table is the bound node.
+    // TODO(Guodong): Handle detech delete if specified.
     tableData->delete_(transaction, nodeIDVector);
 }
 
@@ -112,7 +115,7 @@ void NodeTable::prepareCommit(LocalTable* localTable) {
     if (pkIndex) {
         pkIndex->prepareCommit();
     }
-    tableData->prepareLocalTableToCommit(localTable);
+    tableData->prepareCommit(localTable);
     wal->addToUpdatedTables(tableID);
 }
 
@@ -120,7 +123,8 @@ void NodeTable::prepareRollback(LocalTable* localTable) {
     if (pkIndex) {
         pkIndex->prepareRollback();
     }
-    localTable->clear();
+    auto localNodeTable = ku_dynamic_cast<LocalTable*, LocalNodeTable*>(localTable);
+    localNodeTable->clear();
 }
 
 void NodeTable::checkpointInMemory() {

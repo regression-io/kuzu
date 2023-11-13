@@ -33,7 +33,7 @@ struct RelDataReadState : public TableReadState {
 };
 
 class RelsStoreStats;
-class RelTableData : public TableData {
+class RelTableData final : public TableData {
 public:
     static constexpr common::column_id_t REL_ID_COLUMN_ID = 0;
 
@@ -42,26 +42,38 @@ public:
         common::RelDataDirection direction, bool enableCompression);
 
     void initializeReadState(transaction::Transaction* transaction,
-        common::RelDataDirection direction, std::vector<common::column_id_t> columnIDs,
-        common::ValueVector* inNodeIDVector, RelDataReadState* readState);
+        std::vector<common::column_id_t> columnIDs, common::ValueVector* inNodeIDVector,
+        TableReadState* readState);
     inline void scan(transaction::Transaction* transaction, TableReadState& readState,
         common::ValueVector* inNodeIDVector,
-        const std::vector<common::ValueVector*>& outputVectors) final {
+        const std::vector<common::ValueVector*>& outputVectors) {
         auto& relReadState = common::ku_dynamic_cast<TableReadState&, RelDataReadState&>(readState);
         dataFormat == common::ColumnDataFormat::REGULAR ?
             scanRegularColumns(transaction, relReadState, inNodeIDVector, outputVectors) :
             scanCSRColumns(transaction, relReadState, inNodeIDVector, outputVectors);
     }
+
+    void insert(transaction::Transaction* transaction, common::ValueVector* srcNodeIDVector,
+        common::ValueVector* dstNodeIDVector,
+        const std::vector<common::ValueVector*>& propertyVectors);
+    void update(transaction::Transaction* transaction, common::column_id_t columnID,
+        common::ValueVector* srcNodeIDVector, common::ValueVector* dstNodeIDVector,
+        common::ValueVector* relIDVector, common::ValueVector* propertyVector);
+    void delete_(transaction::Transaction* transaction, common::ValueVector* srcNodeIDVector,
+        common::ValueVector* dstNodeIDVector, common::ValueVector* relIDVector);
+
     void lookup(transaction::Transaction* transaction, TableReadState& readState,
         common::ValueVector* inNodeIDVector,
-        const std::vector<common::ValueVector*>& outputVectors) final;
-    void append(NodeGroup* nodeGroup) final;
+        const std::vector<common::ValueVector*>& outputVectors);
+
+    void append(NodeGroup* nodeGroup);
 
     inline Column* getAdjColumn() const { return adjColumn.get(); }
     inline common::ColumnDataFormat getDataFormat() const { return dataFormat; }
 
-    void checkpointInMemory() final;
-    void rollbackInMemory() final;
+    void prepareCommit(LocalTable* localTable);
+    void checkpointInMemory();
+    void rollbackInMemory();
 
 private:
     void scanRegularColumns(transaction::Transaction* transaction, RelDataReadState& readState,
@@ -71,6 +83,9 @@ private:
         common::ValueVector* inNodeIDVector,
         const std::vector<common::ValueVector*>& outputVectors);
 
+    void prepareCommitRegularColumns(LocalRelTableData* localTableData);
+    void prepareCommitCSRColumns(LocalRelTableData* localTableData);
+
     static inline common::ColumnDataFormat getDataFormatFromSchema(
         catalog::RelTableSchema* tableSchema, common::RelDataDirection direction) {
         return tableSchema->isSingleMultiplicityInDirection(direction) ?
@@ -78,9 +93,8 @@ private:
                    common::ColumnDataFormat::CSR;
     }
 
-    void prepareLocalTableToCommit(LocalTable* localTable);
-
 private:
+    common::RelDataDirection direction;
     std::unique_ptr<Column> adjColumn;
     std::unique_ptr<Column> csrOffsetColumn;
 };
