@@ -12,6 +12,8 @@
 #include "processor/processor.h"
 #include "transaction/transaction_context.h"
 
+#include <iostream>
+
 using namespace kuzu::parser;
 using namespace kuzu::binder;
 using namespace kuzu::common;
@@ -62,8 +64,11 @@ std::unique_ptr<PreparedStatement> Connection::prepare(const std::string& query)
 }
 
 std::unique_ptr<QueryResult> Connection::query(const std::string& query) {
+    std::cout << "Connection::query" << std::endl;
     lock_t lck{mtx};
+    std::cout << "Connection::query: lock acquired" << std::endl;
     auto preparedStatement = prepareNoLock(query);
+    std::cout << "Connection::query: prepared" << std::endl;
     return executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get());
 }
 
@@ -190,17 +195,23 @@ void Connection::bindParametersNoLock(PreparedStatement* preparedStatement,
 
 std::unique_ptr<QueryResult> Connection::executeAndAutoCommitIfNecessaryNoLock(
     PreparedStatement* preparedStatement, uint32_t planIdx) {
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock" << std::endl;
     checkPreparedStatementAccessMode(preparedStatement);
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: access mode checked" << std::endl;
     clientContext->resetActiveQuery();
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: active query reset" << std::endl;
     clientContext->startTimingIfEnabled();
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: timing started" << std::endl;
     auto mapper = PlanMapper(
         *database->storageManager, database->memoryManager.get(), database->catalog.get());
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: mapper created" << std::endl;
     std::unique_ptr<PhysicalPlan> physicalPlan;
     if (preparedStatement->isSuccess()) {
         try {
             physicalPlan =
                 mapper.mapLogicalPlanToPhysical(preparedStatement->logicalPlans[planIdx].get(),
                     preparedStatement->statementResult->getColumns());
+            std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: physical plan mapped" << std::endl;
         } catch (std::exception& exception) {
             preparedStatement->success = false;
             preparedStatement->errMsg = exception.what();
@@ -211,40 +222,58 @@ std::unique_ptr<QueryResult> Connection::executeAndAutoCommitIfNecessaryNoLock(
         return queryResultWithError(preparedStatement->errMsg);
     }
     auto queryResult = std::make_unique<QueryResult>(preparedStatement->preparedSummary);
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: query result created" << std::endl;
     auto profiler = std::make_unique<Profiler>();
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: profiler created" << std::endl;
     auto executionContext =
         std::make_unique<ExecutionContext>(clientContext->numThreadsForExecution, profiler.get(),
             database->memoryManager.get(), database->bufferManager.get(), clientContext.get());
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: execution context created" << std::endl;
     profiler->enabled = preparedStatement->isProfile();
     auto executingTimer = TimeMetric(true /* enable */);
     executingTimer.start();
     std::shared_ptr<FactorizedTable> resultFT;
     try {
         if (preparedStatement->isTransactionStatement()) {
+            std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: is transaction statement" << std::endl;
             resultFT =
                 database->queryProcessor->execute(physicalPlan.get(), executionContext.get());
+            std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: resultFT created" << std::endl;
         } else {
+            std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: is not transaction statement" << std::endl;
             if (clientContext->transactionContext->isAutoTransaction()) {
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: is auto transaction" << std::endl;
                 clientContext->transactionContext->beginAutoTransaction(
                     preparedStatement->isReadOnly());
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: auto transaction begun" << std::endl;
                 resultFT =
                     database->queryProcessor->execute(physicalPlan.get(), executionContext.get());
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: resultFT created" << std::endl;
                 clientContext->transactionContext->commit();
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: auto transaction committed" << std::endl;
             } else {
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: is not auto transaction" << std::endl;
                 clientContext->transactionContext->validateManualTransaction(
                     preparedStatement->allowActiveTransaction(), preparedStatement->isReadOnly());
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: manual transaction validated" << std::endl;
                 resultFT =
                     database->queryProcessor->execute(physicalPlan.get(), executionContext.get());
+                std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: resultFT created" << std::endl;
             }
         }
     } catch (Exception& exception) {
+        std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: exception caught" << std::endl;
         clientContext->transactionContext->rollback();
+        std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: transaction rolled back" << std::endl;
         return queryResultWithError(std::string(exception.what()));
     }
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: resultFT created" << std::endl;
     executingTimer.stop();
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: timer stopped" << std::endl;
     queryResult->querySummary->executionTime = executingTimer.getElapsedTimeMS();
     queryResult->initResultTableAndIterator(
         std::move(resultFT), preparedStatement->statementResult->getColumns());
+    std::cout << "Connection::executeAndAutoCommitIfNecessaryNoLock: result table and iterator initialized" << std::endl;
     return queryResult;
 }
 
