@@ -34,9 +34,18 @@
 4|1946-08-25 19:07:22||2021-06-30|10 years 5 months 13:00:00.000024|[2huh9y89fsfw23,23nsihufhw723]|{locations: ['paris'], transfer: {day: 2000-01-01, amount: [20,5000]}}
 cool stuff found|1946-08-25 19:07:22||1950-05-14|00:23:00|[fwehu9h9832wewew,23u9h989sdfsss]|{locations: ['paris'], transfer: {day: 2011-05-01, amount: [2000,5340]}}
 matthew perry|2012-12-11 20:07:22||1950-05-14|20 years 30 days 48:00:00|[fwh9y81232uisuiehuf,ewnuihxy8dyf232]|{locations: ['vancouver'], transfer: {day: 2020-01-01, amount: [120,50]}}
+-STATEMENT CREATE REL TABLE knows3 (FROM person TO person, a INT16, notes UNION(firstmet DATE, type INT16, comment STRING),
+                meetTime TIMESTAMP,nullDouble DOUBLE, date DATE, validInterval INTERVAL, comments STRING[],
+                summary STRUCT(locations STRING[], transfer STRUCT(day DATE, amount INT64[])), MANY_MANY);
+---- ok
+-STATEMENT COPY knows3 (meetTime, date, validInterval, comments, summary) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
+---- error
+Binder exception: Number of columns mismatch. Expected 7 but got 8.
+-STATEMENT COPY knows3 (meetTime, date, validInterval, comments, summary, dummy) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
+---- error
+Binder exception: Table knows3 does not contain column dummy.
 
 -CASE NodePartialColumnsTest
--SKIP
 -LOG AllPartialColumns
 -STATEMENT CREATE NODE TABLE tableOfTypes2 (id INT64, int64Column INT64, doubleColumn DOUBLE, booleanColumn BOOLEAN,
                                             dateColumn DATE, timestampColumn TIMESTAMP, stringColumn STRING,

@@ -161,10 +161,8 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(const parser::Statement&
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getDstTableID());
     auto srcKey = columns[0];
     auto dstKey = columns[1];
-    auto srcNodeID =
-        createVariable(std::string(InternalKeyword::SRC_OFFSET), LogicalTypeID::INT64);
-    auto dstNodeID =
-        createVariable(std::string(InternalKeyword::DST_OFFSET), LogicalTypeID::INT64);
+    auto srcNodeID = createVariable(std::string(InternalKeyword::SRC_OFFSET), LogicalTypeID::INT64);
+    auto dstNodeID = createVariable(std::string(InternalKeyword::DST_OFFSET), LogicalTypeID::INT64);
     auto extraCopyRelInfo = std::make_unique<ExtraBoundCopyRelInfo>(
         srcTableSchema, dstTableSchema, srcNodeID, dstNodeID, srcKey, dstKey);
     auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(

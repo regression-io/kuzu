@@ -85,9 +85,8 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfRelFrom(const Statement& /*st
         std::make_unique<BoundFileScanInfo>(func, std::move(bindData), columns, offset);
     auto extraInfo = std::make_unique<ExtraBoundCopyRdfRelInfo>(columns[0], columns[2]);
     expression_vector columnsToCopy = {columns[0], columns[2], offset, columns[1]};
-    auto boundCopyFromInfo =
-        std::make_unique<BoundCopyFromInfo>(tableSchema, std::move(boundFileScanInfo),
-            containsSerial, std::move(extraInfo));
+    auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(
+        tableSchema, std::move(boundFileScanInfo), containsSerial, std::move(extraInfo));
     return std::make_unique<BoundCopyFrom>(std::move(boundCopyFromInfo));
 }
 

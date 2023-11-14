@@ -41,7 +41,8 @@ static void getNodeColumnsInCopyOrder(
     }
 }
 
-static void getRelColumnNamesInCopyOrder(TableSchema* tableSchema, std::vector<std::string>& columnNames, logical_types_t& columnTypes) {
+static void getRelColumnNamesInCopyOrder(
+    TableSchema* tableSchema, std::vector<std::string>& columnNames, logical_types_t& columnTypes) {
     columnNames.emplace_back(InternalKeyword::SRC_OFFSET);
     columnNames.emplace_back(InternalKeyword::DST_OFFSET);
     columnNames.emplace_back(InternalKeyword::ROW_OFFSET);
@@ -53,7 +54,6 @@ static void getRelColumnNamesInCopyOrder(TableSchema* tableSchema, std::vector<s
         columnNames.push_back(properties[i]->getName());
         columnTypes.push_back(properties[i]->getDataType()->copy());
     }
-
 }
 
 static std::shared_ptr<Expression> matchColumnExpression(
@@ -68,7 +68,8 @@ static std::shared_ptr<Expression> matchColumnExpression(
     return nullptr;
 }
 
-static std::vector<DataPos> getColumnDataPositions(const std::vector<std::string>& columnNames, const expression_vector& inputColumns, const Schema& fSchema) {
+static std::vector<DataPos> getColumnDataPositions(const std::vector<std::string>& columnNames,
+    const expression_vector& inputColumns, const Schema& fSchema) {
     std::vector<DataPos> columnPositions;
     for (auto& columnName : columnNames) {
         auto expr = matchColumnExpression(inputColumns, columnName);
@@ -103,14 +104,15 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyNodeFrom(LogicalOperator* l
     getNodeColumnsInCopyOrder(tableSchema, columnNames, columnTypes);
     std::vector<std::string> columnNamesExcludingSerial;
     for (auto i = 0u; i < columnNames.size(); ++i) {
-        if (columnTypes[i]->getLogicalTypeID()==common::LogicalTypeID::SERIAL) {
-            continue ;
+        if (columnTypes[i]->getLogicalTypeID() == common::LogicalTypeID::SERIAL) {
+            continue;
         }
         columnNamesExcludingSerial.push_back(columnNames[i]);
     }
     auto inputColumns = copyFromInfo->fileScanInfo->columns;
     inputColumns.push_back(copyFromInfo->fileScanInfo->offset);
-    auto columnPositions = getColumnDataPositions(columnNamesExcludingSerial, inputColumns, *outFSchema);
+    auto columnPositions =
+        getColumnDataPositions(columnNamesExcludingSerial, inputColumns, *outFSchema);
     sharedState->columnTypes = std::move(columnTypes);
     auto info = std::make_unique<CopyNodeInfo>(std::move(columnPositions), nodeTable,
         tableSchema->tableName, copyFromInfo->containsSerial, storageManager.compressionEnabled());
@@ -145,8 +147,7 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapPartitioner(LogicalOperator* lo
         std::vector<std::string> columnNames;
         logical_types_t columnTypes;
         getRelColumnNamesInCopyOrder(info->tableSchema, columnNames, columnTypes);
-        auto columnPositions = getColumnDataPositions(columnNames,
-            info->payloads, *outFSchema);
+        auto columnPositions = getColumnDataPositions(columnNames, info->payloads, *outFSchema);
         infos.push_back(std::make_unique<PartitioningInfo>(keyPos, columnPositions,
             std::move(columnTypes), PartitionerFunctions::partitionRelData));
     }

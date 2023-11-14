@@ -11,12 +11,6 @@ namespace catalog {
 
 class Property {
 public:
-    // TODO: these should be guarded as reserved property names.
-    //    static constexpr std::string_view REL_FROM_PROPERTY_NAME = "_from_";
-    //    static constexpr std::string_view REL_TO_PROPERTY_NAME = "_to_";
-    //    static constexpr std::string_view REL_SRC_OFFSET_NAME = "_src_offset_";
-    //    static constexpr std::string_view REL_DST_OFFSET_NAME = "_nbr_offset_";
-
     Property(std::string name, std::unique_ptr<common::LogicalType> dataType)
         : Property{std::move(name), std::move(dataType), common::INVALID_PROPERTY_ID,
               common::INVALID_TABLE_ID} {}
