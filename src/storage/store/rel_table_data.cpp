@@ -170,8 +170,7 @@ void RelTableData::insert(transaction::Transaction* transaction, ValueVector* sr
     auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
         tableID, direction, dataFormat, columns);
 
-    localTableData->insert(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
-        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, propertyVectors);
+    localTableData->insert(srcNodeIDVector, dstNodeIDVector, propertyVectors);
 }
 
 void RelTableData::update(transaction::Transaction* transaction, column_id_t columnID,
@@ -179,17 +178,14 @@ void RelTableData::update(transaction::Transaction* transaction, column_id_t col
     ValueVector* propertyVector) {
     auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
         tableID, direction, dataFormat, columns);
-    localTableData->update(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
-        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, relIDVector,
-        columnID, propertyVector);
+    localTableData->update(srcNodeIDVector, dstNodeIDVector, relIDVector, columnID, propertyVector);
 }
 
 void RelTableData::delete_(transaction::Transaction* transaction, ValueVector* srcNodeIDVector,
     ValueVector* dstNodeIDVector, ValueVector* relIDVector) {
     auto localTableData = transaction->getLocalStorage()->getOrCreateLocalRelTableData(
         tableID, direction, dataFormat, columns);
-    localTableData->delete_(direction == RelDataDirection::FWD ? srcNodeIDVector : dstNodeIDVector,
-        direction == RelDataDirection::FWD ? dstNodeIDVector : srcNodeIDVector, relIDVector);
+    localTableData->delete_(srcNodeIDVector, dstNodeIDVector, relIDVector);
 }
 
 void RelTableData::append(NodeGroup* nodeGroup) {
@@ -222,18 +218,46 @@ void RelTableData::prepareCommitRegularColumns(LocalRelTableData* localTableData
         // TODO(Guodong): Should apply constratin check here. Cannot create a rel if already exists.
         adjColumn->prepareCommitForChunk(nodeGroupIdx, nodeGroup->getAdjColumn(),
             relNodeGroupInfo->adjInsertInfo, {} /* updateInfo */, relNodeGroupInfo->deleteInfo);
-        for (auto columnID = 0; columnID < columns.size(); columnID++) {
-            auto column = columns[columnID].get();
-            auto columnChunk = nodeGroup->getLocalColumnChunk(columnID);
-            columns[columnID]->prepareCommitForChunk(nodeGroupIdx, columnChunk,
+        for (auto columnID = 0u; columnID < columns.size(); columnID++) {
+            auto localChunk = nodeGroup->getLocalColumnChunk(columnID);
+            columns[columnID]->prepareCommitForChunk(nodeGroupIdx, localChunk,
                 relNodeGroupInfo->insertInfoPerColumn[columnID],
                 relNodeGroupInfo->updateInfoPerColumn[columnID], relNodeGroupInfo->deleteInfo);
         }
     }
 }
 
+static uint64_t findPosOfRelIDFromArray(
+    offset_t* relIDArray, uint64_t startPos, uint64_t endPos, offset_t relOffset) {
+    for (auto i = startPos; i < endPos; i++) {
+        if (relIDArray[i] == relOffset) {
+            return i;
+        }
+    }
+    return UINT64_MAX;
+}
+
+static std::pair<offset_t, offset_t> getCSRStartAndEndOffset(
+    node_group_idx_t nodeGroupIdx, offset_t* csrOffsets, offset_t nodeOffset) {
+    auto nodeGroupStartOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
+    auto offsetInNodeGroup = nodeOffset - nodeGroupStartOffset;
+    return offsetInNodeGroup == 0 ?
+               std::make_pair((offset_t)0, csrOffsets[offsetInNodeGroup]) :
+               std::make_pair(csrOffsets[offsetInNodeGroup - 1], csrOffsets[offsetInNodeGroup]);
+}
+
+// static uint64_t getCSRListSize(
+//    node_group_idx_t nodeGroupIdx, offset_t* csrOffsets, offset_t nodeOffset) {
+//    auto nodeGroupStartOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
+//    auto offsetInNodeGroup = nodeOffset - nodeGroupStartOffset;
+//    return offsetInNodeGroup == 0 ?
+//               csrOffsets[offsetInNodeGroup] :
+//               csrOffsets[offsetInNodeGroup] - csrOffsets[offsetInNodeGroup - 1];
+//}
+
+// TODO: Generally, we should consider reading out a local csr offset when reading a rel. The local
+// csr offset can be used to speed up commiting updates and deletions without searching over relIDs.
 void RelTableData::prepareCommitCSRColumns(LocalRelTableData* localTableData) {
-    KU_UNREACHABLE;
     for (auto& [nodeGroupIdx, nodeGroup] : localTableData->nodeGroups) {
         auto relNodeGroupInfo =
             ku_dynamic_cast<RelNGInfo*, CSRRelNGInfo*>(nodeGroup->getRelNodeGroupInfo());
@@ -241,9 +265,49 @@ void RelTableData::prepareCommitCSRColumns(LocalRelTableData* localTableData) {
             // We don't need to update the csr offset column if there is no deletion or insertion.
             // Thus, we can fall back to directly update the adj column and property columns based
             // on csr offsets.
-            // 1): we need to first scan csr and relID chunks out.
-            // 2): then we can figure out the actual csr offset of each value to be updated based on
+
+            // First, scan the whole csr offset column chunk, whose size is NODE_GROUP_SZIE.
+            auto csrOffsetChunk = ColumnChunkFactory::createColumnChunk(
+                LogicalType{LogicalTypeID::INT64}, false /* enableCompression */);
+            csrOffsetColumn->scan(nodeGroupIdx, csrOffsetChunk.get());
+            // Next, scan the whole relID column chunk.
+            // TODO: We can only scan partial relID column chunk based on csr offset of the max
+            // nodeOffset.
+            auto numRels = csrOffsetChunk->getValue<offset_t>(csrOffsetChunk->getNumValues() - 1);
+            // NOTE: There is an implicit trick happening. Due to the mismatch of storage type and
+            // in-memory representation of INTERNAL_ID, we only store offset as INT64 on disk. Here
+            // we directly read relID's offset part from disk into an INT64 column chunk.
+            // TODO: The term of relID and relOffset is mixed. We should use relOffset instead.
+            auto relIDChunk = ColumnChunkFactory::createColumnChunk(
+                LogicalType{LogicalTypeID::INT64}, false /* enableCompression */, numRels);
+            columns[REL_ID_COLUMN_ID]->scan(nodeGroupIdx, relIDChunk.get());
+            // Finally, we can figure out the actual csr offset of each value to be updated based on
             // csr and relID chunks.
+            auto csrOffsets = (offset_t*)csrOffsetChunk->getData();
+            auto relIDs = (offset_t*)relIDChunk->getData();
+            for (auto columnID = 0u; columnID < columns.size(); columnID++) {
+                std::map<offset_t, row_idx_t> csrOffsetToRowIdx;
+                auto& updateInfo = relNodeGroupInfo->updateInfoPerColumn[columnID];
+                for (auto& [nodeOffset, relIDToRowIdx] : updateInfo) {
+                    for (auto [relID, rowIdx] : relIDToRowIdx) {
+                        auto [startCSROffset, endCSROffset] =
+                            getCSRStartAndEndOffset(nodeGroupIdx, csrOffsets, nodeOffset);
+                        auto csrOffset =
+                            findPosOfRelIDFromArray(relIDs, startCSROffset, endCSROffset, relID);
+                        KU_ASSERT(csrOffset != UINT64_MAX);
+                        csrOffsetToRowIdx[csrOffset] = rowIdx;
+                    }
+                }
+                if (!csrOffsetToRowIdx.empty()) {
+                    auto localChunk = nodeGroup->getLocalColumnChunk(columnID);
+                    columns[columnID]->prepareCommitForChunk(nodeGroupIdx, localChunk,
+                        {} /* insertInfo */, csrOffsetToRowIdx, {} /* deleteInfo */);
+                }
+            }
+        } else {
+            // We need to update the csr offset column. Thus, we cannot simply fall back to directly
+            // update the adj column and property columns based on csr offsets.
+            KU_UNREACHABLE;
         }
     }
 }

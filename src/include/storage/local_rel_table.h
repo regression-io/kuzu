@@ -101,9 +101,9 @@ public:
         } else {
             if (updateInfoPerColumn[columnID].contains(srcNodeOffset)) {
                 KU_ASSERT(!updateInfoPerColumn[columnID][srcNodeOffset].contains(relID));
-                updateInfoPerColumn[columnID][srcNodeOffset][relID] = rowIdx;
+                updateInfoPerColumn[columnID].at(srcNodeOffset)[relID] = rowIdx;
             } else {
-                updateInfoPerColumn[columnID][srcNodeOffset] = {{relID, rowIdx}};
+                updateInfoPerColumn[columnID][srcNodeOffset][relID] = rowIdx;
             }
         }
     }

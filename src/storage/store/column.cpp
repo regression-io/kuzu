@@ -697,8 +697,8 @@ void Column::populateWithDefaultVal(const Property& property, Column* column,
             capacity *= VAR_LIST_RESIZE_RATIO;
         }
         if (capacity > columnChunk->getCapacity()) {
-            auto newColumnChunk =
-                ColumnChunkFactory::createColumnChunk(*property.getDataType(), enableCompression);
+            auto newColumnChunk = ColumnChunkFactory::createColumnChunk(
+                *property.getDataType(), enableCompression, capacity);
             newColumnChunk->populateWithDefaultVal(defaultValueVector);
             newColumnChunk->setNumValues(chunkMeta.numValues);
             column->append(newColumnChunk.get(), i);
