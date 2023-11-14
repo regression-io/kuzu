@@ -47,13 +47,33 @@ static std::shared_ptr<Expression> matchColumnExpression(
 
 static void getColumnDataPositions(
     TableSchema* tableSchema, const expression_vector& inputColumns, const Schema& fSchema, std::vector<DataPos>& columnPositions, common::logical_types_t& columnTypes) {
-//    if (tableSchema->tableType == common::TableType::REL) {
-//        for (auto i = 0u; i < 3; ++i) {
-//            columnPositions.emplace_back(fSchema.getExpressionPos(*inputColumns[i]));
-//            columnTypes.push_back(inputColumns[i]->getDataType().copy());
-//        }
-//    }
+    if (tableSchema->tableType == common::TableType::REL) {
+        for (auto i = 0u; i < 3; ++i) {
+            columnPositions.emplace_back(fSchema.getExpressionPos(*inputColumns[i]));
+            columnTypes.push_back(inputColumns[i]->getDataType().copy());
+        }
+    }
     for (auto& property : tableSchema->getProperties()) {
+        columnTypes.push_back(property->getDataType()->copy());
+        auto expr = matchColumnExpression(inputColumns, property->getName());
+        if (expr != nullptr) {
+            columnPositions.emplace_back(fSchema.getExpressionPos(*expr));
+        } else {
+            columnPositions.push_back(DataPos());
+        }
+    }
+}
+
+static void play(
+    TableSchema* tableSchema, const expression_vector& inputColumns, const Schema& fSchema, std::vector<DataPos>& columnPositions, common::logical_types_t& columnTypes) {
+
+    for (auto i = 0u; i < 3; ++i) {
+        columnPositions.emplace_back(fSchema.getExpressionPos(*inputColumns[i]));
+        columnTypes.push_back(inputColumns[i]->getDataType().copy());
+    }
+    auto properties = tableSchema->getProperties();
+    for (auto i = 1; i < properties.size(); ++i) {
+        auto property  = properties[i];
         columnTypes.push_back(property->getDataType()->copy());
         auto expr = matchColumnExpression(inputColumns, property->getName());
         if (expr != nullptr) {
@@ -125,7 +145,7 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapPartitioner(LogicalOperator* lo
         auto keyPos = getDataPos(*info->key, *outFSchema);
         std::vector<DataPos> columnPositions;
         logical_types_t columnTypes;
-        getColumnDataPositions(info->tableSchema, info->payloads, *outFSchema, columnPositions, columnTypes);
+        play(info->tableSchema, info->payloads, *outFSchema, columnPositions, columnTypes);
         infos.push_back(std::make_unique<PartitioningInfo>(
                 keyPos, columnPositions, std::move(columnTypes), PartitionerFunctions::partitionRelData));
     }

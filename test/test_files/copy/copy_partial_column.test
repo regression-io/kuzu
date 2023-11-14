@@ -12,13 +12,13 @@
 ---- ok
 -STATEMENT COPY person FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/vPerson.csv" (Header=True) ;
 ---- ok
--STATEMENT CREATE REL TABLE knows1 (FROM person TO person, date DATE, meetTime TIMESTAMP,
+-STATEMENT CREATE REL TABLE knows1 (FROM person TO person, nullDouble DOUBLE, date DATE, meetTime TIMESTAMP,
      validInterval INTERVAL, comments STRING[], summary STRUCT(locations STRING[],
     transfer STRUCT(day DATE, amount INT64[])), notes UNION(firstmet DATE, type INT16, comment STRING), MANY_MANY);
 ---- ok
--STATEMENT COPY knows1 FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
+-STATEMENT COPY knows1 (date, meetTime, validInterval, comments, summary, notes) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
 ---- ok
--STATEMENT MATCH (a:person)-[e:knows1]->(:person) WHERE person.ID = 0 RETURN e.*;
+-STATEMENT MATCH (p:person)-[e:knows1]->(:person) WHERE p.ID = 0 RETURN e.*;
 ---- 1
 1
 
