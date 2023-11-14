@@ -1,4 +1,4 @@
--GROUP TCK
+-GROUP TCKMatch2
 -DATASET CSV tck
 
 --
