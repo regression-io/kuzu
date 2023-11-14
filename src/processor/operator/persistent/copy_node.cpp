@@ -59,7 +59,13 @@ void CopyNode::initGlobalStateInternal(ExecutionContext* /*context*/) {
 }
 
 void CopyNode::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* /*context*/) {
-    auto state = resultSet->getDataChunk(info->columnPositions[0].dataChunkPos)->state;
+    std::shared_ptr<DataChunkState> state;
+    for (auto& pos : info->columnPositions) {
+        if (pos.isValid()) {
+            state = resultSet->getValueVector(pos)->state;
+        }
+    }
+    KU_ASSERT(state != nullptr);
     for (auto i = 0; i < info->columnPositions.size(); ++i) {
         auto pos = info->columnPositions[i];
         if (pos.isValid()) {
@@ -67,7 +73,7 @@ void CopyNode::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* /*
         } else {
             auto columnType = sharedState->columnTypes[i].get();
             auto nullVector = std::make_shared<ValueVector>(*columnType);
-            nullVector->state = state;
+            nullVector->setState(state);
             nullVector->setAllNull();
             nullColumnVectors.push_back(nullVector);
             columnVectors.push_back(nullVector.get());

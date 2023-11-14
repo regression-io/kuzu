@@ -26,11 +26,10 @@ struct CopyRelInfo {
         common::RelDataDirection dataDirection, common::ColumnDataFormat dataFormat,
         storage::WAL* wal, bool compressionEnabled)
         : schema{schema}, partitioningIdx{partitioningIdx}, dataDirection{dataDirection},
-          dataFormat{dataFormat},  wal{wal}, compressionEnabled{compressionEnabled} {}
+          dataFormat{dataFormat}, wal{wal}, compressionEnabled{compressionEnabled} {}
     CopyRelInfo(const CopyRelInfo& other)
         : schema{other.schema}, partitioningIdx{other.partitioningIdx},
-          dataDirection{other.dataDirection},
-          dataFormat{other.dataFormat}, wal{other.wal} {}
+          dataDirection{other.dataDirection}, dataFormat{other.dataFormat}, wal{other.wal} {}
 
     inline std::unique_ptr<CopyRelInfo> copy() { return std::make_unique<CopyRelInfo>(*this); }
 };

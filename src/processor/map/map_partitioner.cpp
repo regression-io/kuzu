@@ -1,10 +1,10 @@
 //
 //#include "processor/plan_mapper.h"
 //
-//using namespace kuzu::planner;
+// using namespace kuzu::planner;
 //
-//namespace kuzu {
-//namespace processor {
+// namespace kuzu {
+// namespace processor {
 //
 //
 //

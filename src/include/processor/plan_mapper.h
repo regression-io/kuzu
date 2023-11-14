@@ -147,7 +147,8 @@ private:
     static std::vector<DataPos> getExpressionsDataPos(
         const binder::expression_vector& expressions, const planner::Schema& schema);
 
-    static inline DataPos getDataPos(const binder::Expression& expression, const planner::Schema& schema) {
+    static inline DataPos getDataPos(
+        const binder::Expression& expression, const planner::Schema& schema) {
         return DataPos(schema.getExpressionPos(expression));
     }
 

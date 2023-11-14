@@ -34,7 +34,8 @@ std::unique_ptr<Statement> Transformer::transformCopyFromByColumn(
     return copyFrom;
 }
 
-std::vector<std::string> Transformer::transformColumnNames(CypherParser::KU_ColumnNamesContext& ctx) {
+std::vector<std::string> Transformer::transformColumnNames(
+    CypherParser::KU_ColumnNamesContext& ctx) {
     std::vector<std::string> columnNames;
     for (auto& schemaName : ctx.oC_SchemaName()) {
         columnNames.push_back(transformSchemaName(*schemaName));

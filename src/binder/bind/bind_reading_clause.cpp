@@ -167,8 +167,8 @@ std::unique_ptr<BoundReadingClause> Binder::bindLoadFrom(
     }
     auto offset = expressionBinder.createVariableExpression(
         LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
-    auto info = std::make_unique<BoundFileScanInfo>(scanFunction, std::move(bindData),
-        std::move(columns), std::move(offset), TableType::UNKNOWN);
+    auto info = std::make_unique<BoundFileScanInfo>(
+        scanFunction, std::move(bindData), std::move(columns), std::move(offset));
     auto boundLoadFrom = std::make_unique<BoundLoadFrom>(std::move(info));
     if (loadFrom.hasWherePredicate()) {
         auto wherePredicate = expressionBinder.bindExpression(*loadFrom.getWherePredicate());

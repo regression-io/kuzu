@@ -28,17 +28,18 @@ static void appendIndexScan(
 
 static void appendPartitioner(BoundCopyFromInfo* copyFromInfo, LogicalPlan& plan) {
     std::vector<std::unique_ptr<LogicalPartitionerInfo>> infos;
-    auto readerConfig = reinterpret_cast<function::ScanBindData*>(
-        copyFromInfo->fileScanInfo->bindData.get())->config;
+    auto readerConfig =
+        reinterpret_cast<function::ScanBindData*>(copyFromInfo->fileScanInfo->bindData.get())
+            ->config;
     auto fileType = readerConfig.fileType;
     // TODO(Xiyang): Merge TURTLE case with other data types.
     switch (fileType) {
     case FileType::TURTLE: {
         auto extraInfo = reinterpret_cast<ExtraBoundCopyRdfRelInfo*>(copyFromInfo->extraInfo.get());
         infos.push_back(std::make_unique<LogicalPartitionerInfo>(
-            extraInfo->subjectOffset, copyFromInfo->columns, ColumnDataFormat::CSR));
+            extraInfo->subjectOffset, copyFromInfo->columns, ColumnDataFormat::CSR, nullptr));
         infos.push_back(std::make_unique<LogicalPartitionerInfo>(
-            extraInfo->objectOffset, copyFromInfo->columns, ColumnDataFormat::CSR));
+            extraInfo->objectOffset, copyFromInfo->columns, ColumnDataFormat::CSR, nullptr));
     } break;
     case FileType::CSV:
     case FileType::NPY:
@@ -50,13 +51,13 @@ static void appendPartitioner(BoundCopyFromInfo* copyFromInfo, LogicalPlan& plan
             std::make_unique<LogicalPartitionerInfo>(extraInfo->srcOffset, copyFromInfo->columns,
                 tableSchema->isSingleMultiplicityInDirection(RelDataDirection::FWD) ?
                     ColumnDataFormat::REGULAR :
-                    ColumnDataFormat::CSR));
+                    ColumnDataFormat::CSR, tableSchema));
         // Partitioner for BWD direction rel data.
         infos.push_back(
             std::make_unique<LogicalPartitionerInfo>(extraInfo->dstOffset, copyFromInfo->columns,
                 tableSchema->isSingleMultiplicityInDirection(RelDataDirection::BWD) ?
                     ColumnDataFormat::REGULAR :
-                    ColumnDataFormat::CSR));
+                    ColumnDataFormat::CSR, tableSchema));
     } break;
     default: {
         KU_UNREACHABLE;

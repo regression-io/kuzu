@@ -132,11 +132,11 @@ private:
     std::unique_ptr<BoundStatement> bindCopyRdfRelFrom(const parser::Statement& statement,
         std::unique_ptr<common::ReaderConfig> config, catalog::TableSchema* tableSchema);
     void bindExpectedNodeColumns(catalog::TableSchema* tableSchema,
-        const std::vector<std::string>& inputColumnNames,
-        std::vector<std::string>& columnNames, common::logical_types_t& columnTypes);
+        const std::vector<std::string>& inputColumnNames, std::vector<std::string>& columnNames,
+        common::logical_types_t& columnTypes);
     void bindExpectedRelColumns(catalog::TableSchema* tableSchema,
-        const std::vector<std::string>& inputColumnNames,
-        std::vector<std::string>& columnNames, common::logical_types_t& columnTypes);
+        const std::vector<std::string>& inputColumnNames, std::vector<std::string>& columnNames,
+        common::logical_types_t& columnTypes);
 
     std::unique_ptr<BoundStatement> bindCopyToClause(const parser::Statement& statement);
 

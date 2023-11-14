@@ -36,16 +36,15 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfNodeFrom(const Statement& /*s
     }
     auto bindInput = std::make_unique<function::ScanTableFuncBindInput>(
         memoryManager, *config, columnNames, std::move(columnTypes));
-    auto bindData =
-        func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
+    auto bindData = func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
     expression_vector columns;
     for (auto i = 0u; i < bindData->columnTypes.size(); i++) {
         columns.push_back(createVariable(bindData->columnNames[i], *bindData->columnTypes[i]));
     }
     auto offset = expressionBinder.createVariableExpression(
         LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
-    auto boundFileScanInfo = std::make_unique<BoundFileScanInfo>(
-        func, std::move(bindData), columns, std::move(offset), TableType::NODE);
+    auto boundFileScanInfo =
+        std::make_unique<BoundFileScanInfo>(func, std::move(bindData), columns, std::move(offset));
     auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(tableSchema,
         std::move(boundFileScanInfo), containsSerial, std::move(columns), nullptr /* extraInfo */);
     return std::make_unique<BoundCopyFrom>(std::move(boundCopyFromInfo));
@@ -74,16 +73,15 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfRelFrom(const Statement& /*st
     }
     auto bindInput = std::make_unique<function::ScanTableFuncBindInput>(
         memoryManager, *config, columnNames, std::move(columnTypes));
-    auto bindData =
-        func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
+    auto bindData = func->bindFunc(clientContext, bindInput.get(), catalog.getReadOnlyVersion());
     expression_vector columns;
     for (auto i = 0u; i < bindData->columnTypes.size(); i++) {
         columns.push_back(createVariable(bindData->columnNames[i], *bindData->columnTypes[i]));
     }
     auto offset = expressionBinder.createVariableExpression(
         LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
-    auto boundFileScanInfo = std::make_unique<BoundFileScanInfo>(
-        func, std::move(bindData), columns, offset, TableType::REL);
+    auto boundFileScanInfo =
+        std::make_unique<BoundFileScanInfo>(func, std::move(bindData), columns, offset);
     auto extraInfo = std::make_unique<ExtraBoundCopyRdfRelInfo>(columns[0], columns[2]);
     expression_vector columnsToCopy = {columns[0], columns[2], offset, columns[1]};
     auto boundCopyFromInfo =

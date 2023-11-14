@@ -1,5 +1,7 @@
 #include "binder/copy/bound_copy_from.h"
+#include "binder/expression/variable_expression.h"
 #include "catalog/node_table_schema.h"
+#include "planner/operator/logical_partitioner.h"
 #include "planner/operator/persistent/logical_copy_from.h"
 #include "processor/operator/call/in_query_call.h"
 #include "processor/operator/partitioner.h"
@@ -7,9 +9,6 @@
 #include "processor/operator/persistent/copy_rdf_resource.h"
 #include "processor/operator/persistent/copy_rel.h"
 #include "processor/plan_mapper.h"
-#include "binder/expression/variable_expression.h"
-#include "planner/operator/logical_partitioner.h"
-#include "processor/operator/partitioner.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::catalog;
@@ -34,7 +33,8 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyFrom(LogicalOperator* logic
     // LCOV_EXCL_STOP
 }
 
-static std::shared_ptr<Expression> matchColumnExpression(const expression_vector& columnExpressions, const std::string& columnName) {
+static std::shared_ptr<Expression> matchColumnExpression(
+    const expression_vector& columnExpressions, const std::string& columnName) {
     for (auto& expression : columnExpressions) {
         KU_ASSERT(expression->expressionType == ExpressionType::VARIABLE);
         auto var = reinterpret_cast<binder::VariableExpression*>(expression.get());
@@ -45,8 +45,23 @@ static std::shared_ptr<Expression> matchColumnExpression(const expression_vector
     return nullptr;
 }
 
-static std::vector<DataPos> getColumnDataPositions(TableSchema* tableSchema, const expression_vector& inputExpressions) {
-
+static void getColumnDataPositions(
+    TableSchema* tableSchema, const expression_vector& inputColumns, const Schema& fSchema, std::vector<DataPos>& columnPositions, common::logical_types_t& columnTypes) {
+//    if (tableSchema->tableType == common::TableType::REL) {
+//        for (auto i = 0u; i < 3; ++i) {
+//            columnPositions.emplace_back(fSchema.getExpressionPos(*inputColumns[i]));
+//            columnTypes.push_back(inputColumns[i]->getDataType().copy());
+//        }
+//    }
+    for (auto& property : tableSchema->getProperties()) {
+        columnTypes.push_back(property->getDataType()->copy());
+        auto expr = matchColumnExpression(inputColumns, property->getName());
+        if (expr != nullptr) {
+            columnPositions.emplace_back(fSchema.getExpressionPos(*expr));
+        } else {
+            columnPositions.push_back(DataPos());
+        }
+    }
 }
 
 std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyNodeFrom(LogicalOperator* logicalOperator) {
@@ -62,9 +77,9 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyNodeFrom(LogicalOperator* l
     auto sharedState = std::make_shared<CopyNodeSharedState>(inQueryCall->getSharedState());
     sharedState->wal = storageManager.getWAL();
     sharedState->table = nodeTable;
-    for (auto& property : tableSchema->getProperties()) {
-        sharedState->columnTypes.push_back(property->getDataType()->copy());
-    }
+//    for (auto& property : tableSchema->getProperties()) {
+//        sharedState->columnTypes.push_back(property->getDataType()->copy());
+//    }
     auto properties = tableSchema->getProperties();
     auto pk = tableSchema->getPrimaryKey();
     for (auto i = 0u; i < properties.size(); ++i) {
@@ -72,23 +87,18 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapCopyNodeFrom(LogicalOperator* l
             sharedState->pkColumnIdx = i;
         }
     }
-
     sharedState->pkType = pk->getDataType()->copy();
     sharedState->fTable = getSingleStringColumnFTable();
     std::vector<DataPos> columnPositions;
-    for (auto& property : properties) {
-        auto expr = matchColumnExpression(copyFromInfo->columns, property->getName());
-        if (expr != nullptr) {
-            columnPositions.emplace_back(outFSchema->getExpressionPos(*expr));
-        } else {
-            columnPositions.push_back(DataPos());
-        }
-    }
+    logical_types_t columnTypes;
+    getColumnDataPositions(tableSchema, copyFromInfo->columns, *outFSchema, columnPositions, columnTypes);
+    sharedState->columnTypes = std::move(columnTypes);
     auto info = std::make_unique<CopyNodeInfo>(std::move(columnPositions), nodeTable,
         tableSchema->tableName, copyFromInfo->containsSerial, storageManager.compressionEnabled());
     std::unique_ptr<PhysicalOperator> copyNode;
-    auto readerConfig = reinterpret_cast<function::ScanBindData*>(
-        copyFromInfo->fileScanInfo->bindData.get())->config;
+    auto readerConfig =
+        reinterpret_cast<function::ScanBindData*>(copyFromInfo->fileScanInfo->bindData.get())
+            ->config;
     if (readerConfig.fileType == FileType::TURTLE &&
         readerConfig.rdfReaderConfig->mode == RdfReaderMode::RESOURCE) {
         copyNode = std::make_unique<CopyRdfResource>(sharedState, std::move(info),
@@ -114,18 +124,10 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapPartitioner(LogicalOperator* lo
         auto info = logicalPartitioner->getInfo(i);
         auto keyPos = getDataPos(*info->key, *outFSchema);
         std::vector<DataPos> columnPositions;
-        for (auto& property : info->tableSchema->getProperties()) {
-            auto expr = matchColumnExpression(info->payloads, property->getName());
-            if (expr != nullptr) {
-                columnPositions.emplace_back(outFSchema->getExpressionPos(*expr));
-            } else {
-                columnPositions.push_back(DataPos());
-            }
-        }
-            infos.push_back(std::make_unique<PartitioningInfo>(
-                DataPos{outFSchema->getExpressionPos(*logicalInfo->key)},
-                getExpressionsDataPos(logicalInfo->payloads, *outFSchema),
-                PartitionerFunctions::partitionRelData));
+        logical_types_t columnTypes;
+        getColumnDataPositions(info->tableSchema, info->payloads, *outFSchema, columnPositions, columnTypes);
+        infos.push_back(std::make_unique<PartitioningInfo>(
+                keyPos, columnPositions, std::move(columnTypes), PartitionerFunctions::partitionRelData));
     }
     auto sharedState = std::make_shared<PartitionerSharedState>();
     return std::make_unique<Partitioner>(std::make_unique<ResultSetDescriptor>(outFSchema),
@@ -148,29 +150,12 @@ std::unique_ptr<PhysicalOperator> PlanMapper::createCopyRel(
     auto numPartitions = (maxBoundNodeOffset + StorageConstants::NODE_GROUP_SIZE) /
                          StorageConstants::NODE_GROUP_SIZE;
     partitionerSharedState->numPartitions[partitioningIdx] = numPartitions;
-    auto relIDDataPos =
-        DataPos{outFSchema->getExpressionPos(*copyFromInfo->fileScanInfo->internalID)};
-    DataPos srcOffsetPos, dstOffsetPos;
-    auto readerConfig = reinterpret_cast<function::ScanBindData*>(
-        copyFromInfo->fileScanInfo->copyFuncBindData.get())
-                            ->config;
-    if (readerConfig.fileType == FileType::TURTLE) {
-        auto extraInfo = reinterpret_cast<ExtraBoundCopyRdfRelInfo*>(copyFromInfo->extraInfo.get());
-        srcOffsetPos = DataPos{outFSchema->getExpressionPos(*extraInfo->subjectOffset)};
-        dstOffsetPos = DataPos{outFSchema->getExpressionPos(*extraInfo->objectOffset)};
-    } else {
-        auto extraInfo = reinterpret_cast<ExtraBoundCopyRelInfo*>(copyFromInfo->extraInfo.get());
-        srcOffsetPos = DataPos{outFSchema->getExpressionPos(*extraInfo->srcOffset)};
-        dstOffsetPos = DataPos{outFSchema->getExpressionPos(*extraInfo->dstOffset)};
-    }
     auto dataColumnPositions = getExpressionsDataPos(copyFromInfo->columns, *outFSchema);
     auto dataFormat = tableSchema->isSingleMultiplicityInDirection(direction) ?
                           ColumnDataFormat::REGULAR :
                           ColumnDataFormat::CSR;
-    auto copyRelInfo =
-        std::make_unique<CopyRelInfo>(tableSchema, partitioningIdx, direction, dataFormat,
-            dataColumnPositions, direction == RelDataDirection::FWD ? srcOffsetPos : dstOffsetPos,
-            relIDDataPos, storageManager.getWAL(), storageManager.compressionEnabled());
+    auto copyRelInfo = std::make_unique<CopyRelInfo>(tableSchema, partitioningIdx, direction,
+        dataFormat, storageManager.getWAL(), storageManager.compressionEnabled());
     return std::make_unique<CopyRel>(std::move(copyRelInfo), std::move(partitionerSharedState),
         std::move(sharedState), std::make_unique<ResultSetDescriptor>(outFSchema), getOperatorID(),
         copyFrom->getExpressionsForPrinting());
