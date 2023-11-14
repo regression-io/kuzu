@@ -86,6 +86,21 @@ private:
     void prepareCommitRegularColumns(LocalRelTableData* localTableData);
     void prepareCommitCSRColumns(LocalRelTableData* localTableData);
 
+    void prepareCommitCSRNGWithoutSliding(common::node_group_idx_t nodeGroupIdx,
+        CSRRelNGInfo* relNodeGroupInfo, ColumnChunk* csrOffsetChunk, ColumnChunk* relIDChunk,
+        LocalRelNG* localNodeGroup);
+    void prepareCommitCSRNGWithSliding(common::node_group_idx_t nodeGroupIdx,
+        CSRRelNGInfo* relNodeGroupInfo, ColumnChunk* csrOffsetChunk, ColumnChunk* relIDChunk,
+        LocalRelNG* localNodeGroup);
+
+    std::unique_ptr<ColumnChunk> slideCSROffsetColumnChunk(ColumnChunk* csrOffsetChunk,
+        CSRRelNGInfo* relNodeGroupInfo, common::offset_t nodeGroupStartOffset);
+    std::unique_ptr<ColumnChunk> slideCSRColunnChunk(ColumnChunk* csrOffsetChunk,
+        ColumnChunk* slidedCSROffsetChunkForCheck, ColumnChunk* relIDChunk,
+        const csr_offset_to_row_idx_t& insertInfo, const csr_offset_to_row_idx_t& updateInfo,
+        const std::map<common::offset_t, std::unordered_set<common::offset_t>>& deleteInfo,
+        common::node_group_idx_t nodeGroupIdx, Column* column, LocalVectorCollection* localChunk);
+
     static inline common::ColumnDataFormat getDataFormatFromSchema(
         catalog::RelTableSchema* tableSchema, common::RelDataDirection direction) {
         return tableSchema->isSingleMultiplicityInDirection(direction) ?

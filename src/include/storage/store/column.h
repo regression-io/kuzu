@@ -23,8 +23,6 @@ using read_values_to_page_func_t =
 // This is a special usage for the `batchLookup` interface.
 using batch_lookup_func_t = read_values_to_page_func_t;
 
-class NullColumn;
-class StructColumn;
 class Column {
 public:
     Column(common::LogicalType dataType, const MetadataDAHInfo& metaDAHeaderInfo,

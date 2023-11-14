@@ -3,7 +3,6 @@
 --
 
 -CASE DeleteRelMultiLabel1
--SKIP
 -STATEMENT MATCH (a:person)-[e]->(b:person) WHERE a.ID = 0 RETURN COUNT(*)
 ---- 1
 5
@@ -15,7 +14,6 @@
 
 
 -CASE DeleteRelMultiLabel2
--SKIP
 -STATEMENT MATCH (a)-[e]->(b) WHERE a.ID = 0 RETURN a.ID, b.ID, id(e)
 ---- 6
 0|1|4:0
@@ -47,7 +45,6 @@ Binder exception: Delete undirected rel is not supported.
 2
 
 -CASE OptionalMatchDelete
--SKIP
 -STATEMENT OPTIONAL MATCH (a:person) WHERE a.ID > 5 OPTIONAL MATCH (a)-[e:knows]->(b) DELETE e
 ---- ok
 -STATEMENT MATCH (:person)-[:knows]->(:person) RETURN COUNT(*)
