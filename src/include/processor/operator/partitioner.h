@@ -50,10 +50,11 @@ struct PartitioningInfo {
 
     PartitioningInfo(DataPos keyDataPos, std::vector<DataPos> columnDataPositions,
         common::logical_types_t columnTypes, partitioner_func_t partitionerFunc)
-        : keyDataPos{keyDataPos}, columnDataPositions{std::move(columnDataPositions)}, columnTypes{std::move(columnTypes)},
-          partitionerFunc{partitionerFunc} {}
+        : keyDataPos{keyDataPos}, columnDataPositions{std::move(columnDataPositions)},
+          columnTypes{std::move(columnTypes)}, partitionerFunc{partitionerFunc} {}
     inline std::unique_ptr<PartitioningInfo> copy() {
-        return std::make_unique<PartitioningInfo>(keyDataPos, columnDataPositions, common::LogicalType::copy(columnTypes), partitionerFunc);
+        return std::make_unique<PartitioningInfo>(keyDataPos, columnDataPositions,
+            common::LogicalType::copy(columnTypes), partitionerFunc);
     }
 
     static std::vector<std::unique_ptr<PartitioningInfo>> copy(

@@ -58,17 +58,6 @@ static void validateCopyNpyNotForRelTables(TableSchema* schema) {
     }
 }
 
-// static bool bindContainsSerial(TableSchema* tableSchema) {
-//    bool containsSerial = false;
-//    for (auto& property : tableSchema->properties) {
-//        if (property->getDataType()->getLogicalTypeID() == LogicalTypeID::SERIAL) {
-//            containsSerial = true;
-//            break;
-//        }
-//    }
-//    return containsSerial;
-//}
-
 std::unique_ptr<BoundStatement> Binder::bindCopyFromClause(const Statement& statement) {
     auto& copyStatement = (const CopyFrom&)statement;
     auto catalogContent = catalog.getReadOnlyVersion();
@@ -138,8 +127,8 @@ std::unique_ptr<BoundStatement> Binder::bindCopyNodeFrom(const Statement& statem
         LogicalType(LogicalTypeID::INT64), InternalKeyword::ANONYMOUS);
     auto boundFileScanInfo =
         std::make_unique<BoundFileScanInfo>(func, std::move(bindData), columns, std::move(offset));
-    auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(tableSchema,
-        std::move(boundFileScanInfo), containsSerial, std::move(columns), nullptr /* extraInfo */);
+    auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(
+        tableSchema, std::move(boundFileScanInfo), containsSerial, nullptr /* extraInfo */);
     return std::make_unique<BoundCopyFrom>(std::move(boundCopyFromInfo));
 }
 
@@ -162,7 +151,7 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(const parser::Statement&
         columns.push_back(createVariable(bindData->columnNames[i], *bindData->columnTypes[i]));
     }
     auto offset = expressionBinder.createVariableExpression(
-        LogicalType(LogicalTypeID::INT64), common::InternalKeyword::ANONYMOUS);
+        LogicalType(LogicalTypeID::INT64), std::string(InternalKeyword::ROW_OFFSET));
     auto boundFileScanInfo =
         std::make_unique<BoundFileScanInfo>(func, std::move(bindData), columns, offset);
     auto relTableSchema = reinterpret_cast<RelTableSchema*>(tableSchema);
@@ -173,19 +162,13 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRelFrom(const parser::Statement&
     auto srcKey = columns[0];
     auto dstKey = columns[1];
     auto srcNodeID =
-        createVariable(std::string(Property::REL_BOUND_OFFSET_NAME), LogicalTypeID::INT64);
+        createVariable(std::string(InternalKeyword::SRC_OFFSET), LogicalTypeID::INT64);
     auto dstNodeID =
-        createVariable(std::string(Property::REL_NBR_OFFSET_NAME), LogicalTypeID::INT64);
+        createVariable(std::string(InternalKeyword::DST_OFFSET), LogicalTypeID::INT64);
     auto extraCopyRelInfo = std::make_unique<ExtraBoundCopyRelInfo>(
         srcTableSchema, dstTableSchema, srcNodeID, dstNodeID, srcKey, dstKey);
-    // Skip the first two columns.
-    expression_vector columnsToCopy{std::move(srcNodeID), std::move(dstNodeID), std::move(offset)};
-    for (auto i = NUM_COLUMNS_TO_SKIP_IN_REL_FILE; i < columns.size(); i++) {
-        columnsToCopy.push_back(columns[i]);
-    }
-    auto boundCopyFromInfo =
-        std::make_unique<BoundCopyFromInfo>(tableSchema, std::move(boundFileScanInfo),
-            containsSerial, std::move(columnsToCopy), std::move(extraCopyRelInfo));
+    auto boundCopyFromInfo = std::make_unique<BoundCopyFromInfo>(
+        tableSchema, std::move(boundFileScanInfo), containsSerial, std::move(extraCopyRelInfo));
     return std::make_unique<BoundCopyFrom>(std::move(boundCopyFromInfo));
 }
 
@@ -248,8 +231,8 @@ void Binder::bindExpectedRelColumns(TableSchema* tableSchema,
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getSrcTableID()));
     auto dstTable = reinterpret_cast<NodeTableSchema*>(
         catalog.getReadOnlyVersion()->getTableSchema(relTableSchema->getDstTableID()));
-    columnNames.push_back(std::string(Property::REL_FROM_PROPERTY_NAME));
-    columnNames.push_back(std::string(Property::REL_TO_PROPERTY_NAME));
+    columnNames.push_back("from");
+    columnNames.push_back("to");
     auto srcPKColumnType = srcTable->getPrimaryKey()->getDataType()->copy();
     if (srcPKColumnType->getLogicalTypeID() == LogicalTypeID::SERIAL) {
         srcPKColumnType = std::make_unique<LogicalType>(LogicalTypeID::INT64);
