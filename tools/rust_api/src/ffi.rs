@@ -313,7 +313,7 @@ pub(crate) mod ffi {
         fn create_value_interval(months: i32, days: i32, micros: i64) -> UniquePtr<Value>;
         fn create_value_internal_id(offset: u64, table: u64) -> UniquePtr<Value>;
 
-        fn node_value_get_node_id(value: &Value) -> [u64; 2];
+        fn node_value_get_node_id(value: &Value) -> &Value;
         fn node_value_get_label_name(value: &Value) -> String;
 
         fn node_value_get_num_properties(value: &Value) -> usize;
@@ -322,7 +322,7 @@ pub(crate) mod ffi {
 
         fn rel_value_get_label_name(value: &Value) -> String;
 
-        fn rel_value_get_src_id(value: &Value) -> [u64; 2];
+        fn rel_value_get_src_id(value: &Value) -> &Value;
         fn rel_value_get_dst_id(value: &Value) -> [u64; 2];
 
         fn rel_value_get_num_properties(value: &Value) -> usize;
