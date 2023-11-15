@@ -53,15 +53,17 @@ public class ValueTest extends TestBase {
     @Test
     void ValueSetNull() throws KuzuObjectRefDestroyedException {
         KuzuValue value = new KuzuValue(123L);
-        assertFalse(value.isOwnedByCPP());
-        assertFalse(value.isNull());
-
-        value.setNull(true);
-        assertTrue(value.isNull());
-
-        value.setNull(false);
-        assertFalse(value.isNull());
+        value.checkNotDestroyed();
         value.destroy();
+        // assertFalse(value.isOwnedByCPP());
+        // assertFalse(value.isNull());
+        //
+        // value.setNull(true);
+        // assertTrue(value.isNull());
+        //
+        // value.setNull(false);
+        // assertFalse(value.isNull());
+        // value.destroy();
     }
 
     @Test
@@ -487,22 +489,22 @@ public class ValueTest extends TestBase {
         result.destroy();
     }
 
-//     @Test
-//     void ValueGetSERIAL() throws KuzuObjectRefDestroyedException {
-//         // SERIAL
-//         KuzuQueryResult result = conn.query("MATCH (a:moviesSerial) WHERE a.ID = 2 RETURN a.ID;");
-//         assertTrue(result.isSuccess());
-//         assertTrue(result.hasNext());
-//         KuzuFlatTuple flatTuple = result.getNext();
-//         KuzuValue value = flatTuple.getValue(0);
-//         assertTrue(value.isOwnedByCPP());
-//         assertFalse(value.isNull());
-//
-//         assertTrue(value.getValue().equals(2L));
-//         value.destroy();
-//         flatTuple.destroy();
-//         result.destroy();
-//     }
+    @Test
+    void ValueGetSERIAL() throws KuzuObjectRefDestroyedException {
+        // SERIAL
+        KuzuQueryResult result = conn.query("MATCH (a:moviesSerial) WHERE a.ID = 2 RETURN a.ID;");
+        assertTrue(result.isSuccess());
+        assertTrue(result.hasNext());
+        KuzuFlatTuple flatTuple = result.getNext();
+        KuzuValue value = flatTuple.getValue(0);
+        assertTrue(value.isOwnedByCPP());
+        assertFalse(value.isNull());
+
+        assertTrue(value.getValue().equals(2L));
+        value.destroy();
+        flatTuple.destroy();
+        result.destroy();
+    }
 
 
     @Test

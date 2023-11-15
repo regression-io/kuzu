@@ -1,7 +1,6 @@
 #include <iostream>
 #include <unordered_map>
 
-#include "binder/bound_statement_result.h"
 // This header is generated at build time. See CMakeLists.txt.
 #include "com_kuzudb_KuzuNative.h"
 #include "common/exception/conversion.h"
@@ -11,10 +10,8 @@
 #include "common/types/value/node.h"
 #include "common/types/value/rel.h"
 #include "common/types/value/value.h"
-#include "json.hpp"
 #include "main/kuzu.h"
 #include "main/query_summary.h"
-#include "planner/operator/logical_plan.h"
 #include <jni.h>
 
 using namespace kuzu::main;
@@ -95,8 +92,11 @@ LogicalType* getDataType(JNIEnv* env, jobject thisDT) {
 
 Value* getValue(JNIEnv* env, jobject thisValue) {
     jclass javaValueClass = env->GetObjectClass(thisValue);
+    KU_ASSERT(!env->ExceptionCheck());
     jfieldID fieldID = env->GetFieldID(javaValueClass, "v_ref", "J");
+    KU_ASSERT(!env->ExceptionCheck());
     jlong fieldValue = env->GetLongField(thisValue, fieldID);
+    KU_ASSERT(!env->ExceptionCheck());
 
     uint64_t address = static_cast<uint64_t>(fieldValue);
     Value* v = reinterpret_cast<Value*>(address);
@@ -742,8 +742,29 @@ JNIEXPORT void JNICALL Java_com_kuzudb_KuzuNative_kuzu_1value_1copy(
 
 JNIEXPORT void JNICALL Java_com_kuzudb_KuzuNative_kuzu_1value_1destroy(
     JNIEnv* env, jclass, jobject thisValue) {
+    jclass cls = env->GetObjectClass(thisValue);
+    KU_ASSERT(!env->ExceptionCheck());
+    jfieldID destroyedID = env->GetFieldID(cls, "destroyed", "Z");
+    KU_ASSERT(!env->ExceptionCheck());
+    bool isDestroyed = env->GetBooleanField(thisValue, destroyedID);
+    KU_ASSERT(!env->ExceptionCheck());
+    KU_ASSERT(!static_cast<bool>(isDestroyed));
+
+    jfieldID ownedID = env->GetFieldID(cls, "isOwnedByCPP", "Z");
+    KU_ASSERT(!env->ExceptionCheck());
+    bool isOwnedByCPP = env->GetBooleanField(thisValue, ownedID);
+    KU_ASSERT(!env->ExceptionCheck());
+    KU_ASSERT(!isOwnedByCPP);
+
     Value* v = getValue(env, thisValue);
-    delete v;
+    std::cerr << "deleting"
+              << " " << v << " with destroyed " << isDestroyed << " and owned " << isOwnedByCPP
+              << std::endl;
+
+    static std::mutex mtx;
+    static std::unordered_set<Value*> deleted_values;
+    std::lock_guard guard(mtx);
+    KU_ASSERT(deleted_values.insert(v).second);
 }
 
 JNIEXPORT jlong JNICALL Java_com_kuzudb_KuzuNative_kuzu_1value_1get_1list_1size(

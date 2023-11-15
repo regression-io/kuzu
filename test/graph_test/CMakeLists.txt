@@ -11,7 +11,7 @@ target_include_directories(
         ../../src/include
 )
 
-target_link_libraries(graph_test PUBLIC GTest::GTest kuzu)
+target_link_libraries(graph_test PUBLIC GTest::GTest kuzu_interface)
 
 
 add_library(

@@ -1,8 +1,7 @@
 import datetime
 import sys
 
-sys.path.append('../build/')
-import kuzu
+from common import kuzu
 from pandas import Timestamp, Timedelta, isna
 
 

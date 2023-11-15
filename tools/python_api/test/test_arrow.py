@@ -1,7 +1,6 @@
 import sys
 
-sys.path.append('../build/')
-import kuzu
+from common import kuzu
 import pyarrow as pa
 import datetime
 import ground_truth

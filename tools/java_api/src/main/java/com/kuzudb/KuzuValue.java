@@ -71,8 +71,13 @@ public class KuzuValue {
     public void destroy() throws KuzuObjectRefDestroyedException {
         checkNotDestroyed();
         if (!isOwnedByCPP) {
+            System.out.println("Started deleting" + v_ref);
+            assert this != null;
+            assert !destroyed;
             KuzuNative.kuzu_value_destroy(this);
+            assert !destroyed;
             destroyed = true;
+            System.out.println("Finished deleting" + v_ref);
         }
     }
 

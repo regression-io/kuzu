@@ -1,8 +1,7 @@
 import pytest
 import sys
-sys.path.append('../build/')
-import kuzu
 
+from common import kuzu
 
 def test_exception(establish_connection):
     conn, db = establish_connection

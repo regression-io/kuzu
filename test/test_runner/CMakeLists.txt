@@ -12,4 +12,4 @@ target_include_directories(
         ../../src/include
 )
 
-target_link_libraries(test_runner PUBLIC GTest::GTest kuzu)
+target_link_libraries(test_runner PUBLIC GTest::GTest kuzu_interface)

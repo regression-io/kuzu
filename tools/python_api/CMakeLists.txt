@@ -1,8 +1,3 @@
-include(FetchContent)
-project(_kuzu)
-
-set(CMAKE_CXX_STANDARD 20)
-
 file(GLOB SOURCE_PY
         "src_py/*")
 
@@ -19,15 +14,9 @@ pybind11_add_module(_kuzu
         src_cpp/numpy/numpy_type.cpp
         src_cpp/numpy/numpy_scan.cpp)
 
-set_target_properties(_kuzu
-        PROPERTIES
-        LIBRARY_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build/kuzu"
-        RUNTIME_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build/kuzu"
-        ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_SOURCE_DIR}/build/kuzu")
-
 target_link_libraries(_kuzu
         PRIVATE
-        kuzu)
+        kuzu_interface)
 
 target_include_directories(
         _kuzu
@@ -35,6 +24,6 @@ target_include_directories(
         ../../src/include
         src_cpp/include)
 
-get_target_property(PYTHON_DEST _kuzu LIBRARY_OUTPUT_DIRECTORY)
-
-file(COPY ${SOURCE_PY} DESTINATION ${PYTHON_DEST})
+set(PYTHON_INSTALL_DEST ${CMAKE_INSTALL_LIBDIR}/python/kuzu)
+install(FILES ${SOURCE_PY} DESTINATION ${PYTHON_INSTALL_DEST})
+install(TARGETS _kuzu DESTINATION ${PYTHON_INSTALL_DEST})

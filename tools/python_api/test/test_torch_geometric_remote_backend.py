@@ -2,8 +2,7 @@ import torch
 import random
 import sys
 
-sys.path.append('../build/')
-import kuzu
+from common import kuzu
 
 TINY_SNB_KNOWS_GROUND_TRUTH = {
     0: [2, 3, 5],

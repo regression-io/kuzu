@@ -3,9 +3,7 @@ import sys
 import pytest
 import shutil
 
-sys.path.append('../build/')
-import kuzu
-
+from common import kuzu
 
 def init_npy(conn):
     conn.execute(

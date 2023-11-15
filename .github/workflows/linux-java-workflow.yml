@@ -16,7 +16,7 @@ jobs:
         with:
           name: java-lib-linux-x86_64
           path: tools/java_api/build/libkuzu_java_native*
-      
+
       - uses: actions/upload-artifact@v3
         with:
           name: kuzu-linux-jar

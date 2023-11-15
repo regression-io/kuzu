@@ -11,4 +11,4 @@ target_include_directories(kuzu_rs
         ${KUZU_RS_BINDINGS_DIR}/sources
 )
 
-target_link_libraries(kuzu_rs kuzu)
+target_link_libraries(kuzu_rs kuzu_interface)
