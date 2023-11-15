@@ -8,9 +8,10 @@
 #include "catalog/rel_table_group_schema.h"
 #include "catalog/rel_table_schema.h"
 #include "common/exception/binder.h"
+#include "common/exception/not_implemented.h"
 #include "common/keyword/rdf_keyword.h"
 #include "common/string_format.h"
-#include "function/cast/functions/cast_string_to_functions.h"
+#include "function/cast/functions/cast_from_string_functions.h"
 #include "main/client_context.h"
 
 using namespace kuzu::common;
@@ -115,7 +116,7 @@ std::shared_ptr<Expression> Binder::createPath(
             extraFieldFromStructType(
                 recursiveInfo->rel->getDataType(), relFieldNameSet, relFieldNames, relFieldTypes);
         } else {
-            KU_UNREACHABLE;
+            throw NotImplementedException("Binder::createPath");
         }
     }
     auto nodeExtraInfo = std::make_unique<StructTypeInfo>(nodeFieldNames, nodeFieldTypes);
