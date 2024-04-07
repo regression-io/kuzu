@@ -28,11 +28,11 @@ using batch_lookup_func_t = read_values_to_page_func_t;
 
 class NullColumn;
 class StructColumn;
-class LocalVectorCollection;
 class Column {
     friend class StringColumn;
-    friend class VarListLocalColumn;
+    friend class ListLocalColumn;
     friend class StructColumn;
+    friend class ListColumn;
 
 public:
     struct ReadState {
@@ -63,7 +63,8 @@ public:
     virtual void lookup(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         common::ValueVector* resultVector);
 
-    virtual void append(ColumnChunk* columnChunk, uint64_t nodeGroupIdx);
+    // Append column chunk in a new node group.
+    virtual void append(ColumnChunk* columnChunk, common::node_group_idx_t nodeGroupIdx);
 
     inline common::LogicalType& getDataType() { return dataType; }
     inline const common::LogicalType& getDataType() const { return dataType; }
@@ -74,10 +75,11 @@ public:
 
     Column* getNullColumn();
 
+    virtual void prepareCommit();
     virtual void prepareCommitForChunk(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localColumnChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo,
-        const offset_set_t& deleteInfo);
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunks,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunks,
+        const offset_to_row_idx_t& updateInfo, const offset_set_t& deleteInfo);
     virtual void prepareCommitForChunk(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, const std::vector<common::offset_t>& dstOffsets,
         ColumnChunk* chunk, common::offset_t startSrcOffset);
@@ -88,8 +90,8 @@ public:
     void populateWithDefaultVal(transaction::Transaction* transaction,
         InMemDiskArray<ColumnChunkMetadata>* metadataDA, common::ValueVector* defaultValueVector);
 
-    inline ColumnChunkMetadata getMetadata(
-        common::node_group_idx_t nodeGroupIdx, transaction::TransactionType transaction) const {
+    inline ColumnChunkMetadata getMetadata(common::node_group_idx_t nodeGroupIdx,
+        transaction::TransactionType transaction) const {
         return metadataDA->get(nodeGroupIdx, transaction);
     }
     inline InMemDiskArray<ColumnChunkMetadata>* getMetadataDA() const { return metadataDA.get(); }
@@ -107,13 +109,14 @@ public:
         ColumnChunk* data, common::offset_t dataOffset, common::length_t numValues);
 
     // Append values to the end of the node group, resizing it if necessary
-    common::offset_t appendValues(
-        common::node_group_idx_t nodeGroupIdx, const uint8_t* data, common::offset_t numValues);
+    common::offset_t appendValues(common::node_group_idx_t nodeGroupIdx, const uint8_t* data,
+        common::offset_t numValues);
 
-    ReadState getReadState(
-        transaction::TransactionType transactionType, common::node_group_idx_t nodeGroupIdx) const;
+    ReadState getReadState(transaction::TransactionType transactionType,
+        common::node_group_idx_t nodeGroupIdx) const;
 
-    static void applyLocalChunkToColumnChunk(LocalVectorCollection* localChunk,
+    virtual std::unique_ptr<ColumnChunk> getEmptyChunkForCommit(uint64_t capacity);
+    static void applyLocalChunkToColumnChunk(const ChunkCollection& localChunks,
         ColumnChunk* columnChunk, const offset_to_row_idx_t& info);
 
 protected:
@@ -140,15 +143,13 @@ protected:
         common::offset_t dataOffset = 0, common::offset_t numValues = 1);
 
     // Produces a page cursor for the offset relative to the given node group
-    PageCursor getPageCursorForOffsetInGroup(
-        common::offset_t offsetInChunk, const ReadState& state);
+    PageCursor getPageCursorForOffsetInGroup(common::offset_t offsetInChunk,
+        const ReadState& state);
     // Produces a page cursor for the absolute node offset
     PageCursor getPageCursorForOffset(transaction::TransactionType transactionType,
         common::node_group_idx_t nodeGroupIdx, common::offset_t offsetInChunk);
-    void updatePageWithCursor(
-        PageCursor cursor, const std::function<void(uint8_t*, common::offset_t)>& writeOp);
-
-    virtual std::unique_ptr<ColumnChunk> getEmptyChunkForCommit(uint64_t capacity);
+    void updatePageWithCursor(PageCursor cursor,
+        const std::function<void(uint8_t*, common::offset_t)>& writeOp);
 
     inline common::offset_t getMaxOffset(const std::vector<common::offset_t>& offsets) {
         common::offset_t maxOffset = 0u;
@@ -158,27 +159,31 @@ protected:
         return maxOffset;
     }
 
+    static ChunkCollection getNullChunkCollection(const ChunkCollection& chunkCollection);
+
 private:
-    bool isInsertionsOutOfPagesCapacity(
-        const ColumnChunkMetadata& metadata, const offset_to_row_idx_t& insertInfo);
-    bool isMaxOffsetOutOfPagesCapacity(
-        const ColumnChunkMetadata& metadata, common::offset_t maxOffset);
-    bool checkUpdateInPlace(const ColumnChunkMetadata& metadata, LocalVectorCollection* localChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo);
+    bool isInsertionsOutOfPagesCapacity(const ColumnChunkMetadata& metadata,
+        const offset_to_row_idx_t& insertInfo);
+    bool isMaxOffsetOutOfPagesCapacity(const ColumnChunkMetadata& metadata,
+        common::offset_t maxOffset);
+    bool checkUpdateInPlace(const ColumnChunkMetadata& metadata, const ChunkCollection& localChunks,
+        const offset_to_row_idx_t& writeInfo);
     virtual bool canCommitInPlace(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo);
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunks,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunks,
+        const offset_to_row_idx_t& updateInfo);
     virtual bool canCommitInPlace(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, const std::vector<common::offset_t>& dstOffsets,
         ColumnChunk* chunk, common::offset_t srcOffset);
     virtual void commitLocalChunkInPlace(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo,
-        const offset_set_t& deleteInfo);
-    virtual void commitLocalChunkOutOfPlace(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk,
-        bool isNewNodeGroup, const offset_to_row_idx_t& insertInfo,
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunks,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunks,
         const offset_to_row_idx_t& updateInfo, const offset_set_t& deleteInfo);
+    virtual void commitLocalChunkOutOfPlace(transaction::Transaction* transaction,
+        common::node_group_idx_t nodeGroupIdx, bool isNewNodeGroup,
+        const ChunkCollection& localInsertChunks, const offset_to_row_idx_t& insertInfo,
+        const ChunkCollection& localUpdateChunks, const offset_to_row_idx_t& updateInfo,
+        const offset_set_t& deleteInfo);
     virtual void commitColumnChunkInPlace(common::node_group_idx_t nodeGroupIdx,
         const std::vector<common::offset_t>& dstOffsets, ColumnChunk* chunk,
         common::offset_t srcOffset);
@@ -188,7 +193,7 @@ private:
         common::offset_t srcOffset);
 
     void applyLocalChunkToColumn(common::node_group_idx_t nodeGroupIdx,
-        LocalVectorCollection* localChunk, const offset_to_row_idx_t& info);
+        const ChunkCollection& localChunks, const offset_to_row_idx_t& info);
 
     // check if val is in range [start, end)
     static inline bool isInRange(uint64_t val, uint64_t start, uint64_t end) {
@@ -199,8 +204,8 @@ protected:
     std::string name;
     DBFileID dbFileID;
     common::LogicalType dataType;
-    // TODO(bmwinger): Remove. Only used by var_list_column_chunk for something which should be
-    // rewritten
+    // TODO(bmwinger): Remove. Only used by StorageDriver, which should be rewritten to not use this
+    // field.
     uint32_t numBytesPerFixedSizedValue;
     BMFileHandle* dataFH;
     BMFileHandle* metadataFH;
@@ -221,7 +226,7 @@ class InternalIDColumn : public Column {
 public:
     InternalIDColumn(std::string name, const MetadataDAHInfo& metaDAHeaderInfo,
         BMFileHandle* dataFH, BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-        transaction::Transaction* transaction, RWPropertyStats stats);
+        transaction::Transaction* transaction, RWPropertyStats stats, bool enableCompression);
 
     inline void scan(transaction::Transaction* transaction, common::ValueVector* nodeIDVector,
         common::ValueVector* resultVector) override {
@@ -243,7 +248,7 @@ public:
         populateCommonTableID(resultVector);
     }
 
-    // TODO(Guodong): Should figure out a better way to set tableID, and remove this function.
+    // TODO(Guodong): This function should be removed through rewritting INTERNAL_ID as STRUCT.
     inline void setCommonTableID(common::table_id_t tableID) { commonTableID = tableID; }
 
 private:

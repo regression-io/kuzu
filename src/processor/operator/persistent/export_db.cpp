@@ -7,8 +7,10 @@
 #include "catalog/catalog.h"
 #include "catalog/catalog_entry/node_table_catalog_entry.h"
 #include "catalog/catalog_entry/rel_table_catalog_entry.h"
+#include "common/copier_config/csv_reader_config.h"
 #include "common/file_system/virtual_file_system.h"
 #include "common/string_utils.h"
+#include "function/scalar_macro_function.h"
 
 using namespace kuzu::common;
 using namespace kuzu::transaction;
@@ -19,22 +21,20 @@ namespace processor {
 
 using std::stringstream;
 
-static void writeStringStreamToFile(
-    VirtualFileSystem* vfs, std::string ss_string, const std::string& path) {
+static void writeStringStreamToFile(VirtualFileSystem* vfs, std::string ss_string,
+    const std::string& path) {
     auto fileInfo = vfs->openFile(path, O_WRONLY | O_CREAT);
-    fileInfo->writeFile(
-        reinterpret_cast<const uint8_t*>(ss_string.c_str()), ss_string.size(), 0 /* offset */);
+    fileInfo->writeFile(reinterpret_cast<const uint8_t*>(ss_string.c_str()), ss_string.size(),
+        0 /* offset */);
 }
 
-static void writeCopyStatement(
-    stringstream& ss, std::string tableName, ReaderConfig* boundFileInfo) {
-    ss << "COPY ";
-    ss << tableName << " FROM \"" << boundFileInfo->filePaths[0] << "/" << tableName;
+static void writeCopyStatement(stringstream& ss, std::string tableName,
+    ReaderConfig* boundFileInfo) {
     auto fileTypeStr = FileTypeUtils::toString(boundFileInfo->fileType);
     StringUtils::toLower(fileTypeStr);
-    ss << "." << fileTypeStr;
     auto csvConfig = common::CSVReaderConfig::construct(boundFileInfo->options);
-    ss << "\"" << csvConfig.option.toCypher() << std::endl;
+    ss << stringFormat("COPY {} FROM \"{}.{}\" {};\n", tableName, tableName, fileTypeStr,
+        csvConfig.option.toCypher());
 }
 
 std::string getSchemaCypher(main::ClientContext* clientContext, transaction::Transaction* tx) {
@@ -57,8 +57,8 @@ std::string getMacroCypher(catalog::Catalog* catalog, transaction::Transaction* 
     return ss.str();
 }
 
-std::string getCopyCypher(
-    catalog::Catalog* catalog, transaction::Transaction* tx, ReaderConfig* boundFileInfo) {
+std::string getCopyCypher(catalog::Catalog* catalog, transaction::Transaction* tx,
+    ReaderConfig* boundFileInfo) {
     stringstream ss;
     for (auto& nodeTableEntry : catalog->getNodeTableEntries(tx)) {
         auto tableName = nodeTableEntry->getName();
@@ -83,8 +83,8 @@ bool ExportDB::getNextTuplesInternal(ExecutionContext* context) {
     // write the copy.cypher file
     // for every table, we write COPY FROM statement
     writeStringStreamToFile(context->clientContext->getVFSUnsafe(),
-        getCopyCypher(
-            context->clientContext->getCatalog(), context->clientContext->getTx(), &boundFileInfo),
+        getCopyCypher(context->clientContext->getCatalog(), context->clientContext->getTx(),
+            &boundFileInfo),
         boundFileInfo.filePaths[0] + "/copy.cypher");
     return false;
 }

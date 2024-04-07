@@ -1,5 +1,6 @@
 #include "function/uuid/vector_uuid_functions.h"
 
+#include "function/scalar_function.h"
 #include "function/uuid/functions/gen_random_uuid.h"
 
 using namespace kuzu::common;
@@ -9,9 +10,8 @@ namespace function {
 
 function_set GenRandomUUIDFunction::getFunctionSet() {
     function_set definitions;
-    definitions.push_back(
-        make_unique<ScalarFunction>(GEN_RANDOM_UUID_FUNC_NAME, std::vector<LogicalTypeID>{},
-            LogicalTypeID::UUID, ScalarFunction::PoniterExecFunction<ku_uuid_t, GenRandomUUID>));
+    definitions.push_back(make_unique<ScalarFunction>(name, std::vector<LogicalTypeID>{},
+        LogicalTypeID::UUID, ScalarFunction::PoniterExecFunction<ku_uuid_t, GenRandomUUID>));
     return definitions;
 }
 

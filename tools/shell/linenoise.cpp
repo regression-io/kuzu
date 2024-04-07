@@ -1369,6 +1369,7 @@ static void searchNext(linenoiseState* l) {
 bool pastedInput(int ifd) {
 #ifdef _WIN32
     fd_set readfds;
+    FD_ZERO(&readfds);
     FD_SET(ifd, &readfds);
     int isPasted = select(0, &readfds, NULL, NULL, NULL);
     return (isPasted != 0 && isPasted != SOCKET_ERROR);
@@ -2348,6 +2349,8 @@ int linenoiseHistoryLoad(const char* filename) {
             // if the first character is a colon this is a colon command
             // add the full line to the history
             linenoiseHistoryAdd(buf);
+            continue;
+        } else if (result.empty() && buf[0] == '\0') {
             continue;
         }
         // else we are parsing a Cypher statement

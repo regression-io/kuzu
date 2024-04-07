@@ -173,11 +173,6 @@ struct PlannerKnobs {
     static constexpr uint64_t SIP_RATIO = 5;
 };
 
-struct ClientContextConstants {
-    // We disable query timeout by default.
-    static constexpr uint64_t TIMEOUT_IN_MS = 0;
-};
-
 struct OrderByConstants {
     static constexpr uint64_t NUM_BYTES_FOR_PAYLOAD_IDX = 8;
     static constexpr uint64_t MIN_SIZE_TO_REDUCE = common::DEFAULT_VECTOR_CAPACITY * 5;

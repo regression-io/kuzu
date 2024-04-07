@@ -1,21 +1,14 @@
 #pragma once
 
+#include <cmath>
+
 #include "common/types/ku_string.h"
 #include "common/types/types.h"
 #include "function/hash/hash_functions.h"
 #include "storage/index/hash_index_header.h"
-#include "storage/storage_utils.h"
 
 namespace kuzu {
 namespace storage {
-
-// NOLINTBEGIN(cert-err58-cpp): This is the best way to get the datatype size because it avoids
-// refactoring.
-static const uint32_t NUM_BYTES_FOR_INT64_KEY =
-    storage::StorageUtils::getDataTypeSize(common::LogicalType{common::LogicalTypeID::INT64});
-static const uint32_t NUM_BYTES_FOR_STRING_KEY =
-    storage::StorageUtils::getDataTypeSize(common::LogicalType{common::LogicalTypeID::STRING});
-// NOLINTEND(cert-err58-cpp)
 
 const uint64_t NUM_HASH_INDEXES_LOG2 = 8;
 const uint64_t NUM_HASH_INDEXES = 1 << NUM_HASH_INDEXES_LOG2;
@@ -36,10 +29,10 @@ struct SlotInfo {
 class HashIndexUtils {
 
 public:
-    inline static bool areStringPrefixAndLenEqual(
-        std::string_view keyToLookup, const common::ku_string_t& keyInEntry) {
-        auto prefixLen = std::min(
-            (uint64_t)keyInEntry.len, static_cast<uint64_t>(common::ku_string_t::PREFIX_LENGTH));
+    inline static bool areStringPrefixAndLenEqual(std::string_view keyToLookup,
+        const common::ku_string_t& keyInEntry) {
+        auto prefixLen = std::min((uint64_t)keyInEntry.len,
+            static_cast<uint64_t>(common::ku_string_t::PREFIX_LENGTH));
         return keyToLookup.length() == keyInEntry.len &&
                memcmp(keyToLookup.data(), keyInEntry.prefix, prefixLen) == 0;
     }
@@ -56,8 +49,8 @@ public:
         return (hash >> (64 - NUM_HASH_INDEXES_LOG2 - 8)) & 255;
     }
 
-    inline static slot_id_t getPrimarySlotIdForHash(
-        const HashIndexHeader& indexHeader, common::hash_t hash) {
+    inline static slot_id_t getPrimarySlotIdForHash(const HashIndexHeader& indexHeader,
+        common::hash_t hash) {
         auto slotId = hash & indexHeader.levelHashMask;
         if (slotId < indexHeader.nextSplitSlotId) {
             slotId = hash & indexHeader.higherLevelHashMask;
@@ -69,8 +62,8 @@ public:
         return (HashIndexUtils::hash(key) >> (64 - NUM_HASH_INDEXES_LOG2)) & (NUM_HASH_INDEXES - 1);
     }
 
-    static inline uint64_t getNumRequiredEntries(
-        uint64_t numExistingEntries, uint64_t numNewEntries) {
+    static inline uint64_t getNumRequiredEntries(uint64_t numExistingEntries,
+        uint64_t numNewEntries) {
         return ceil((double)(numExistingEntries + numNewEntries) * common::DEFAULT_HT_LOAD_FACTOR);
     }
 };

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "aggregate_function.h"
-#include "scalar_function.h"
+#include "function.h"
 
 namespace kuzu {
 namespace catalog {
@@ -24,8 +24,8 @@ public:
         const std::vector<common::LogicalType>& inputTypes, bool isDistinct,
         catalog::CatalogSet* catalogSet);
 
-    static uint32_t getCastCost(
-        common::LogicalTypeID inputTypeID, common::LogicalTypeID targetTypeID);
+    static uint32_t getCastCost(common::LogicalTypeID inputTypeID,
+        common::LogicalTypeID targetTypeID);
 
 private:
     // TODO(Xiyang): move casting cost related functions to binder.
@@ -67,8 +67,8 @@ private:
 
     static Function* getBestMatch(std::vector<Function*>& functions);
 
-    static uint32_t getFunctionCost(
-        const std::vector<common::LogicalType>& inputTypes, Function* function, bool isOverload);
+    static uint32_t getFunctionCost(const std::vector<common::LogicalType>& inputTypes,
+        Function* function, bool isOverload);
     static uint32_t matchParameters(const std::vector<common::LogicalType>& inputTypes,
         const std::vector<common::LogicalTypeID>& targetTypeIDs, bool isOverload);
     static uint32_t matchVarLengthParameters(const std::vector<common::LogicalType>& inputTypes,
@@ -77,47 +77,6 @@ private:
         bool isDistinct, AggregateFunction* function);
 
     static void validateSpecialCases(std::vector<Function*>& candidateFunctions,
-        const std::string& name, const std::vector<common::LogicalType>& inputTypes,
-        function::function_set& set);
-
-    // Scalar functions.
-    static void registerScalarFunctions(catalog::CatalogSet* catalogSet);
-    static void registerComparisonFunctions(catalog::CatalogSet* catalogSet);
-    static void registerArithmeticFunctions(catalog::CatalogSet* catalogSet);
-    static void registerDateFunctions(catalog::CatalogSet* catalogSet);
-    static void registerTimestampFunctions(catalog::CatalogSet* catalogSet);
-    static void registerIntervalFunctions(catalog::CatalogSet* catalogSet);
-    static void registerBlobFunctions(catalog::CatalogSet* catalogSet);
-    static void registerUUIDFunctions(catalog::CatalogSet* catalogSet);
-    static void registerStringFunctions(catalog::CatalogSet* catalogSet);
-    static void registerCastFunctions(catalog::CatalogSet* catalogSet);
-    static void registerListFunctions(catalog::CatalogSet* catalogSet);
-    static void registerStructFunctions(catalog::CatalogSet* catalogSet);
-    static void registerMapFunctions(catalog::CatalogSet* catalogSet);
-    static void registerUnionFunctions(catalog::CatalogSet* catalogSet);
-    static void registerNodeRelFunctions(catalog::CatalogSet* catalogSet);
-    static void registerPathFunctions(catalog::CatalogSet* catalogSet);
-    static void registerRdfFunctions(catalog::CatalogSet* catalogSet);
-
-    // Aggregate functions.
-    static void registerAggregateFunctions(catalog::CatalogSet* catalogSet);
-    static void registerCountStar(catalog::CatalogSet* catalogSet);
-    static void registerCount(catalog::CatalogSet* catalogSet);
-    static void registerSum(catalog::CatalogSet* catalogSet);
-    static void registerAvg(catalog::CatalogSet* catalogSet);
-    static void registerMin(catalog::CatalogSet* catalogSet);
-    static void registerMax(catalog::CatalogSet* catalogSet);
-    static void registerCollect(catalog::CatalogSet* catalogSet);
-
-    // Table functions.
-    static void registerTableFunctions(catalog::CatalogSet* catalogSet);
-
-    // Validations
-    static void validateNonEmptyCandidateFunctions(
-        std::vector<AggregateFunction*>& candidateFunctions, const std::string& name,
-        const std::vector<common::LogicalType>& inputTypes, bool isDistinct,
-        function::function_set& set);
-    static void validateNonEmptyCandidateFunctions(std::vector<Function*>& candidateFunctions,
         const std::string& name, const std::vector<common::LogicalType>& inputTypes,
         function::function_set& set);
 };

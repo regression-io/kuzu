@@ -16,8 +16,8 @@ void NodeBatchInsertSharedState::initPKIndex(kuzu::processor::ExecutionContext* 
     KU_ASSERT(pkType.getLogicalTypeID() != LogicalTypeID::SERIAL);
     auto indexFName = StorageUtils::getNodeIndexFName(context->clientContext->getVFSUnsafe(),
         wal->getDirectory(), table->getTableID(), FileVersionType::ORIGINAL);
-    pkIndex = std::make_unique<PrimaryKeyIndexBuilder>(
-        indexFName, pkType.getPhysicalType(), context->clientContext->getVFSUnsafe());
+    pkIndex = std::make_unique<PrimaryKeyIndexBuilder>(indexFName, pkType.getPhysicalType(),
+        context->clientContext->getVFSUnsafe());
     uint64_t numRows;
     if (readerSharedState != nullptr) {
         KU_ASSERT(distinctSharedState == nullptr);
@@ -32,7 +32,7 @@ void NodeBatchInsertSharedState::initPKIndex(kuzu::processor::ExecutionContext* 
 }
 
 void NodeBatchInsertSharedState::appendIncompleteNodeGroup(
-    std::unique_ptr<NodeGroup> localNodeGroup, std::optional<IndexBuilder>& indexBuilder) {
+    std::unique_ptr<ChunkedNodeGroup> localNodeGroup, std::optional<IndexBuilder>& indexBuilder) {
     std::unique_lock xLck{mtx};
     if (!sharedNodeGroup) {
         sharedNodeGroup = std::move(localNodeGroup);
@@ -43,8 +43,8 @@ void NodeBatchInsertSharedState::appendIncompleteNodeGroup(
     if (sharedNodeGroup->isFull()) {
         auto nodeGroupIdx = getNextNodeGroupIdxWithoutLock();
         auto nodeTable = ku_dynamic_cast<Table*, NodeTable*>(table);
-        NodeBatchInsert::writeAndResetNodeGroup(
-            nodeGroupIdx, indexBuilder, pkColumnIdx, nodeTable, sharedNodeGroup.get());
+        NodeBatchInsert::writeAndResetNodeGroup(nodeGroupIdx, indexBuilder, pkColumnIdx, nodeTable,
+            sharedNodeGroup.get());
     }
     if (numNodesAppended < localNodeGroup->getNumRows()) {
         sharedNodeGroup->append(localNodeGroup.get(), numNodesAppended);
@@ -87,16 +87,16 @@ void NodeBatchInsert::initLocalStateInternal(ResultSet* resultSet, ExecutionCont
         if (pos.isValid()) {
             nodeLocalState->columnVectors.push_back(resultSet->getValueVector(pos).get());
         } else {
-            auto columnType = nodeInfo->columnTypes[i].get();
-            auto nullVector = std::make_shared<ValueVector>(*columnType);
+            auto& columnType = nodeInfo->columnTypes[i];
+            auto nullVector = std::make_shared<ValueVector>(columnType);
             nullVector->setState(state);
             nullVector->setAllNull();
             nodeLocalState->nullColumnVectors.push_back(nullVector);
             nodeLocalState->columnVectors.push_back(nullVector.get());
         }
     }
-    nodeLocalState->nodeGroup = NodeGroupFactory::createNodeGroup(
-        ColumnDataFormat::REGULAR, nodeInfo->columnTypes, info->compressionEnabled);
+    nodeLocalState->nodeGroup = NodeGroupFactory::createNodeGroup(ColumnDataFormat::REGULAR,
+        nodeInfo->columnTypes, info->compressionEnabled);
     nodeLocalState->columnState = state.get();
 }
 
@@ -117,8 +117,8 @@ void NodeBatchInsert::executeInternal(ExecutionContext* context) {
         auto nodeSharedState =
             ku_dynamic_cast<BatchInsertSharedState*, NodeBatchInsertSharedState*>(
                 sharedState.get());
-        nodeSharedState->appendIncompleteNodeGroup(
-            std::move(nodeLocalState->nodeGroup), nodeLocalState->localIndexBuilder);
+        nodeSharedState->appendIncompleteNodeGroup(std::move(nodeLocalState->nodeGroup),
+            nodeLocalState->localIndexBuilder);
     }
     if (nodeLocalState->localIndexBuilder) {
         KU_ASSERT(token);
@@ -129,12 +129,12 @@ void NodeBatchInsert::executeInternal(ExecutionContext* context) {
 
 void NodeBatchInsert::writeAndResetNodeGroup(node_group_idx_t nodeGroupIdx,
     std::optional<IndexBuilder>& indexBuilder, column_id_t pkColumnID, NodeTable* table,
-    NodeGroup* nodeGroup) {
+    ChunkedNodeGroup* nodeGroup) {
     nodeGroup->finalize(nodeGroupIdx);
     if (indexBuilder) {
         auto nodeOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
-        indexBuilder->insert(
-            nodeGroup->getColumnChunk(pkColumnID), nodeOffset, nodeGroup->getNumRows());
+        indexBuilder->insert(nodeGroup->getColumnChunkUnsafe(pkColumnID), nodeOffset,
+            nodeGroup->getNumRows());
     }
     table->append(nodeGroup);
     nodeGroup->resetToEmpty();
@@ -158,7 +158,7 @@ void NodeBatchInsert::copyToNodeGroup() {
     while (numAppendedTuples < numTuplesToAppend) {
         auto numAppendedTuplesInNodeGroup =
             nodeLocalState->nodeGroup->append(nodeLocalState->columnVectors,
-                nodeLocalState->columnState, numTuplesToAppend - numAppendedTuples);
+                *nodeLocalState->columnState->selVector, numTuplesToAppend - numAppendedTuples);
         numAppendedTuples += numAppendedTuplesInNodeGroup;
         if (nodeLocalState->nodeGroup->isFull()) {
             node_group_idx_t nodeGroupIdx;
@@ -176,7 +176,7 @@ void NodeBatchInsert::finalize(ExecutionContext* context) {
     auto nodeSharedState =
         ku_dynamic_cast<BatchInsertSharedState*, NodeBatchInsertSharedState*>(sharedState.get());
     nodeSharedState->calculateNumTuples();
-    nodeSharedState->setNumTuplesForTable();
+    nodeSharedState->updateNumTuplesForTable();
     if (nodeSharedState->sharedNodeGroup) {
         auto nodeGroupIdx = nodeSharedState->getNextNodeGroupIdx();
         auto nodeTable = ku_dynamic_cast<Table*, NodeTable*>(nodeSharedState->table);
@@ -188,8 +188,8 @@ void NodeBatchInsert::finalize(ExecutionContext* context) {
     }
     auto outputMsg = stringFormat("{} number of tuples has been copied to table: {}.",
         sharedState->getNumRows(), info->tableEntry->getName());
-    FactorizedTableUtils::appendStringToTable(
-        sharedState->fTable.get(), outputMsg, context->clientContext->getMemoryManager());
+    FactorizedTableUtils::appendStringToTable(sharedState->fTable.get(), outputMsg,
+        context->clientContext->getMemoryManager());
 }
 } // namespace processor
 } // namespace kuzu

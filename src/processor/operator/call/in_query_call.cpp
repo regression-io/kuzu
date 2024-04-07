@@ -40,21 +40,21 @@ void InQueryCall::initLocalStateInternal(ResultSet* resultSet, ExecutionContext*
     }
     // Init table function input.
     function::TableFunctionInitInput tableFunctionInitInput{info.bindData.get()};
-    localState.funcState = info.function->initLocalStateFunc(tableFunctionInitInput,
+    localState.funcState = info.function.initLocalStateFunc(tableFunctionInitInput,
         sharedState->funcState.get(), context->clientContext->getMemoryManager());
-    localState.funcInput = function::TableFuncInput{
-        info.bindData.get(), localState.funcState.get(), sharedState->funcState.get()};
+    localState.funcInput = function::TableFuncInput{info.bindData.get(), localState.funcState.get(),
+        sharedState->funcState.get()};
 }
 
 void InQueryCall::initGlobalStateInternal(ExecutionContext*) {
     function::TableFunctionInitInput tableFunctionInitInput{info.bindData.get()};
-    sharedState->funcState = info.function->initSharedStateFunc(tableFunctionInitInput);
+    sharedState->funcState = info.function.initSharedStateFunc(tableFunctionInitInput);
 }
 
 bool InQueryCall::getNextTuplesInternal(ExecutionContext*) {
     localState.funcOutput.dataChunk.state->selVector->selectedSize = 0;
     localState.funcOutput.dataChunk.resetAuxiliaryBuffer();
-    auto numTuplesScanned = info.function->tableFunc(localState.funcInput, localState.funcOutput);
+    auto numTuplesScanned = info.function.tableFunc(localState.funcInput, localState.funcOutput);
     localState.funcOutput.dataChunk.state->selVector->selectedSize = numTuplesScanned;
     if (localState.rowOffsetVector != nullptr) {
         auto rowIdx = sharedState->getAndIncreaseRowIdx(numTuplesScanned);
@@ -63,6 +63,10 @@ bool InQueryCall::getNextTuplesInternal(ExecutionContext*) {
         }
     }
     return numTuplesScanned != 0;
+}
+
+double InQueryCall::getProgress(ExecutionContext* /*context*/) const {
+    return info.function.progressFunc(sharedState->funcState.get());
 }
 
 } // namespace processor

@@ -21,6 +21,14 @@ std::string ExceptionMessage::invalidPKType(const std::string& type) {
         type);
 }
 
+std::string ExceptionMessage::nullPKException() {
+    return "Found NULL, which violates the non-null constraint of the primary key column.";
+}
+
+std::string ExceptionMessage::notAllowCopyOnNonEmptyTableException() {
+    return "COPY commands can only be executed once on a table.";
+}
+
 std::string ExceptionMessage::overLargeStringPKValueException(uint64_t length) {
     return stringFormat("The maximum length of primary key strings is 262144 bytes. The input "
                         "string's length was {}.",
@@ -40,16 +48,15 @@ std::string ExceptionMessage::violateDeleteNodeWithConnectedEdgesConstraint(
         offset, tableName, direction);
 }
 
-std::string ExceptionMessage::violateRelMultiplicityConstraint(
-    const std::string& tableName, const std::string& offset, const std::string& direction) {
+std::string ExceptionMessage::violateRelMultiplicityConstraint(const std::string& tableName,
+    const std::string& offset, const std::string& direction) {
     return stringFormat("Node(nodeOffset: {}) has more than one neighbour in table {} in the {} "
                         "direction, which violates the rel multiplicity constraint.",
         offset, tableName, direction);
 }
 
-std::string ExceptionMessage::validateCopyNpyNotForRelTablesException(
-    const std::string& tableName) {
-    return stringFormat("Copy from npy files to rel table {} is not supported yet.", tableName);
+std::string ExceptionMessage::variableNotInScope(const std::string& varName) {
+    return stringFormat("Variable {} is not in scope.", varName);
 }
 
 } // namespace common

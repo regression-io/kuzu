@@ -10,8 +10,8 @@ using namespace kuzu::common;
 namespace kuzu {
 namespace parser {
 
-std::vector<std::unique_ptr<Statement>> Transformer::transform() {
-    std::vector<std::unique_ptr<Statement>> statements;
+std::vector<std::shared_ptr<Statement>> Transformer::transform() {
+    std::vector<std::shared_ptr<Statement>> statements;
     for (auto& oc_Statement : root.oC_Cypher()) {
         auto statement = transformStatement(*oc_Statement->oC_Statement());
         if (oc_Statement->oC_AnyCypherOption()) {
@@ -52,6 +52,10 @@ std::unique_ptr<Statement> Transformer::transformStatement(CypherParser::OC_Stat
         return transformExportDatabase(*ctx.kU_ExportDatabase());
     } else if (ctx.kU_ImportDatabase()) {
         return transformImportDatabase(*ctx.kU_ImportDatabase());
+    } else if (ctx.kU_AttachDatabase()) {
+        return transformAttachDatabase(*ctx.kU_AttachDatabase());
+    } else if (ctx.kU_DetachDatabase()) {
+        return transformDetachDatabase(*ctx.kU_DetachDatabase());
     } else {
         KU_UNREACHABLE;
     }

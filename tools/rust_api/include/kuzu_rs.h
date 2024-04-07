@@ -11,7 +11,7 @@
 #include "common/types/value/rel.h"
 #include "common/types/value/value.h"
 #include "main/kuzu.h"
-#include "storage/storage_info.h"
+#include "storage/storage_version_info.h"
 #else
 #include <kuzu.hpp>
 #endif
@@ -39,9 +39,9 @@ struct QueryParams {
 std::unique_ptr<QueryParams> new_params();
 
 std::unique_ptr<kuzu::common::LogicalType> create_logical_type(kuzu::common::LogicalTypeID id);
-std::unique_ptr<kuzu::common::LogicalType> create_logical_type_var_list(
+std::unique_ptr<kuzu::common::LogicalType> create_logical_type_list(
     std::unique_ptr<kuzu::common::LogicalType> childType);
-std::unique_ptr<kuzu::common::LogicalType> create_logical_type_fixed_list(
+std::unique_ptr<kuzu::common::LogicalType> create_logical_type_array(
     std::unique_ptr<kuzu::common::LogicalType> childType, uint64_t numElements);
 
 inline std::unique_ptr<kuzu::common::LogicalType> create_logical_type_struct(
@@ -68,11 +68,11 @@ inline std::unique_ptr<kuzu::common::LogicalType> create_logical_type_rdf_varian
     return kuzu::common::LogicalType::RDF_VARIANT();
 }
 
-const kuzu::common::LogicalType& logical_type_get_var_list_child_type(
+const kuzu::common::LogicalType& logical_type_get_list_child_type(
     const kuzu::common::LogicalType& logicalType);
-const kuzu::common::LogicalType& logical_type_get_fixed_list_child_type(
+const kuzu::common::LogicalType& logical_type_get_array_child_type(
     const kuzu::common::LogicalType& logicalType);
-uint64_t logical_type_get_fixed_list_num_elements(const kuzu::common::LogicalType& logicalType);
+uint64_t logical_type_get_array_num_elements(const kuzu::common::LogicalType& logicalType);
 
 rust::Vec<rust::String> logical_type_get_struct_field_names(const kuzu::common::LogicalType& value);
 std::unique_ptr<std::vector<kuzu::common::LogicalType>> logical_type_get_struct_field_types(

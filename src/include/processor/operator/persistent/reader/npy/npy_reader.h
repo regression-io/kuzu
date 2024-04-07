@@ -5,7 +5,7 @@
 
 #include "common/data_chunk/data_chunk.h"
 #include "common/types/types.h"
-#include "function/scalar_function.h"
+#include "function/function.h"
 #include "function/table/scan_functions.h"
 
 namespace kuzu {
@@ -62,6 +62,8 @@ struct NpyScanSharedState final : public function::ScanSharedState {
 };
 
 struct NpyScanFunction {
+    static constexpr const char* name = "READ_NPY";
+
     static function::function_set getFunctionSet();
 };
 

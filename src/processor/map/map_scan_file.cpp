@@ -19,15 +19,19 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapScanFile(LogicalOperator* logic
         outPosV.emplace_back(getDataPos(*expr, *outSchema));
     }
     auto info = InQueryCallInfo();
-    info.function = scanFileInfo->copyFunc;
+    info.function = scanFileInfo->func;
     info.bindData = scanFileInfo->bindData->copy();
     info.outPosV = outPosV;
-    info.rowOffsetPos = getDataPos(*scanFileInfo->offset, *outSchema);
+    if (scanFile->hasOffset()) {
+        info.rowOffsetPos = getDataPos(*scanFile->getOffset(), *outSchema);
+    } else {
+        info.rowOffsetPos = DataPos::getInvalidPos();
+    }
     info.outputType =
         outPosV.empty() ? TableScanOutputType::EMPTY : TableScanOutputType::SINGLE_DATA_CHUNK;
     auto sharedState = std::make_shared<InQueryCallSharedState>();
-    return std::make_unique<InQueryCall>(
-        std::move(info), sharedState, getOperatorID(), scanFile->getExpressionsForPrinting());
+    return std::make_unique<InQueryCall>(std::move(info), sharedState, getOperatorID(),
+        scanFile->getExpressionsForPrinting());
 }
 
 } // namespace processor

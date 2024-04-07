@@ -19,8 +19,8 @@ public:
         main::ClientContext* context = nullptr,
         FileLockType lockType = FileLockType::NO_LOCK) override;
 
-    std::vector<std::string> glob(
-        main::ClientContext* context, const std::string& path) const override;
+    std::vector<std::string> glob(main::ClientContext* context,
+        const std::string& path) const override;
 
     void overwriteFile(const std::string& from, const std::string& to) const override;
 
@@ -30,9 +30,11 @@ public:
 
     bool fileOrPathExists(const std::string& path) const override;
 
+    std::string expandPath(main::ClientContext* context, const std::string& path) const override;
+
 protected:
-    void readFromFile(
-        FileInfo* fileInfo, void* buffer, uint64_t numBytes, uint64_t position) const override;
+    void readFromFile(FileInfo* fileInfo, void* buffer, uint64_t numBytes,
+        uint64_t position) const override;
 
     int64_t readFile(FileInfo* fileInfo, void* buf, size_t nbyte) const override;
 

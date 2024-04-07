@@ -1,11 +1,13 @@
 #pragma once
 
-#include "function/scalar_function.h"
+#include "function/function.h"
 
 namespace kuzu {
 namespace function {
 
 struct GenRandomUUIDFunction {
+    static constexpr const char* name = "GEN_RANDOM_UUID";
+
     static function_set getFunctionSet();
 };
 

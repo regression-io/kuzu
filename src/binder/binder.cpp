@@ -1,17 +1,24 @@
 #include "binder/binder.h"
 
 #include "binder/bound_statement_rewriter.h"
+#include "catalog/catalog.h"
+#include "catalog/catalog_entry/table_catalog_entry.h"
 #include "common/copier_config/csv_reader_config.h"
 #include "common/exception/binder.h"
 #include "common/keyword/rdf_keyword.h"
 #include "common/string_format.h"
 #include "common/string_utils.h"
+#include "function/built_in_function_utils.h"
 #include "function/table_functions.h"
-#include "main/client_context.h"
+#include "processor/operator/persistent/reader/csv/parallel_csv_reader.h"
+#include "processor/operator/persistent/reader/csv/serial_csv_reader.h"
+#include "processor/operator/persistent/reader/npy/npy_reader.h"
+#include "processor/operator/persistent/reader/parquet/parquet_reader.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;
 using namespace kuzu::parser;
+using namespace kuzu::processor;
 
 namespace kuzu {
 namespace binder {
@@ -61,11 +68,17 @@ std::unique_ptr<BoundStatement> Binder::bind(const Statement& statement) {
     case StatementType::IMPORT_DATABASE: {
         boundStatement = bindImportDatabaseClause(statement);
     } break;
+    case StatementType::ATTACH_DATABASE: {
+        boundStatement = bindAttachDatabase(statement);
+    } break;
+    case StatementType::DETACH_DATABASE: {
+        boundStatement = bindDetachDatabase(statement);
+    } break;
     default: {
         KU_UNREACHABLE;
     }
     }
-    BoundStatementRewriter::rewrite(*boundStatement, catalog);
+    BoundStatementRewriter::rewrite(*boundStatement, *clientContext);
     return boundStatement;
 }
 
@@ -76,56 +89,44 @@ std::shared_ptr<Expression> Binder::bindWhereExpression(const ParsedExpression& 
 }
 
 common::table_id_t Binder::bindTableID(const std::string& tableName) const {
-    if (!catalog.containsTable(clientContext->getTx(), tableName)) {
+    auto catalog = clientContext->getCatalog();
+    if (!catalog->containsTable(clientContext->getTx(), tableName)) {
         throw BinderException(common::stringFormat("Table {} does not exist.", tableName));
     }
-    return catalog.getTableID(clientContext->getTx(), tableName);
+    return catalog->getTableID(clientContext->getTx(), tableName);
 }
 
-std::shared_ptr<Expression> Binder::createVariable(
-    std::string_view name, common::LogicalTypeID typeID) {
+std::shared_ptr<Expression> Binder::createVariable(std::string_view name,
+    common::LogicalTypeID typeID) {
     return createVariable(std::string(name), LogicalType{typeID});
 }
 
-std::shared_ptr<Expression> Binder::createVariable(
-    const std::string& name, LogicalTypeID logicalTypeID) {
+std::shared_ptr<Expression> Binder::createVariable(const std::string& name,
+    LogicalTypeID logicalTypeID) {
     return createVariable(name, LogicalType{logicalTypeID});
 }
 
-std::shared_ptr<Expression> Binder::createVariable(
-    const std::string& name, const LogicalType& dataType) {
-    if (scope->contains(name)) {
+std::shared_ptr<Expression> Binder::createVariable(const std::string& name,
+    const LogicalType& dataType) {
+    if (scope.contains(name)) {
         throw BinderException("Variable " + name + " already exists.");
     }
     auto expression = expressionBinder.createVariableExpression(dataType, name);
     expression->setAlias(name);
-    scope->addExpression(name, expression);
+    scope.addExpression(name, expression);
     return expression;
 }
 
 std::unique_ptr<LogicalType> Binder::bindDataType(const std::string& dataType) {
     auto boundType = LogicalTypeUtils::dataTypeFromString(dataType);
-    if (boundType.getLogicalTypeID() == LogicalTypeID::FIXED_LIST) {
-        auto validNumericTypes = LogicalTypeUtils::getNumericalLogicalTypeIDs();
-        auto childType = FixedListType::getChildType(&boundType);
-        auto numElementsInList = FixedListType::getNumValuesInList(&boundType);
-        if (find(validNumericTypes.begin(), validNumericTypes.end(),
-                childType->getLogicalTypeID()) == validNumericTypes.end()) {
-            throw BinderException("The child type of a fixed list must be a numeric type. Given: " +
-                                  childType->toString() + ".");
-        }
-        if (numElementsInList == 0) {
+    if (boundType.getLogicalTypeID() == LogicalTypeID::ARRAY) {
+        auto numElementsInArray = ArrayType::getNumElements(&boundType);
+        if (numElementsInArray == 0) {
             // Note: the parser already guarantees that the number of elements is a non-negative
             // number. However, we still need to check whether the number of elements is 0.
             throw BinderException(
-                "The number of elements in a fixed list must be greater than 0. Given: " +
-                std::to_string(numElementsInList) + ".");
-        }
-        auto numElementsPerPage = storage::PageUtils::getNumElementsInAPage(
-            storage::StorageUtils::getDataTypeSize(boundType), true /* hasNull */);
-        if (numElementsPerPage == 0) {
-            throw BinderException(stringFormat("Cannot store a fixed list of size {} in a page.",
-                storage::StorageUtils::getDataTypeSize(boundType)));
+                "The number of elements in an array must be greater than 0. Given: " +
+                std::to_string(numElementsInArray) + ".");
         }
     }
     return std::make_unique<LogicalType>(boundType);
@@ -159,27 +160,16 @@ void Binder::validateOrderByFollowedBySkipOrLimitInWithClause(
     }
 }
 
-void Binder::validateReadNotFollowUpdate(const NormalizedSingleQuery& singleQuery) {
-    bool hasSeenUpdateClause = false;
-    for (auto i = 0u; i < singleQuery.getNumQueryParts(); ++i) {
-        auto normalizedQueryPart = singleQuery.getQueryPart(i);
-        if (hasSeenUpdateClause && normalizedQueryPart->hasReadingClause()) {
-            throw BinderException(
-                "Read after update is not supported. Try query with multiple statements.");
-        }
-        hasSeenUpdateClause |= normalizedQueryPart->hasUpdatingClause();
-    }
-}
-
 void Binder::validateTableType(table_id_t tableID, TableType expectedTableType) {
-    if (catalog.getTableCatalogEntry(clientContext->getTx(), tableID)->getTableType() !=
-        expectedTableType) {
+    auto tableEntry =
+        clientContext->getCatalog()->getTableCatalogEntry(clientContext->getTx(), tableID);
+    if (tableEntry->getTableType() != expectedTableType) {
         throw BinderException("Table type mismatch.");
     }
 }
 
 void Binder::validateTableExist(const std::string& tableName) {
-    if (!catalog.containsTable(clientContext->getTx(), tableName)) {
+    if (!clientContext->getCatalog()->containsTable(clientContext->getTx(), tableName)) {
         throw BinderException("Table " + tableName + " does not exist.");
     }
 }
@@ -199,39 +189,39 @@ bool Binder::isReservedPropertyName(const std::string& name) {
     return false;
 }
 
-std::unique_ptr<BinderScope> Binder::saveScope() {
-    return scope->copy();
+BinderScope Binder::saveScope() {
+    return scope.copy();
 }
 
-void Binder::restoreScope(std::unique_ptr<BinderScope> prevVariableScope) {
-    scope = std::move(prevVariableScope);
+void Binder::restoreScope(BinderScope prevScope) {
+    scope = std::move(prevScope);
 }
 
-function::TableFunction* Binder::getScanFunction(FileType fileType, const ReaderConfig& config) {
+function::TableFunction Binder::getScanFunction(FileType fileType, const ReaderConfig& config) {
     function::Function* func;
     auto stringType = LogicalType(LogicalTypeID::STRING);
     std::vector<LogicalType> inputTypes;
     inputTypes.push_back(stringType);
-    auto functions = catalog.getFunctions(clientContext->getTx());
+    auto functions = clientContext->getCatalog()->getFunctions(clientContext->getTx());
     switch (fileType) {
     case FileType::PARQUET: {
-        func = function::BuiltInFunctionsUtils::matchFunction(
-            READ_PARQUET_FUNC_NAME, inputTypes, functions);
+        func = function::BuiltInFunctionsUtils::matchFunction(ParquetScanFunction::name, inputTypes,
+            functions);
     } break;
     case FileType::NPY: {
-        func = function::BuiltInFunctionsUtils::matchFunction(
-            READ_NPY_FUNC_NAME, inputTypes, functions);
+        func = function::BuiltInFunctionsUtils::matchFunction(NpyScanFunction::name, inputTypes,
+            functions);
     } break;
     case FileType::CSV: {
         auto csvConfig = CSVReaderConfig::construct(config.options);
         func = function::BuiltInFunctionsUtils::matchFunction(
-            csvConfig.parallel ? READ_CSV_PARALLEL_FUNC_NAME : READ_CSV_SERIAL_FUNC_NAME,
-            inputTypes, functions);
+            csvConfig.parallel ? ParallelCSVScan::name : SerialCSVScan::name, inputTypes,
+            functions);
     } break;
     default:
         KU_UNREACHABLE;
     }
-    return ku_dynamic_cast<function::Function*, function::TableFunction*>(func);
+    return *ku_dynamic_cast<function::Function*, function::TableFunction*>(func);
 }
 
 } // namespace binder

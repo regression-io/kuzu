@@ -42,6 +42,30 @@ Binder exception: Upper bound of rel  exceeds maximum: 10.
 ---- 1
 354290
 
+-LOG SetGetProgressBar
+-STATEMENT CALL progress_bar=true
+---- ok
+-STATEMENT CALL current_setting('progress_bar') RETURN *
+---- 1
+True
+-STATEMENT CALL progress_bar=false
+---- ok
+-STATEMENT CALL current_setting('progress_bar') RETURN *
+---- 1
+False
+
+-LOG SetGetProgressBarTime
+-STATEMENT CALL progress_bar_time=4000
+---- ok
+-STATEMENT CALL current_setting('progress_bar_time') RETURN *
+---- 1
+4000
+-STATEMENT CALL progress_bar_time=0
+---- ok
+-STATEMENT CALL current_setting('progress_bar_time') RETURN *
+---- 1
+0
+
 -LOG disableSemihMaskOptimization
 -STATEMENT CALL enable_semi_mask=true
 ---- ok
@@ -195,10 +219,10 @@ Binder exception: Cannot evaluate a.fName as a literal.
 8
 -STATEMENT CALL storage_info('person') RETURN COUNT(*)
 ---- 1
-37
+38
 -STATEMENT CALL storage_info('knows') RETURN COUNT(*)
 ---- 1
-82
+80
 -STATEMENT CALL storage_info('workAt') RETURN COUNT(*)
 ---- 1
 22

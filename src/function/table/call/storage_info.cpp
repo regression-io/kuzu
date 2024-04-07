@@ -3,9 +3,10 @@
 #include "function/table/bind_input.h"
 #include "function/table/call_functions.h"
 #include "storage/storage_manager.h"
+#include "storage/store/list_column.h"
+#include "storage/store/node_table.h"
 #include "storage/store/string_column.h"
 #include "storage/store/struct_column.h"
-#include "storage/store/var_list_column.h"
 
 using namespace kuzu::common;
 using namespace kuzu::catalog;
@@ -48,8 +49,6 @@ private:
             columns.push_back(relTable->getCSRLengthColumn(RelDataDirection::FWD));
             columns.push_back(relTable->getCSROffsetColumn(RelDataDirection::BWD));
             columns.push_back(relTable->getCSRLengthColumn(RelDataDirection::BWD));
-            columns.push_back(relTable->getAdjColumn(RelDataDirection::FWD));
-            columns.push_back(relTable->getAdjColumn(RelDataDirection::BWD));
             for (auto columnID = 0u; columnID < relTable->getNumColumns(); columnID++) {
                 auto column = relTable->getColumn(columnID, RelDataDirection::FWD);
                 auto collectedColumns = collectColumns(column);
@@ -86,9 +85,9 @@ private:
             result.push_back(dictionary.getDataColumn());
             result.push_back(dictionary.getOffsetColumn());
         } break;
-        case PhysicalTypeID::VAR_LIST: {
-            auto varListColumn = ku_dynamic_cast<Column*, VarListColumn*>(column);
-            result.push_back(varListColumn->getDataColumn());
+        case PhysicalTypeID::LIST: {
+            auto listColumn = ku_dynamic_cast<Column*, ListColumn*>(column);
+            result.push_back(listColumn->getDataColumn());
         } break;
         default: {
             // DO NOTHING.
@@ -109,8 +108,8 @@ struct StorageInfoBindData final : public CallTableFuncBindData {
           tableEntry{tableEntry}, table{table}, context{context} {}
 
     inline std::unique_ptr<TableFuncBindData> copy() const override {
-        return std::make_unique<StorageInfoBindData>(
-            columnTypes, columnNames, tableEntry, table, context);
+        return std::make_unique<StorageInfoBindData>(columnTypes, columnNames, tableEntry, table,
+            context);
     }
 };
 
@@ -123,8 +122,8 @@ static std::unique_ptr<TableFuncSharedState> initStorageInfoSharedState(
     TableFunctionInitInput& input) {
     auto storageInfoBindData =
         ku_dynamic_cast<TableFuncBindData*, StorageInfoBindData*>(input.bindData);
-    return std::make_unique<StorageInfoSharedState>(
-        storageInfoBindData->table, storageInfoBindData->maxOffset);
+    return std::make_unique<StorageInfoSharedState>(storageInfoBindData->table,
+        storageInfoBindData->maxOffset);
 }
 
 static void appendColumnChunkStorageInfo(node_group_idx_t nodeGroupIdx,
@@ -146,7 +145,7 @@ static void appendColumnChunkStorageInfo(node_group_idx_t nodeGroupIdx,
 
 static void appendStorageInfoForColumn(StorageInfoLocalState* localState, std::string tableType,
     const Column* column, DataChunk& outputChunk, ClientContext* context) {
-    auto numNodeGroups = column->getNumNodeGroups(&transaction::DUMMY_READ_TRANSACTION);
+    auto numNodeGroups = column->getNumNodeGroups(context->getTx());
     for (auto nodeGroupIdx = 0u; nodeGroupIdx < numNodeGroups; nodeGroupIdx++) {
         if (outputChunk.state->selVector->selectedSize == DEFAULT_VECTOR_CAPACITY) {
             localState->dataChunkCollection->append(outputChunk);
@@ -167,16 +166,16 @@ static common::offset_t tableFunc(TableFuncInput& input, TableFuncOutput& output
     while (true) {
         if (localState->currChunkIdx < localState->dataChunkCollection->getNumChunks()) {
             // Copy from local state chunk.
-            auto chunk = localState->dataChunkCollection->getChunk(localState->currChunkIdx);
-            auto numValuesToOutput = chunk->state->selVector->selectedSize;
+            auto& chunk = localState->dataChunkCollection->getChunkUnsafe(localState->currChunkIdx);
+            auto numValuesToOutput = chunk.state->selVector->selectedSize;
             for (auto columnIdx = 0u; columnIdx < dataChunk.getNumValueVectors(); columnIdx++) {
-                auto localVector = chunk->getValueVector(columnIdx);
+                auto localVector = chunk.getValueVector(columnIdx);
                 auto outputVector = dataChunk.getValueVector(columnIdx);
                 for (auto i = 0u; i < numValuesToOutput; i++) {
                     outputVector->copyFromVectorData(i, localVector.get(), i);
                 }
             }
-            dataChunk.state->selVector->resetSelectorToUnselectedWithSize(numValuesToOutput);
+            dataChunk.state->selVector->setToUnfiltered(numValuesToOutput);
             localState->currChunkIdx++;
             return numValuesToOutput;
         }
@@ -199,8 +198,8 @@ static common::offset_t tableFunc(TableFuncInput& input, TableFuncOutput& output
     }
 }
 
-static std::unique_ptr<TableFuncBindData> bindFunc(
-    ClientContext* context, TableFuncBindInput* input) {
+static std::unique_ptr<TableFuncBindData> bindFunc(ClientContext* context,
+    TableFuncBindInput* input) {
     std::vector<std::string> columnNames = {"node_group_id", "column_name", "data_type",
         "table_type", "start_page_idx", "num_pages", "num_values", "compression"};
     std::vector<LogicalType> columnTypes;
@@ -220,18 +219,16 @@ static std::unique_ptr<TableFuncBindData> bindFunc(
     auto tableID = catalog->getTableID(context->getTx(), tableName);
     auto tableEntry = catalog->getTableCatalogEntry(context->getTx(), tableID);
     auto storageManager = context->getStorageManager();
-    auto table = tableEntry->getTableType() == TableType::NODE ?
-                     reinterpret_cast<Table*>(storageManager->getNodeTable(tableID)) :
-                     reinterpret_cast<Table*>(storageManager->getRelTable(tableID));
-    return std::make_unique<StorageInfoBindData>(
-        std::move(columnTypes), std::move(columnNames), tableEntry, table, context);
+    auto table = storageManager->getTable(tableID);
+    return std::make_unique<StorageInfoBindData>(std::move(columnTypes), std::move(columnNames),
+        tableEntry, table, context);
 }
 
 function_set StorageInfoFunction::getFunctionSet() {
     function_set functionSet;
-    functionSet.push_back(std::make_unique<TableFunction>(STORAGE_INFO_FUNC_NAME, tableFunc,
-        bindFunc, initStorageInfoSharedState, initLocalState,
-        std::vector<LogicalTypeID>{LogicalTypeID::STRING}));
+    functionSet.push_back(
+        std::make_unique<TableFunction>(name, tableFunc, bindFunc, initStorageInfoSharedState,
+            initLocalState, std::vector<LogicalTypeID>{LogicalTypeID::STRING}));
     return functionSet;
 }
 

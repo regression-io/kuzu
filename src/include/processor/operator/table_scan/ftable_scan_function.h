@@ -1,6 +1,6 @@
 #pragma once
 
-#include "function/scalar_function.h"
+#include "function/function.h"
 #include "function/table/bind_data.h"
 #include "processor/result/factorized_table.h"
 
@@ -26,6 +26,8 @@ struct FTableScanBindData : public function::TableFuncBindData {
 };
 
 struct FTableScan {
+    static constexpr const char* name = "READ_FTABLE";
+
     static function::function_set getFunctionSet();
 };
 

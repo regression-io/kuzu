@@ -18,6 +18,7 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapDummyScan(LogicalOperator* /*lo
         std::make_unique<ColumnSchema>(false, 0 /* all expressions are in the same datachunk */,
             LogicalTypeUtils::getRowLayoutSize(expression->dataType)));
     auto expressionEvaluator = ExpressionMapper::getEvaluator(expression, inSchema.get());
+    auto memoryManager = clientContext->getMemoryManager();
     // expression can be evaluated statically and does not require an actual resultset to init
     expressionEvaluator->init(ResultSet(0) /* dummy resultset */, memoryManager);
     expressionEvaluator->evaluate(clientContext);
@@ -25,8 +26,7 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapDummyScan(LogicalOperator* /*lo
     vectorsToAppend.push_back(expressionEvaluator->resultVector.get());
     auto table = std::make_shared<FactorizedTable>(memoryManager, std::move(tableSchema));
     table->append(vectorsToAppend);
-    return createFactorizedTableScan(binder::expression_vector{}, std::vector<ft_col_idx_t>{},
-        inSchema.get(), table, 1 /* maxMorselSize */, nullptr /* child */);
+    return createEmptyFTableScan(table, 1 /* maxMorselSize */);
 }
 
 } // namespace processor

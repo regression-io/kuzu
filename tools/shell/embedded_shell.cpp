@@ -18,6 +18,8 @@
 #include "utf8proc.h"
 #include "utf8proc_wrapper.h"
 
+#include "common/task_system/progress_bar.h"
+
 using namespace kuzu::common;
 using namespace kuzu::utf8proc;
 
@@ -42,9 +44,9 @@ struct ShellCommand {
     const char* HELP = ":help";
     const char* CLEAR = ":clear";
     const char* QUIT = ":quit";
-    const char* MAXROWS = ":max_rows";
-    const char* MAXWIDTH = ":max_width";
-    const std::array<const char*, 5> commandList = {HELP, CLEAR, QUIT, MAXROWS, MAXWIDTH};
+    const char* MAX_ROWS = ":max_rows";
+    const char* MAX_WIDTH = ":max_width";
+    const std::array<const char*, 5> commandList = {HELP, CLEAR, QUIT, MAX_ROWS, MAX_WIDTH};
 } shellCommand;
 
 const char* TAB = "    ";
@@ -273,10 +275,10 @@ int EmbeddedShell::processShellCommands(std::string lineStr) {
         linenoiseClearScreen();
     } else if (lineStr == shellCommand.QUIT) {
         return -1;
-    } else if (lineStr.rfind(shellCommand.MAXROWS) == 0) {
-        setMaxRows(lineStr.substr(strlen(shellCommand.MAXROWS)));
-    } else if (lineStr.rfind(shellCommand.MAXWIDTH) == 0) {
-        setMaxWidth(lineStr.substr(strlen(shellCommand.MAXWIDTH)));
+    } else if (lineStr.rfind(shellCommand.MAX_ROWS) == 0) {
+        setMaxRows(lineStr.substr(strlen(shellCommand.MAX_ROWS)));
+    } else if (lineStr.rfind(shellCommand.MAX_WIDTH) == 0) {
+        setMaxWidth(lineStr.substr(strlen(shellCommand.MAX_WIDTH)));
     } else {
         printf("Error: Unknown command: \"%s\". Enter \":help\" for help\n", lineStr.c_str());
         printf("Did you mean: \"%s\"?\n", findClosestCommand(lineStr).c_str());
@@ -425,15 +427,15 @@ void EmbeddedShell::printHelp() {
     printf("%s%s %sclear shell\n", TAB, shellCommand.CLEAR, TAB);
     printf("%s%s %sexit from shell\n", TAB, shellCommand.QUIT, TAB);
     printf("%s%s [max_rows] %sset maximum number of rows for display (default: 20)\n", TAB,
-        shellCommand.MAXROWS, TAB);
+        shellCommand.MAX_ROWS, TAB);
     printf("%s%s [max_width] %sset maximum width in characters for display\n", TAB,
-        shellCommand.MAXWIDTH, TAB);
+        shellCommand.MAX_WIDTH, TAB);
     printf("\n");
     printf("%sNote: you can change and see several system configurations, such as num-threads, \n",
         TAB);
-    printf("%s%s  timeout, and logging_level using Cypher CALL statements.\n", TAB, TAB);
+    printf("%s%s  timeout, and progress_bar using Cypher CALL statements.\n", TAB, TAB);
     printf("%s%s  e.g. CALL THREADS=5; or CALL current_setting('threads') return *;\n", TAB, TAB);
-    printf("%s%s  See: https://kuzudb.com/docusaurus/cypher/configuration\n", TAB, TAB);
+    printf("%s%s  See: https://docs.kuzudb.com/cypher/configuration\n", TAB, TAB);
 }
 
 void EmbeddedShell::printExecutionResult(QueryResult& queryResult) const {
@@ -480,11 +482,16 @@ void EmbeddedShell::printExecutionResult(QueryResult& queryResult) const {
         uint32_t sumGoal = minTruncatedWidth;
         uint32_t maxWidth = minTruncatedWidth;
         if (colsWidth.size() == 1) {
-            sumGoal = colsWidth[0] + 2;
+            uint32_t minDisplayWidth = minTruncatedWidth + SMALL_TABLE_SEPERATOR_LENGTH;
+            if (maxPrintWidth > minDisplayWidth) {
+				sumGoal = maxPrintWidth - 2;
+            } else {
+                sumGoal = std::max(
+                    (uint32_t)(getColumns(STDIN_FILENO, STDOUT_FILENO) - colsWidth.size() - 1),
+                    minDisplayWidth);
+			}
         } else if (colsWidth.size() > 1) {
-            uint32_t minDisplayWidth = SMALL_TABLE_SEPERATOR_LENGTH;
-            minDisplayWidth += (colsWidth[0] < minTruncatedWidth) ? colsWidth[0] : minTruncatedWidth;
-            minDisplayWidth += (colsWidth.back() < minTruncatedWidth) ? colsWidth.back() : minTruncatedWidth;
+            uint32_t minDisplayWidth = SMALL_TABLE_SEPERATOR_LENGTH + minTruncatedWidth * 2;
             if (maxPrintWidth > minDisplayWidth) {
                 sumGoal = maxPrintWidth - colsWidth.size() - 1;
             } else {

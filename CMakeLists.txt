@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(Kuzu VERSION 0.3.1.1 LANGUAGES CXX C)
+project(Kuzu VERSION 0.3.2.5 LANGUAGES CXX C)
 
 find_package(Threads REQUIRED)
 
@@ -46,6 +46,7 @@ if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 elseif(CMAKE_SIZEOF_VOID_P EQUAL 4)
     message(STATUS "32-bit architecture detected")
     add_compile_definitions(__32BIT__)
+    set(__32BIT__ TRUE)
 endif()
 
 if(NOT CMAKE_BUILD_TYPE)
@@ -103,8 +104,8 @@ if(MSVC)
     # Enables support for custom hardware exception handling
     add_compile_options("/EHa")
     # Remove the default to avoid warnings
-    STRING(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-    STRING(REPLACE "/EHs" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+    STRING(REPLACE "/EHsc" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
+    STRING(REPLACE "/EHs" "" CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     # Store all libraries and binaries in the same directory so that kuzu_shared.dll is found at runtime
     set(LIBRARY_OUTPUT_PATH "${CMAKE_BINARY_DIR}/src")
     set(EXECUTABLE_OUTPUT_PATH "${CMAKE_BINARY_DIR}/src")
@@ -196,7 +197,7 @@ endif ()
 if(${BUILD_KUZU})
 add_definitions(-DKUZU_ROOT_DIRECTORY="${PROJECT_SOURCE_DIR}")
 add_definitions(-DKUZU_CMAKE_VERSION="${CMAKE_PROJECT_VERSION}")
-add_definitions(-DKUZU_EXTENSION_VERSION="0.1.0")
+add_definitions(-DKUZU_EXTENSION_VERSION="0.2.5")
 
 include_directories(src/include)
 include_directories(third_party/antlr4_cypher/include)
@@ -226,7 +227,9 @@ elseif (${BUILD_BENCHMARK})
 endif ()
 add_subdirectory(tools)
 endif ()
-add_subdirectory(extension)
+if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/extension/CMakeLists.txt")
+    add_subdirectory(extension)
+endif ()
 
 if (${BUILD_EXAMPLES})
     add_subdirectory(examples/c)

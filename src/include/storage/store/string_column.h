@@ -28,6 +28,7 @@ public:
     void write(common::node_group_idx_t nodeGroupIdx, common::offset_t offsetInChunk,
         ColumnChunk* data, common::offset_t dataOffset, common::length_t numValues) override;
 
+    void prepareCommit() override;
     void checkpointInMemory() override;
     void rollbackInMemory() override;
 
@@ -49,14 +50,19 @@ protected:
 
 private:
     bool canCommitInPlace(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo) override;
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunk,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunk,
+        const offset_to_row_idx_t& updateInfo) override;
     bool canCommitInPlace(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, const std::vector<common::offset_t>& dstOffsets,
         ColumnChunk* chunk, common::offset_t srcOffset) override;
 
     bool canIndexCommitInPlace(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, uint64_t numStrings, common::offset_t maxOffset);
+
+    bool checkUpdateInPlace(transaction::Transaction* transaction,
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localChunk,
+        const offset_to_row_idx_t& writeInfo);
 
 private:
     // Main column stores indices of values in the dictionary

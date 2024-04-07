@@ -1,8 +1,10 @@
 #include "binder/bound_statement_result.h"
+#include "catalog/catalog.h"
 #include "common/string_format.h"
 #include "graph_test/graph_test.h"
 #include "processor/plan_mapper.h"
 #include "processor/processor.h"
+#include "storage/storage_manager.h"
 
 using namespace kuzu::catalog;
 using namespace kuzu::common;
@@ -105,8 +107,8 @@ public:
             "Binder exception: Nodes a and b are not connected through rel e.");
     }
 
-    void dropTableCommitAndRecoveryTest(
-        std::string tableName, TransactionTestType transactionTestType) {
+    void dropTableCommitAndRecoveryTest(std::string tableName,
+        TransactionTestType transactionTestType) {
         auto tableID = catalog->getTableID(&DUMMY_READ_TRANSACTION, tableName);
         auto tableSchema = catalog->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID)->copy();
         executeQueryWithoutCommit(stringFormat("DROP TABLE {}", tableName));
@@ -167,9 +169,8 @@ public:
     }
 
     void executeQueryWithoutCommit(std::string query) {
-        auto preparedStatement = conn->prepare(query);
-        auto mapper = PlanMapper(*getStorageManager(*database), getMemoryManager(*database),
-            getCatalog(*database), conn->getClientContext());
+        auto preparedStatement = conn->getClientContext()->prepareTest(query);
+        auto mapper = PlanMapper(conn->getClientContext());
         auto physicalPlan =
             mapper.mapLogicalPlanToPhysical(preparedStatement->logicalPlans[0].get(),
                 preparedStatement->statementResult->getColumns());
@@ -177,8 +178,8 @@ public:
         getQueryProcessor(*database)->execute(physicalPlan.get(), executionContext.get());
     }
 
-    void addPropertyToPersonTableWithoutDefaultValue(
-        std::string propertyType, TransactionTestType transactionTestType) {
+    void addPropertyToPersonTableWithoutDefaultValue(std::string propertyType,
+        TransactionTestType transactionTestType) {
         executeQueryWithoutCommit(stringFormat("ALTER TABLE person ADD random {}", propertyType));
         if (transactionTestType == TransactionTestType::RECOVERY) {
             conn->query("COMMIT_SKIP_CHECKPOINT");
@@ -200,8 +201,8 @@ public:
         // The convertResultToString function will remove the single quote around the result
         // std::string, so we should also remove the single quote in the expected result.
         defaultVal.erase(remove(defaultVal.begin(), defaultVal.end(), '\''), defaultVal.end());
-        std::vector<std::string> expectedResult(
-            8 /* numOfNodesInPesron */, expectedVal.empty() ? defaultVal : expectedVal);
+        std::vector<std::string> expectedResult(8 /* numOfNodesInPesron */,
+            expectedVal.empty() ? defaultVal : expectedVal);
         if (transactionTestType == TransactionTestType::RECOVERY) {
             conn->query("COMMIT_SKIP_CHECKPOINT");
             initWithoutLoadingGraph();
@@ -213,8 +214,8 @@ public:
             expectedResult);
     }
 
-    void addPropertyToStudyAtTableWithoutDefaultValue(
-        std::string propertyType, TransactionTestType transactionTestType) {
+    void addPropertyToStudyAtTableWithoutDefaultValue(std::string propertyType,
+        TransactionTestType transactionTestType) {
         executeQueryWithoutCommit(stringFormat("ALTER TABLE studyAt ADD random {}", propertyType));
         if (transactionTestType == TransactionTestType::RECOVERY) {
             conn->query("COMMIT_SKIP_CHECKPOINT");
@@ -229,8 +230,8 @@ public:
         }
     }
 
-    void addPropertyToStudyAtTableWithDefaultValue(
-        std::string propertyType, std::string defaultVal, TransactionTestType transactionTestType) {
+    void addPropertyToStudyAtTableWithDefaultValue(std::string propertyType, std::string defaultVal,
+        TransactionTestType transactionTestType) {
         executeQueryWithoutCommit(
             stringFormat("ALTER TABLE studyAt ADD random {} DEFAULT {}", propertyType, defaultVal));
         defaultVal.erase(remove(defaultVal.begin(), defaultVal.end(), '\''), defaultVal.end());
@@ -329,28 +330,28 @@ TEST_F(TinySnbDDLTest, DropRelTablePropertyRecovery) {
 }
 
 TEST_F(TinySnbDDLTest, AddInt64PropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "INT64" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithoutDefaultValue("INT64" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
-TEST_F(TinySnbDDLTest, AddFixedListPropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "DOUBLE[5]" /* propertyType */, TransactionTestType::RECOVERY);
+TEST_F(TinySnbDDLTest, AddArrayPropertyToPersonTableWithoutDefaultValueRecovery) {
+    addPropertyToPersonTableWithoutDefaultValue("DOUBLE[5]" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddStringPropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "STRING" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithoutDefaultValue("STRING" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddListOfInt64PropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "INT64[]" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithoutDefaultValue("INT64[]" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddListOfStringPropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "STRING[]" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithoutDefaultValue("STRING[]" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddListOfStructPropertyToPersonTableWithoutDefaultValueRecovery) {
@@ -359,8 +360,8 @@ TEST_F(TinySnbDDLTest, AddListOfStructPropertyToPersonTableWithoutDefaultValueRe
 }
 
 TEST_F(TinySnbDDLTest, AddMapPropertyToPersonTableWithoutDefaultValueRecovery) {
-    addPropertyToPersonTableWithoutDefaultValue(
-        "MAP(STRING, INT64)" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithoutDefaultValue("MAP(STRING, INT64)" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddStructPropertyToPersonTableWithoutDefaultValueRecovery) {
@@ -369,8 +370,8 @@ TEST_F(TinySnbDDLTest, AddStructPropertyToPersonTableWithoutDefaultValueRecovery
 }
 
 TEST_F(TinySnbDDLTest, AddInt64PropertyToPersonTableWithDefaultValueRecovery) {
-    addPropertyToPersonTableWithDefaultValue(
-        "INT64" /* propertyType */, "21" /* defaultVal */, TransactionTestType::RECOVERY);
+    addPropertyToPersonTableWithDefaultValue("INT64" /* propertyType */, "21" /* defaultVal */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddStringPropertyToPersonTableWithDefaultValueRecovery) {
@@ -416,28 +417,28 @@ TEST_F(TinySnbDDLTest, AddStructPropertyToPersonTableWithDefaultValueRecovery) {
 }
 
 TEST_F(TinySnbDDLTest, AddInt64PropertyToStudyAtTableWithoutDefaultValueRecovery) {
-    addPropertyToStudyAtTableWithoutDefaultValue(
-        "INT64" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToStudyAtTableWithoutDefaultValue("INT64" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddStringPropertyToStudyAtTableWithoutDefaultValueRecovery) {
-    addPropertyToStudyAtTableWithoutDefaultValue(
-        "STRING" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToStudyAtTableWithoutDefaultValue("STRING" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddListOfInt64PropertyToStudyAtTableWithoutDefaultValueRecovery) {
-    addPropertyToStudyAtTableWithoutDefaultValue(
-        "INT64[]" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToStudyAtTableWithoutDefaultValue("INT64[]" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddListOfStringPropertyToStudyAtTableWithoutDefaultValueRecovery) {
-    addPropertyToStudyAtTableWithoutDefaultValue(
-        "STRING[]" /* propertyType */, TransactionTestType::RECOVERY);
+    addPropertyToStudyAtTableWithoutDefaultValue("STRING[]" /* propertyType */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddInt64PropertyToStudyAtTableWithDefaultValueRecovery) {
-    addPropertyToStudyAtTableWithDefaultValue(
-        "INT64" /* propertyType */, "42" /* defaultVal */, TransactionTestType::RECOVERY);
+    addPropertyToStudyAtTableWithDefaultValue("INT64" /* propertyType */, "42" /* defaultVal */,
+        TransactionTestType::RECOVERY);
 }
 
 TEST_F(TinySnbDDLTest, AddStringPropertyToStudyAtTableWithDefaultValueRecovery) {

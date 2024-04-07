@@ -1,12 +1,10 @@
 #include "catalog/catalog_entry/node_table_catalog_entry.h"
 
-#include <sstream>
-
 namespace kuzu {
 namespace catalog {
 
-NodeTableCatalogEntry::NodeTableCatalogEntry(
-    std::string name, common::table_id_t tableID, common::property_id_t primaryKeyPID)
+NodeTableCatalogEntry::NodeTableCatalogEntry(std::string name, common::table_id_t tableID,
+    common::property_id_t primaryKeyPID)
     : TableCatalogEntry{CatalogEntryType::NODE_TABLE_ENTRY, std::move(name), tableID},
       primaryKeyPID{primaryKeyPID} {}
 
@@ -44,11 +42,8 @@ std::unique_ptr<CatalogEntry> NodeTableCatalogEntry::copy() const {
 }
 
 std::string NodeTableCatalogEntry::toCypher(main::ClientContext* /*clientContext*/) const {
-    std::stringstream ss;
-    ss << "CREATE NODE TABLE " << getName() << "(";
-    Property::toCypher(getPropertiesRef(), ss);
-    ss << " PRIMARY KEY(" << getPrimaryKey()->getName() << "));";
-    return ss.str();
+    return common::stringFormat("CREATE NODE TABLE {} ({} PRIMARY KEY({}));", getName(),
+        Property::toCypher(getPropertiesRef()), getPrimaryKey()->getName());
 }
 
 } // namespace catalog

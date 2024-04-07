@@ -3,7 +3,7 @@
 #include "column_reader.h"
 #include "common/data_chunk/data_chunk.h"
 #include "common/types/types.h"
-#include "function/scalar_function.h"
+#include "function/function.h"
 #include "function/table/bind_input.h"
 #include "function/table/scan_functions.h"
 #include "parquet/parquet_types.h"
@@ -91,10 +91,12 @@ private:
 };
 
 struct ParquetScanSharedState final : public function::ScanFileSharedState {
-    explicit ParquetScanSharedState(
-        const common::ReaderConfig readerConfig, uint64_t numRows, main::ClientContext* context);
+    explicit ParquetScanSharedState(const common::ReaderConfig readerConfig, uint64_t numRows,
+        main::ClientContext* context);
 
     std::vector<std::unique_ptr<ParquetReader>> readers;
+    uint64_t totalRowsGroups;
+    uint64_t numBlocksReadByFiles;
 };
 
 struct ParquetScanLocalState final : public function::TableFuncLocalState {
@@ -105,6 +107,8 @@ struct ParquetScanLocalState final : public function::TableFuncLocalState {
 };
 
 struct ParquetScanFunction {
+    static constexpr const char* name = "READ_PARQUET";
+
     static function::function_set getFunctionSet();
 };
 

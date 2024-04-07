@@ -7,6 +7,7 @@
 #include "binder/expression/rel_expression.h"
 #include "binder/expression/subquery_expression.h"
 #include "common/cast.h"
+#include "function/uuid/vector_uuid_functions.h"
 
 using namespace kuzu::common;
 
@@ -107,7 +108,7 @@ bool ExpressionVisitor::isRandom(const Expression& expression) {
         return false;
     }
     auto& funcExpr = ku_dynamic_cast<const Expression&, const FunctionExpression&>(expression);
-    if (funcExpr.getFunctionName() == GEN_RANDOM_UUID_FUNC_NAME) {
+    if (funcExpr.getFunctionName() == function::GenRandomUUIDFunction::name) {
         return true;
     }
     for (auto& child : ExpressionChildrenCollector::collectChildren(expression)) {
@@ -118,8 +119,8 @@ bool ExpressionVisitor::isRandom(const Expression& expression) {
     return false;
 }
 
-bool ExpressionVisitor::satisfyAny(
-    const Expression& expression, const std::function<bool(const Expression&)>& condition) {
+bool ExpressionVisitor::satisfyAny(const Expression& expression,
+    const std::function<bool(const Expression&)>& condition) {
     if (condition(expression)) {
         return true;
     }

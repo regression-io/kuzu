@@ -1,6 +1,7 @@
 #include "expression_evaluator/function_evaluator.h"
 
 #include "binder/expression/function_expression.h"
+#include "function/cast/vector_cast_functions.h"
 
 using namespace kuzu::common;
 using namespace kuzu::processor;
@@ -24,7 +25,7 @@ void FunctionExpressionEvaluator::evaluate(ClientContext* clientContext) {
     }
     auto expr =
         ku_dynamic_cast<binder::Expression*, binder::ScalarFunctionExpression*>(expression.get());
-    if (expr->getFunctionName() == CAST_FUNC_NAME) {
+    if (expr->getFunctionName() == function::CastAnyFunction::name) {
         execFunc(parameters, *resultVector, expr->getBindData());
         return;
     }
@@ -33,8 +34,8 @@ void FunctionExpressionEvaluator::evaluate(ClientContext* clientContext) {
     }
 }
 
-bool FunctionExpressionEvaluator::select(
-    SelectionVector& selVector, ClientContext* /*ClientContext*/) {
+bool FunctionExpressionEvaluator::select(SelectionVector& selVector,
+    ClientContext* /*ClientContext*/) {
     for (auto& child : children) {
         child->evaluate(nullptr);
     }
@@ -46,7 +47,7 @@ bool FunctionExpressionEvaluator::select(
         auto numSelectedValues = 0u;
         for (auto i = 0u; i < resultVector->state->selVector->selectedSize; ++i) {
             auto pos = resultVector->state->selVector->selectedPositions[i];
-            auto selectedPosBuffer = selVector.getSelectedPositionsBuffer();
+            auto selectedPosBuffer = selVector.getMultableBuffer();
             selectedPosBuffer[numSelectedValues] = pos;
             numSelectedValues += resultVector->getValue<bool>(pos);
         }
@@ -65,8 +66,8 @@ std::unique_ptr<ExpressionEvaluator> FunctionExpressionEvaluator::clone() {
     return make_unique<FunctionExpressionEvaluator>(expression, std::move(clonedChildren));
 }
 
-void FunctionExpressionEvaluator::resolveResultVector(
-    const ResultSet& /*resultSet*/, MemoryManager* memoryManager) {
+void FunctionExpressionEvaluator::resolveResultVector(const ResultSet& /*resultSet*/,
+    MemoryManager* memoryManager) {
     resultVector = std::make_shared<ValueVector>(expression->dataType, memoryManager);
     std::vector<ExpressionEvaluator*> inputEvaluators;
     inputEvaluators.reserve(children.size());

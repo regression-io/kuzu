@@ -2,7 +2,7 @@
 
 #include "base_csv_reader.h"
 #include "common/types/types.h"
-#include "function/scalar_function.h"
+#include "function/function.h"
 #include "function/table/bind_input.h"
 #include "function/table/scan_functions.h"
 #include "function/table_functions.h"
@@ -39,15 +39,18 @@ struct ParallelCSVScanSharedState final : public function::ScanFileSharedState {
     explicit ParallelCSVScanSharedState(common::ReaderConfig readerConfig, uint64_t numRows,
         uint64_t numColumns, main::ClientContext* context, common::CSVReaderConfig csvReaderConfig)
         : ScanFileSharedState{std::move(readerConfig), numRows, context}, numColumns{numColumns},
-          csvReaderConfig{std::move(csvReaderConfig)} {}
+          numBlocksReadByFiles{0}, csvReaderConfig{std::move(csvReaderConfig)} {}
 
     void setFileComplete(uint64_t completedFileIdx);
 
     uint64_t numColumns;
+    uint64_t numBlocksReadByFiles = 0;
     common::CSVReaderConfig csvReaderConfig;
 };
 
 struct ParallelCSVScan {
+    static constexpr const char* name = "READ_CSV_PARALLEL";
+
     static function::function_set getFunctionSet();
 };
 

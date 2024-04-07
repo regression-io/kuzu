@@ -17,32 +17,18 @@ struct PandasScanLocalState : public function::TableFuncLocalState {
 };
 
 struct PandasScanSharedState : public function::BaseScanSharedState {
-    explicit PandasScanSharedState(uint64_t numRows) : BaseScanSharedState{numRows}, position{0} {}
+    explicit PandasScanSharedState(uint64_t numRows)
+        : BaseScanSharedState{numRows}, position{0}, numReadRows{0} {}
 
     std::mutex lock;
     uint64_t position;
+    uint64_t numReadRows;
 };
 
 struct PandasScanFunction {
+    static constexpr const char* name = "READ_PANDAS";
+    
     static function::function_set getFunctionSet();
-
-    static common::offset_t tableFunc(function::TableFuncInput& input, function::TableFuncOutput& output);
-
-    static std::unique_ptr<function::TableFuncBindData> bindFunc(main::ClientContext* /*context*/,
-        function::TableFuncBindInput* input);
-
-    static std::unique_ptr<function::TableFuncSharedState> initSharedState(
-        function::TableFunctionInitInput& input);
-
-    static std::unique_ptr<function::TableFuncLocalState> initLocalState(
-        function::TableFunctionInitInput& input, function::TableFuncSharedState* state,
-        storage::MemoryManager* /*mm*/);
-
-    static bool sharedStateNext(const function::TableFuncBindData* bindData,
-        PandasScanLocalState* localState, function::TableFuncSharedState* sharedState);
-
-    static void pandasBackendScanSwitch(PandasColumnBindData* bindData, uint64_t count,
-        uint64_t offset, common::ValueVector* outputVector);
 };
 
 struct PandasScanFunctionData : public function::TableFuncBindData {
@@ -69,6 +55,6 @@ struct PandasScanFunctionData : public function::TableFuncBindData {
     }
 };
 
-std::unique_ptr<common::Value> replacePD(common::Value* value);
+std::unique_ptr<function::ScanReplacementData> replacePD(const std::string& objectName);
 
 } // namespace kuzu

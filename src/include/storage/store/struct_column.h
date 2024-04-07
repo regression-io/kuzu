@@ -23,6 +23,7 @@ public:
 
     void checkpointInMemory() override;
     void rollbackInMemory() override;
+    void prepareCommit() override;
 
     inline Column* getChild(common::vector_idx_t childIdx) {
         KU_ASSERT(childIdx < childColumns.size());
@@ -34,9 +35,9 @@ public:
         ColumnChunk* data, common::offset_t dataOffset, common::length_t numValues) override;
 
     void prepareCommitForChunk(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localColumnChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo,
-        const offset_set_t& deleteInfo) override;
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunk,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunk,
+        const offset_to_row_idx_t& updateInfo, const offset_set_t& deleteInfo) override;
     void prepareCommitForChunk(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, const std::vector<common::offset_t>& dstOffsets,
         ColumnChunk* chunk, common::offset_t startSrcOffset) override;
@@ -48,11 +49,16 @@ protected:
         common::ValueVector* resultVector) override;
 
     bool canCommitInPlace(transaction::Transaction* transaction,
-        common::node_group_idx_t nodeGroupIdx, LocalVectorCollection* localChunk,
-        const offset_to_row_idx_t& insertInfo, const offset_to_row_idx_t& updateInfo) override;
+        common::node_group_idx_t nodeGroupIdx, const ChunkCollection& localInsertChunk,
+        const offset_to_row_idx_t& insertInfo, const ChunkCollection& localUpdateChunk,
+        const offset_to_row_idx_t& updateInfo) override;
     bool canCommitInPlace(transaction::Transaction* transaction,
         common::node_group_idx_t nodeGroupIdx, const std::vector<common::offset_t>& dstOffsets,
         ColumnChunk* chunk, common::offset_t dataOffset) override;
+
+private:
+    static ChunkCollection getStructChildChunkCollection(const ChunkCollection& chunkCollection,
+        common::vector_idx_t childIdx);
 
 private:
     std::vector<std::unique_ptr<Column>> childColumns;

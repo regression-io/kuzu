@@ -1,6 +1,7 @@
 #include "pandas/pandas_analyzer.h"
 
 #include "function/built_in_function_utils.h"
+#include "cached_import/py_cached_import.h"
 #include "py_conversion.h"
 
 namespace kuzu {
@@ -10,14 +11,14 @@ static bool upgradeType(common::LogicalType& left, const common::LogicalType& ri
         return true;
     }
     if (left.getLogicalTypeID() == common::LogicalTypeID::ANY ||
-        ((left.getLogicalTypeID() == common::LogicalTypeID::VAR_LIST) &&
-            (common::VarListType::getChildType(&left)->getLogicalTypeID() ==
+        ((left.getLogicalTypeID() == common::LogicalTypeID::LIST) &&
+            (common::ListType::getChildType(&left)->getLogicalTypeID() ==
                 common::LogicalTypeID::ANY))) {
         left = right;
         return true;
     }
-    if (((right.getLogicalTypeID() == common::LogicalTypeID::VAR_LIST) &&
-            (common::VarListType::getChildType(&right)->getLogicalTypeID() ==
+    if (((right.getLogicalTypeID() == common::LogicalTypeID::LIST) &&
+            (common::ListType::getChildType(&right)->getLogicalTypeID() ==
                 common::LogicalTypeID::ANY))) {
         return true;
     }
@@ -37,7 +38,7 @@ common::LogicalType PandasAnalyzer::getListType(py::object& ele, bool& canConver
     for (auto pyVal : ele) {
         auto object = py::reinterpret_borrow<py::object>(pyVal);
         auto itemType = getItemType(object, canConvert);
-        if (i != 0) {
+        if (i == 0) {
             listType = itemType;
         } else {
             if (!upgradeType(listType, itemType)) {
@@ -70,7 +71,7 @@ common::LogicalType PandasAnalyzer::getItemType(py::object ele, bool& canConvert
     case PythonObjectType::String:
         return *common::LogicalType::STRING();
     case PythonObjectType::List:
-        return *common::LogicalType::VAR_LIST(getListType(ele, canConvert));
+        return *common::LogicalType::LIST(getListType(ele, canConvert));
     default:
         KU_UNREACHABLE;
     }
@@ -88,8 +89,8 @@ static py::object findFirstNonNull(const py::handle& row, uint64_t numRows) {
 
 common::LogicalType PandasAnalyzer::innerAnalyze(py::object column, bool& canConvert) {
     auto numRows = py::len(column);
-    auto pandasModule = py::module::import("pandas");
-    auto pandasSeries = pandasModule.attr("core").attr("series").attr("Series");
+    auto pandasModule = importCache->pandas;
+    auto pandasSeries = pandasModule.core.series.Series();
 
     if (py::isinstance(column, pandasSeries)) {
         column = column.attr("__array__")();

@@ -8,6 +8,9 @@ namespace processor {
 void Unwind::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) {
     expressionEvaluator->init(*resultSet, context->clientContext->getMemoryManager());
     outValueVector = resultSet->getValueVector(outDataPos);
+    if (idPos.isValid()) {
+        idVector = resultSet->getValueVector(idPos).get();
+    }
 }
 
 bool Unwind::hasMoreToRead() const {
@@ -20,11 +23,20 @@ void Unwind::copyTuplesToOutVector(uint64_t startPos, uint64_t endPos) const {
     for (auto i = 0u; i < endPos - startPos; i++) {
         outValueVector->copyFromVectorData(i, listDataVector, listPos++);
     }
+    if (idVector != nullptr) {
+        KU_ASSERT(listDataVector->dataType.getLogicalTypeID() == common::LogicalTypeID::NODE);
+        auto idFieldVector = StructVector::getFieldVector(listDataVector, 0);
+        listPos = listEntry.offset + startPos;
+        for (auto i = 0u; i < endPos - startPos; i++) {
+            idVector->copyFromVectorData(i, idFieldVector.get(), listPos++);
+        }
+    }
 }
 
 bool Unwind::getNextTuplesInternal(ExecutionContext* context) {
     if (hasMoreToRead()) {
-        auto totalElementsCopy = std::min(DEFAULT_VECTOR_CAPACITY, listEntry.size - startIndex);
+        auto totalElementsCopy =
+            std::min(DEFAULT_VECTOR_CAPACITY, (uint64_t)listEntry.size - startIndex);
         copyTuplesToOutVector(startIndex, (totalElementsCopy + startIndex));
         startIndex += totalElementsCopy;
         outValueVector->state->initOriginalAndSelectedSize(totalElementsCopy);
@@ -42,7 +54,7 @@ bool Unwind::getNextTuplesInternal(ExecutionContext* context) {
         }
         listEntry = expressionEvaluator->resultVector->getValue<list_entry_t>(pos);
         startIndex = 0;
-        auto totalElementsCopy = std::min(DEFAULT_VECTOR_CAPACITY, listEntry.size);
+        auto totalElementsCopy = std::min(DEFAULT_VECTOR_CAPACITY, (uint64_t)listEntry.size);
         copyTuplesToOutVector(0, totalElementsCopy);
         startIndex += totalElementsCopy;
         outValueVector->state->initOriginalAndSelectedSize(startIndex);

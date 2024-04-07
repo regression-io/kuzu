@@ -31,11 +31,12 @@ void ProcessorTask::run() {
 void ProcessorTask::finalizeIfNecessary() {
     auto resultSet = populateResultSet(sink, executionContext->clientContext->getMemoryManager());
     sink->initLocalState(resultSet.get(), executionContext);
+    executionContext->clientContext->getProgressBar()->finishPipeline();
     sink->finalize(executionContext);
 }
 
-std::unique_ptr<ResultSet> ProcessorTask::populateResultSet(
-    Sink* op, storage::MemoryManager* memoryManager) {
+std::unique_ptr<ResultSet> ProcessorTask::populateResultSet(Sink* op,
+    storage::MemoryManager* memoryManager) {
     auto resultSetDescriptor = op->getResultSetDescriptor();
     if (resultSetDescriptor == nullptr) {
         // Some pipeline does not need a resultSet, e.g. OrderByMerge

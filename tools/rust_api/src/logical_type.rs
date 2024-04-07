@@ -54,12 +54,12 @@ pub enum LogicalType {
     String,
     /// Correponds to [Value::Blob](crate::value::Value::Blob)
     Blob,
-    /// Correponds to [Value::VarList](crate::value::Value::VarList)
-    VarList {
+    /// Correponds to [Value::List](crate::value::Value::List)
+    List {
         child_type: Box<LogicalType>,
     },
-    /// Correponds to [Value::FixedList](crate::value::Value::FixedList)
-    FixedList {
+    /// Correponds to [Value::Array](crate::value::Value::Array)
+    Array {
         child_type: Box<LogicalType>,
         num_elements: u64,
     },
@@ -118,16 +118,12 @@ impl From<&ffi::LogicalType> for LogicalType {
             LogicalTypeID::TIMESTAMP_MS => LogicalType::TimestampMs,
             LogicalTypeID::TIMESTAMP_SEC => LogicalType::TimestampSec,
             LogicalTypeID::INTERNAL_ID => LogicalType::InternalID,
-            LogicalTypeID::VAR_LIST => LogicalType::VarList {
-                child_type: Box::new(
-                    ffi::logical_type_get_var_list_child_type(logical_type).into(),
-                ),
+            LogicalTypeID::LIST => LogicalType::List {
+                child_type: Box::new(ffi::logical_type_get_list_child_type(logical_type).into()),
             },
-            LogicalTypeID::FIXED_LIST => LogicalType::FixedList {
-                child_type: Box::new(
-                    ffi::logical_type_get_fixed_list_child_type(logical_type).into(),
-                ),
-                num_elements: ffi::logical_type_get_fixed_list_num_elements(logical_type),
+            LogicalTypeID::ARRAY => LogicalType::Array {
+                child_type: Box::new(ffi::logical_type_get_array_child_type(logical_type).into()),
+                num_elements: ffi::logical_type_get_array_num_elements(logical_type),
             },
             LogicalTypeID::STRUCT => {
                 let names = ffi::logical_type_get_struct_field_names(logical_type);
@@ -143,7 +139,7 @@ impl From<&ffi::LogicalType> for LogicalType {
             LogicalTypeID::REL => LogicalType::Rel,
             LogicalTypeID::RECURSIVE_REL => LogicalType::RecursiveRel,
             LogicalTypeID::MAP => {
-                let child_types = ffi::logical_type_get_var_list_child_type(logical_type);
+                let child_types = ffi::logical_type_get_list_child_type(logical_type);
                 let types = ffi::logical_type_get_struct_field_types(child_types);
                 let key_type = types
                     .as_ref()
@@ -214,13 +210,13 @@ impl From<&LogicalType> for cxx::UniquePtr<ffi::LogicalType> {
             | LogicalType::Rel
             | LogicalType::RecursiveRel
             | LogicalType::UUID => ffi::create_logical_type(typ.id()),
-            LogicalType::VarList { child_type } => {
-                ffi::create_logical_type_var_list(child_type.as_ref().into())
+            LogicalType::List { child_type } => {
+                ffi::create_logical_type_list(child_type.as_ref().into())
             }
-            LogicalType::FixedList {
+            LogicalType::Array {
                 child_type,
                 num_elements,
-            } => ffi::create_logical_type_fixed_list(child_type.as_ref().into(), *num_elements),
+            } => ffi::create_logical_type_array(child_type.as_ref().into(), *num_elements),
             LogicalType::Struct { fields } => {
                 let mut builder = ffi::create_type_list();
                 let mut names = vec![];
@@ -278,8 +274,8 @@ impl LogicalType {
             LogicalType::TimestampMs => LogicalTypeID::TIMESTAMP_MS,
             LogicalType::TimestampSec => LogicalTypeID::TIMESTAMP_SEC,
             LogicalType::InternalID => LogicalTypeID::INTERNAL_ID,
-            LogicalType::VarList { .. } => LogicalTypeID::VAR_LIST,
-            LogicalType::FixedList { .. } => LogicalTypeID::FIXED_LIST,
+            LogicalType::List { .. } => LogicalTypeID::LIST,
+            LogicalType::Array { .. } => LogicalTypeID::ARRAY,
             LogicalType::Struct { .. } => LogicalTypeID::STRUCT,
             LogicalType::Node => LogicalTypeID::NODE,
             LogicalType::Rel => LogicalTypeID::REL,

@@ -40,6 +40,10 @@ public:
      */
     KUZU_API uint64_t getMaxNumThreadForExec();
 
+    void setProgressBarPrinting(bool enable) {
+        clientContext->progressBar->toggleProgressBarPrinting(enable);
+    }
+
     /**
      * @brief Executes the given query and returns the result.
      * @param query The query to execute.
@@ -60,8 +64,8 @@ public:
      * @return the result of the query.
      */
     template<typename... Args>
-    inline std::unique_ptr<QueryResult> execute(
-        PreparedStatement* preparedStatement, std::pair<std::string, Args>... args) {
+    inline std::unique_ptr<QueryResult> execute(PreparedStatement* preparedStatement,
+        std::pair<std::string, Args>... args) {
         std::unordered_map<std::string, std::unique_ptr<common::Value>> inputParameters;
         return executeWithParams(preparedStatement, std::move(inputParameters), args...);
     }
@@ -95,8 +99,8 @@ public:
     void createScalarFunction(std::string name, TR (*udfFunc)(Args...)) {
         auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
         auto nameCopy = std::string(name);
-        addScalarFunction(
-            std::move(nameCopy), function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc));
+        addScalarFunction(std::move(nameCopy),
+            function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc));
         commitUDFTrx(autoTrx);
     }
 
@@ -105,14 +109,14 @@ public:
         common::LogicalTypeID returnType, TR (*udfFunc)(Args...)) {
         auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
         auto nameCopy = std::string(name);
-        addScalarFunction(
-            std::move(nameCopy), function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc,
-                                     std::move(parameterTypes), returnType));
+        addScalarFunction(std::move(nameCopy),
+            function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc,
+                std::move(parameterTypes), returnType));
         commitUDFTrx(autoTrx);
     }
 
     template<typename TR, typename... Args>
-    void createVectorizedFunction(std::string name, function::scalar_exec_func scalarFunc) {
+    void createVectorizedFunction(std::string name, function::scalar_func_exec_t scalarFunc) {
         auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
         auto nameCopy = std::string(name);
         addScalarFunction(std::move(nameCopy), function::UDF::getVectorizedFunction<TR, Args...>(
@@ -122,33 +126,28 @@ public:
 
     void createVectorizedFunction(std::string name,
         std::vector<common::LogicalTypeID> parameterTypes, common::LogicalTypeID returnType,
-        function::scalar_exec_func scalarFunc) {
+        function::scalar_func_exec_t scalarFunc) {
         auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
         auto nameCopy = std::string(name);
-        addScalarFunction(
-            std::move(nameCopy), function::UDF::getVectorizedFunction(std::move(name),
-                                     std::move(scalarFunc), std::move(parameterTypes), returnType));
+        addScalarFunction(std::move(nameCopy),
+            function::UDF::getVectorizedFunction(std::move(name), std::move(scalarFunc),
+                std::move(parameterTypes), returnType));
         commitUDFTrx(autoTrx);
     }
 
-    inline void setReplaceFunc(replace_func_t replaceFunc) {
-        clientContext->setReplaceFunc(std::move(replaceFunc));
-    }
-
-    inline ClientContext* getClientContext() { return clientContext.get(); };
+    ClientContext* getClientContext() { return clientContext.get(); };
 
 private:
-    std::unique_ptr<QueryResult> query(
-        std::string_view query, std::string_view encodedJoin, bool enumerateAllPlans = true);
+    std::unique_ptr<QueryResult> query(std::string_view query, std::string_view encodedJoin,
+        bool enumerateAllPlans = true);
 
     std::unique_ptr<QueryResult> queryResultWithError(std::string_view errMsg);
 
     std::unique_ptr<PreparedStatement> preparedStatementWithError(std::string_view errMsg);
 
-    std::vector<std::unique_ptr<parser::Statement>> parseQuery(std::string_view query);
-
-    std::unique_ptr<PreparedStatement> prepareNoLock(parser::Statement* parsedStatement,
-        bool enumerateAllPlans = false, std::string_view joinOrder = std::string_view());
+    std::unique_ptr<PreparedStatement> prepareNoLock(
+        std::shared_ptr<parser::Statement> parsedStatement, bool enumerateAllPlans = false,
+        std::string_view joinOrder = std::string_view());
 
     template<typename T, typename... Args>
     std::unique_ptr<QueryResult> executeWithParams(PreparedStatement* preparedStatement,

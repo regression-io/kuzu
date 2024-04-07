@@ -114,6 +114,10 @@ bool BaseCSVReader::isEOF() const {
     return getFileOffset() >= fileInfo->getFileSize();
 }
 
+uint64_t BaseCSVReader::getFileSize() {
+    return fileInfo->getFileSize();
+}
+
 template<typename Driver>
 void BaseCSVReader::addValue(Driver& driver, uint64_t rowNum, column_id_t columnIdx,
     std::string_view strVal, std::vector<uint64_t>& escapePositions) {
@@ -272,7 +276,7 @@ add_value:
         goto final_state;
     }
     goto value_start;
-add_row : {
+add_row: {
     // We get here after we have a newline.
     KU_ASSERT(isNewLine(buffer[position]));
     bool isCarriageReturn = buffer[position] == '\r';
@@ -319,8 +323,8 @@ in_quotes:
     } while (readBuffer(&start));
     [[unlikely]]
     // still in quoted state at the end of the file, error:
-    throw CopyException(stringFormat(
-        "Error in file {} on line {}: unterminated quotes.", fileInfo->path, getLineNumber()));
+    throw CopyException(stringFormat("Error in file {} on line {}: unterminated quotes.",
+        fileInfo->path, getLineNumber()));
 unquote:
     KU_ASSERT(hasQuotes && buffer[position] == option.quoteChar);
     // this state handles the state directly after we unquote
@@ -417,8 +421,8 @@ uint64_t BaseCSVReader::getLineNumber() {
     char buf[BUF_SIZE];
     if (fileInfo->seek(0, SEEK_SET) == -1) {
         // LCOV_EXCL_START
-        throw CopyException(stringFormat(
-            "Could not seek to beginning of file {}: {}", fileInfo->path, posixErrMessage()));
+        throw CopyException(stringFormat("Could not seek to beginning of file {}: {}",
+            fileInfo->path, posixErrMessage()));
         // LCOV_EXCL_STOP
     }
 

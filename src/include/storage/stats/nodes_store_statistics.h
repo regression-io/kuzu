@@ -4,7 +4,6 @@
 #include "storage/stats/node_table_statistics.h"
 #include "storage/stats/table_statistics_collection.h"
 #include "storage/storage_utils.h"
-#include "transaction/transaction.h"
 
 namespace kuzu {
 namespace storage {
@@ -16,8 +15,8 @@ public:
     // Should only be used by saveInitialNodesStatisticsAndDeletedIDsToFile to start a database
     // from an empty directory.
     explicit NodesStoreStatsAndDeletedIDs(common::VirtualFileSystem* vfs)
-        : TablesStatistics{
-              nullptr /* metadataFH */, nullptr /* bufferManager */, nullptr /* wal */, vfs} {};
+        : TablesStatistics{nullptr /* metadataFH */, nullptr /* bufferManager */, nullptr /* wal */,
+              vfs} {};
     // Should be used when an already loaded database is started from a directory.
     NodesStoreStatsAndDeletedIDs(BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
         common::VirtualFileSystem* vfs,
@@ -27,25 +26,20 @@ public:
     }
 
     inline NodeTableStatsAndDeletedIDs* getNodeStatisticsAndDeletedIDs(
-        common::table_id_t tableID) const {
-        return getNodeTableStats(transaction::TransactionType::READ_ONLY, tableID);
+        transaction::Transaction* transaction, common::table_id_t tableID) const {
+        return getNodeTableStats(transaction->getType(), tableID);
     }
 
-    static inline void saveInitialNodesStatisticsAndDeletedIDsToFile(
-        common::VirtualFileSystem* vfs, const std::string& directory) {
-        std::make_unique<NodesStoreStatsAndDeletedIDs>(vfs)->saveToFile(
-            directory, common::FileVersionType::ORIGINAL, transaction::TransactionType::READ_ONLY);
+    static inline void saveInitialNodesStatisticsAndDeletedIDsToFile(common::VirtualFileSystem* vfs,
+        const std::string& directory) {
+        std::make_unique<NodesStoreStatsAndDeletedIDs>(vfs)->saveToFile(directory,
+            common::FileVersionType::ORIGINAL, transaction::TransactionType::READ_ONLY);
     }
 
-    inline void setNumTuplesForTable(common::table_id_t tableID, uint64_t numTuples) override {
-        initTableStatisticsForWriteTrx();
-        KU_ASSERT(readWriteVersion && readWriteVersion->tableStatisticPerTable.contains(tableID));
-        setToUpdated();
-        getNodeTableStats(transaction::TransactionType::WRITE, tableID)->setNumTuples(numTuples);
-    }
+    void updateNumTuplesByValue(common::table_id_t tableID, int64_t value) override;
 
-    common::offset_t getMaxNodeOffset(
-        transaction::Transaction* transaction, common::table_id_t tableID);
+    common::offset_t getMaxNodeOffset(transaction::Transaction* transaction,
+        common::table_id_t tableID);
 
     // This function is only used for testing purpose.
     inline uint32_t getNumNodeStatisticsAndDeleteIDsPerTable() const {
@@ -71,12 +65,8 @@ public:
         getNodeTableStats(transaction::TransactionType::WRITE, tableID)->deleteNode(nodeOffset);
     }
 
-    // This function is only used by storageManager to construct relsStore during start-up, so
-    // we can just safely return the maxNodeOffsetPerTable for readOnlyVersion.
-    std::map<common::table_id_t, common::offset_t> getMaxNodeOffsetPerTable() const;
-
-    void setDeletedNodeOffsetsForMorsel(transaction::Transaction* transaction,
-        const std::shared_ptr<common::ValueVector>& nodeOffsetVector, common::table_id_t tableID);
+    void setDeletedNodeOffsetsForMorsel(transaction::Transaction* tx,
+        common::ValueVector* nodeIDVector, common::table_id_t tableID);
 
     void addNodeStatisticsAndDeletedIDs(catalog::NodeTableCatalogEntry* nodeTableEntry);
 
@@ -88,8 +78,8 @@ public:
 protected:
     inline std::unique_ptr<TableStatistics> constructTableStatistic(
         catalog::TableCatalogEntry* tableEntry) override {
-        return std::make_unique<NodeTableStatsAndDeletedIDs>(
-            metadataFH, *tableEntry, bufferManager, wal);
+        return std::make_unique<NodeTableStatsAndDeletedIDs>(metadataFH, *tableEntry, bufferManager,
+            wal);
     }
 
     inline std::unique_ptr<TableStatistics> constructTableStatistic(
@@ -98,8 +88,8 @@ protected:
             *(NodeTableStatsAndDeletedIDs*)tableStatistics);
     }
 
-    inline std::string getTableStatisticsFilePath(
-        const std::string& directory, common::FileVersionType dbFileType) override {
+    inline std::string getTableStatisticsFilePath(const std::string& directory,
+        common::FileVersionType dbFileType) override {
         return StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(vfs, directory, dbFileType);
     }
 

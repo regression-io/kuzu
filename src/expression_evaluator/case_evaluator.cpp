@@ -12,7 +12,7 @@ void CaseAlternativeEvaluator::init(const ResultSet& resultSet, MemoryManager* m
     whenEvaluator->init(resultSet, memoryManager);
     thenEvaluator->init(resultSet, memoryManager);
     whenSelVector = std::make_unique<SelectionVector>(DEFAULT_VECTOR_CAPACITY);
-    whenSelVector->resetSelectorToValuePosBuffer();
+    whenSelVector->setToFiltered();
 }
 
 void CaseExpressionEvaluator::init(const ResultSet& resultSet, MemoryManager* memoryManager) {
@@ -51,7 +51,7 @@ bool CaseExpressionEvaluator::select(SelectionVector& selVector, ClientContext* 
     evaluate(clientContext);
     KU_ASSERT(resultVector->state->selVector->selectedSize == selVector.selectedSize);
     auto numSelectedValues = 0u;
-    auto selectedPosBuffer = selVector.getSelectedPositionsBuffer();
+    auto selectedPosBuffer = selVector.getMultableBuffer();
     for (auto i = 0u; i < selVector.selectedSize; ++i) {
         auto selVectorPos = selVector.selectedPositions[i];
         auto resultVectorPos = resultVector->state->selVector->selectedPositions[i];
@@ -68,12 +68,12 @@ std::unique_ptr<ExpressionEvaluator> CaseExpressionEvaluator::clone() {
     for (auto& alternative : alternativeEvaluators) {
         clonedAlternativeEvaluators.push_back(alternative->clone());
     }
-    return make_unique<CaseExpressionEvaluator>(
-        expression, std::move(clonedAlternativeEvaluators), elseEvaluator->clone());
+    return make_unique<CaseExpressionEvaluator>(expression, std::move(clonedAlternativeEvaluators),
+        elseEvaluator->clone());
 }
 
-void CaseExpressionEvaluator::resolveResultVector(
-    const ResultSet& /*resultSet*/, MemoryManager* memoryManager) {
+void CaseExpressionEvaluator::resolveResultVector(const ResultSet& /*resultSet*/,
+    MemoryManager* memoryManager) {
     resultVector = std::make_shared<ValueVector>(expression->dataType, memoryManager);
     std::vector<ExpressionEvaluator*> inputEvaluators;
     for (auto& alternative : alternativeEvaluators) {
@@ -84,8 +84,8 @@ void CaseExpressionEvaluator::resolveResultVector(
     resolveResultStateFromChildren(inputEvaluators);
 }
 
-void CaseExpressionEvaluator::fillSelected(
-    const SelectionVector& selVector, ValueVector* srcVector) {
+void CaseExpressionEvaluator::fillSelected(const SelectionVector& selVector,
+    ValueVector* srcVector) {
     for (auto i = 0u; i < selVector.selectedSize; ++i) {
         auto resultPos = selVector.selectedPositions[i];
         fillEntry(resultPos, srcVector);

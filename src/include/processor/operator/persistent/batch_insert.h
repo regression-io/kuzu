@@ -26,8 +26,8 @@ struct BatchInsertSharedState {
     std::shared_ptr<FactorizedTable> fTable;
     storage::WAL* wal;
 
-    BatchInsertSharedState(
-        storage::Table* table, std::shared_ptr<FactorizedTable> fTable, storage::WAL* wal)
+    BatchInsertSharedState(storage::Table* table, std::shared_ptr<FactorizedTable> fTable,
+        storage::WAL* wal)
         : numRows{0}, table{table}, fTable{std::move(fTable)}, wal{wal} {};
     BatchInsertSharedState(const BatchInsertSharedState& other) = delete;
 
@@ -48,11 +48,11 @@ struct BatchInsertSharedState {
         wal->logCopyTableRecord(table->getTableID());
         wal->flushAllPages();
     }
-    inline void setNumTuplesForTable() { table->setNumTuples(getNumRows()); }
+    inline void updateNumTuplesForTable() { table->updateNumTuplesByValue(getNumRows()); }
 };
 
 struct BatchInsertLocalState {
-    std::unique_ptr<storage::NodeGroup> nodeGroup;
+    std::unique_ptr<storage::ChunkedNodeGroup> nodeGroup;
 
     virtual ~BatchInsertLocalState() = default;
 };

@@ -34,21 +34,16 @@ public:
                       std::is_same<T, double>::value || std::is_same<T, float>::value);
         return std::to_string(val);
     }
-    // Fixed list does not have a physical class. So we cannot reuse above toString template.
-    // dummyVector is used to avoid clang-tidy check and should be removed once we unify
-    // Fixed-LIST in memory layout with VAR-LIST.
-    static std::string fixedListToString(
-        const uint8_t* val, const common::LogicalType& type, ValueVector* dummyVector);
     static std::string nodeToString(const struct_entry_t& val, ValueVector* vector);
     static std::string relToString(const struct_entry_t& val, ValueVector* vector);
 
-    static inline void encodeOverflowPtr(
-        uint64_t& overflowPtr, page_idx_t pageIdx, uint16_t pageOffset) {
+    static inline void encodeOverflowPtr(uint64_t& overflowPtr, page_idx_t pageIdx,
+        uint16_t pageOffset) {
         memcpy(&overflowPtr, &pageIdx, 4);
         memcpy(((uint8_t*)&overflowPtr) + 4, &pageOffset, 2);
     }
-    static inline void decodeOverflowPtr(
-        uint64_t overflowPtr, page_idx_t& pageIdx, uint16_t& pageOffset) {
+    static inline void decodeOverflowPtr(uint64_t overflowPtr, page_idx_t& pageIdx,
+        uint16_t& pageOffset) {
         pageIdx = 0;
         memcpy(&pageIdx, &overflowPtr, 4);
         memcpy(&pageOffset, ((uint8_t*)&overflowPtr) + 4, 2);
@@ -80,7 +75,8 @@ public:
             return common::PhysicalTypeID::INT128;
         } else if constexpr (std::is_same_v<T, interval_t>) {
             return common::PhysicalTypeID::INTERVAL;
-        } else if constexpr (std::is_same_v<T, ku_string_t>) {
+        } else if constexpr (std::same_as<T, ku_string_t> || std::same_as<T, std::string> ||
+                             std::same_as<T, std::string_view>) {
             return common::PhysicalTypeID::STRING;
         } else {
             KU_UNREACHABLE;
@@ -177,7 +173,8 @@ public:
             return func(blob_t());
         case LogicalTypeID::UUID:
             return func(ku_uuid_t());
-        case LogicalTypeID::VAR_LIST:
+        case LogicalTypeID::ARRAY:
+        case LogicalTypeID::LIST:
             return func(list_entry_t());
         case LogicalTypeID::MAP:
             return func(map_entry_t());
@@ -189,11 +186,9 @@ public:
         case LogicalTypeID::UNION:
             return func(union_entry_t());
         /* NOLINTEND(bugprone-branch-clone)*/
-        case LogicalTypeID::FIXED_LIST:
         case LogicalTypeID::ANY:
         case LogicalTypeID::POINTER:
         case LogicalTypeID::RDF_VARIANT:
-            // FIXED_LIST has no type
             KU_UNREACHABLE;
         }
     }
@@ -235,13 +230,13 @@ public:
             return func(internalID_t());
         case PhysicalTypeID::STRING:
             return func(ku_string_t());
-        case PhysicalTypeID::VAR_LIST:
+        case PhysicalTypeID::LIST:
             return func(list_entry_t());
+        case PhysicalTypeID::STRUCT:
+            return func(struct_entry_t());
         /* NOLINTEND(bugprone-branch-clone)*/
         case PhysicalTypeID::ANY:
-        case PhysicalTypeID::FIXED_LIST:
         case PhysicalTypeID::POINTER:
-        case PhysicalTypeID::STRUCT:
             // Unsupported type
             KU_UNREACHABLE;
         }

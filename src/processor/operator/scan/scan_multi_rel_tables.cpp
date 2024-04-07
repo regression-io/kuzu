@@ -7,10 +7,13 @@ using namespace kuzu::transaction;
 namespace kuzu {
 namespace processor {
 
-void RelTableCollectionScanner::init() {
+void RelTableCollectionScanner::init(ValueVector* inVector,
+    const std::vector<ValueVector*>& outputVectors) {
     readStates.resize(scanInfos.size());
     for (auto i = 0u; i < scanInfos.size(); i++) {
-        readStates[i] = std::make_unique<RelDataReadState>();
+        auto scanInfo = scanInfos[i].get();
+        readStates[i] = std::make_unique<RelTableReadState>(*inVector, scanInfo->columnIDs,
+            outputVectors, scanInfo->direction);
     }
 }
 
@@ -19,8 +22,7 @@ bool RelTableCollectionScanner::scan(ValueVector* inVector,
     while (true) {
         if (readStates[currentTableIdx]->hasMoreToRead(transaction)) {
             auto scanInfo = scanInfos[currentTableIdx].get();
-            scanInfo->table->read(
-                transaction, *readStates[currentTableIdx], inVector, outputVectors);
+            scanInfo->table->read(transaction, *readStates[currentTableIdx]);
             if (outputVectors[0]->state->selVector->selectedSize > 0) {
                 return true;
             }
@@ -31,7 +33,7 @@ bool RelTableCollectionScanner::scan(ValueVector* inVector,
             }
             auto scanInfo = scanInfos[currentTableIdx].get();
             scanInfo->table->initializeReadState(transaction, scanInfo->direction,
-                scanInfo->columnIDs, inVector, readStates[currentTableIdx].get());
+                scanInfo->columnIDs, *inVector, *readStates[currentTableIdx]);
             nextTableIdx++;
         }
     }
@@ -49,14 +51,15 @@ std::unique_ptr<RelTableCollectionScanner> RelTableCollectionScanner::clone() co
 void ScanMultiRelTable::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) {
     ScanRelTable::initLocalStateInternal(resultSet, context);
     for (auto& [_, scanner] : scannerPerNodeTable) {
-        scanner->init();
+        scanner->init(inVector, outVectors);
     }
     currentScanner = nullptr;
 }
 
 bool ScanMultiRelTable::getNextTuplesInternal(ExecutionContext* context) {
     while (true) {
-        if (currentScanner != nullptr && currentScanner->scan(inVector, outVectors, transaction)) {
+        if (currentScanner != nullptr &&
+            currentScanner->scan(inVector, outVectors, context->clientContext->getTx())) {
             metrics->numOutputTuple.increase(outVectors[0]->state->selVector->selectedSize);
             return true;
         }

@@ -2,6 +2,7 @@
 #include "binder/ddl/bound_alter.h"
 #include "binder/ddl/bound_create_table.h"
 #include "binder/ddl/bound_drop_table.h"
+#include "catalog/catalog.h"
 #include "catalog/catalog_entry/node_table_catalog_entry.h"
 #include "catalog/catalog_entry/rdf_graph_catalog_entry.h"
 #include "catalog/catalog_entry/rel_group_catalog_entry.h"
@@ -39,8 +40,8 @@ std::vector<PropertyInfo> Binder::bindPropertyInfo(
     std::vector<PropertyInfo> propertyInfos;
     propertyInfos.reserve(propertyNameDataTypes.size());
     for (auto& propertyNameDataType : propertyNameDataTypes) {
-        propertyInfos.emplace_back(
-            propertyNameDataType.first, *bindDataType(propertyNameDataType.second));
+        propertyInfos.emplace_back(propertyNameDataType.first,
+            *bindDataType(propertyNameDataType.second));
     }
     validateUniquePropertyName(propertyInfos);
     for (auto& info : propertyInfos) {
@@ -51,8 +52,8 @@ std::vector<PropertyInfo> Binder::bindPropertyInfo(
     return propertyInfos;
 }
 
-static uint32_t bindPrimaryKey(
-    const std::string& pkColName, const std::vector<PropertyInfo>& infos) {
+static uint32_t bindPrimaryKey(const std::string& pkColName,
+    const std::vector<PropertyInfo>& infos) {
     uint32_t primaryKeyIdx = UINT32_MAX;
     for (auto i = 0u; i < infos.size(); i++) {
         if (infos[i].name == pkColName) {
@@ -137,8 +138,8 @@ BoundCreateTableInfo Binder::bindCreateRelTableInfo(const CreateTableInfo* info)
     validateTableType(srcTableID, TableType::NODE);
     auto dstTableID = bindTableID(extraInfo->dstTableName);
     validateTableType(dstTableID, TableType::NODE);
-    auto boundExtraInfo = std::make_unique<BoundExtraCreateRelTableInfo>(
-        srcMultiplicity, dstMultiplicity, srcTableID, dstTableID, std::move(propertyInfos));
+    auto boundExtraInfo = std::make_unique<BoundExtraCreateRelTableInfo>(srcMultiplicity,
+        dstMultiplicity, srcTableID, dstTableID, std::move(propertyInfos));
     return BoundCreateTableInfo(TableType::REL, info->tableName, std::move(boundExtraInfo));
 }
 
@@ -167,7 +168,7 @@ BoundCreateTableInfo Binder::bindCreateRelTableGroupInfo(const CreateTableInfo* 
 std::unique_ptr<BoundStatement> Binder::bindCreateTable(const Statement& statement) {
     auto& createTable = ku_dynamic_cast<const Statement&, const CreateTable&>(statement);
     auto tableName = createTable.getInfo()->tableName;
-    if (catalog.containsTable(clientContext->getTx(), tableName)) {
+    if (clientContext->getCatalog()->containsTable(clientContext->getTx(), tableName)) {
         throw BinderException(tableName + " already exists in catalog.");
     }
     auto boundCreateInfo = bindCreateTableInfo(createTable.getInfo());
@@ -178,12 +179,13 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
     auto& dropTable = ku_dynamic_cast<const Statement&, const Drop&>(statement);
     auto tableName = dropTable.getTableName();
     validateTableExist(tableName);
-    auto tableID = catalog.getTableID(clientContext->getTx(), tableName);
-    auto tableEntry = catalog.getTableCatalogEntry(clientContext->getTx(), tableID);
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
+    auto tableEntry = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     switch (tableEntry->getTableType()) {
     case TableType::NODE: {
         // Check node table is not referenced by rel table.
-        for (auto& relTableEntry : catalog.getRelTableEntries(clientContext->getTx())) {
+        for (auto& relTableEntry : catalog->getRelTableEntries(clientContext->getTx())) {
             if (relTableEntry->isParent(tableID)) {
                 throw BinderException(stringFormat("Cannot delete node table {} because it is "
                                                    "referenced by relationship table {}.",
@@ -191,7 +193,7 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
             }
         }
         // Check node table is not referenced by rdf graph
-        for (auto& rdfEntry : catalog.getRdfGraphEntries(clientContext->getTx())) {
+        for (auto& rdfEntry : catalog->getRdfGraphEntries(clientContext->getTx())) {
             if (rdfEntry->isParent(tableID)) {
                 throw BinderException(stringFormat(
                     "Cannot delete node table {} because it is referenced by rdfGraph {}.",
@@ -201,7 +203,7 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
     } break;
     case TableType::REL: {
         // Check rel table is not referenced by rel group.
-        for (auto& relTableGroupEntry : catalog.getRelTableGroupEntries(clientContext->getTx())) {
+        for (auto& relTableGroupEntry : catalog->getRelTableGroupEntries(clientContext->getTx())) {
             if (relTableGroupEntry->isParent(tableID)) {
                 throw BinderException(stringFormat("Cannot delete relationship table {} because it "
                                                    "is referenced by relationship group {}.",
@@ -209,7 +211,7 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
             }
         }
         // Check rel table is not referenced by rdf graph.
-        for (auto& rdfGraphEntry : catalog.getRdfGraphEntries(clientContext->getTx())) {
+        for (auto& rdfGraphEntry : catalog->getRdfGraphEntries(clientContext->getTx())) {
             if (rdfGraphEntry->isParent(tableID)) {
                 throw BinderException(stringFormat(
                     "Cannot delete relationship table {} because it is referenced by rdfGraph {}.",
@@ -220,7 +222,7 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
     case TableType::RDF: {
         auto rdfGraphEntry = ku_dynamic_cast<TableCatalogEntry*, RDFGraphCatalogEntry*>(tableEntry);
         // Check resource table is not referenced by rel table other than its triple table.
-        for (auto& relTableEntry : catalog.getRelTableEntries(clientContext->getTx())) {
+        for (auto& relTableEntry : catalog->getRelTableEntries(clientContext->getTx())) {
             if (relTableEntry->getTableID() == rdfGraphEntry->getResourceTripleTableID() ||
                 relTableEntry->getTableID() == rdfGraphEntry->getLiteralTripleTableID()) {
                 continue;
@@ -232,7 +234,7 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
             }
         }
         // Check literal table is not referenced by rel table other than its triple table.
-        for (auto& relTableEntry : catalog.getRelTableEntries(clientContext->getTx())) {
+        for (auto& relTableEntry : catalog->getRelTableEntries(clientContext->getTx())) {
             if (relTableEntry->getTableID() == rdfGraphEntry->getLiteralTripleTableID()) {
                 continue;
             }
@@ -251,8 +253,9 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
 
 std::unique_ptr<BoundStatement> Binder::bindAlter(const Statement& statement) {
     auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
-    auto tableID = catalog.getTableID(clientContext->getTx(), alter.getInfo()->tableName);
-    for (auto& schema : catalog.getRdfGraphEntries(clientContext->getTx())) {
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), alter.getInfo()->tableName);
+    for (auto& schema : catalog->getRdfGraphEntries(clientContext->getTx())) {
         if (schema->isParent(tableID)) {
             throw BinderException(
                 stringFormat("Cannot alter table {} because it is referenced by rdfGraph {}.",
@@ -285,10 +288,11 @@ std::unique_ptr<BoundStatement> Binder::bindRenameTable(const Statement& stateme
     auto tableName = info->tableName;
     auto newName = extraInfo->newName;
     validateTableExist(tableName);
-    if (catalog.containsTable(clientContext->getTx(), newName)) {
+    auto catalog = clientContext->getCatalog();
+    if (catalog->containsTable(clientContext->getTx(), newName)) {
         throw BinderException("Table: " + newName + " already exists.");
     }
-    auto tableID = catalog.getTableID(clientContext->getTx(), tableName);
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
     auto boundExtraInfo = std::make_unique<BoundExtraRenameTableInfo>(newName);
     auto boundInfo =
         BoundAlterInfo(AlterType::RENAME_TABLE, tableName, tableID, std::move(boundExtraInfo));
@@ -302,16 +306,16 @@ static void validatePropertyExist(TableCatalogEntry* tableEntry, const std::stri
     }
 }
 
-static void validatePropertyNotExist(
-    TableCatalogEntry* tableEntry, const std::string& propertyName) {
+static void validatePropertyNotExist(TableCatalogEntry* tableEntry,
+    const std::string& propertyName) {
     if (tableEntry->containProperty(propertyName)) {
         throw BinderException(
             tableEntry->getName() + " table already has property " + propertyName + ".");
     }
 }
 
-static void validatePropertyDDLOnTable(
-    TableCatalogEntry* tableEntry, const std::string& ddlOperation) {
+static void validatePropertyDDLOnTable(TableCatalogEntry* tableEntry,
+    const std::string& ddlOperation) {
     switch (tableEntry->getTableType()) {
     case TableType::REL_GROUP:
     case TableType::RDF: {
@@ -332,8 +336,9 @@ std::unique_ptr<BoundStatement> Binder::bindAddProperty(const Statement& stateme
     auto dataType = bindDataType(extraInfo->dataType);
     auto propertyName = extraInfo->propertyName;
     validateTableExist(tableName);
-    auto tableID = catalog.getTableID(clientContext->getTx(), tableName);
-    auto tableSchema = catalog.getTableCatalogEntry(clientContext->getTx(), tableID);
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
+    auto tableSchema = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     validatePropertyDDLOnTable(tableSchema, "add");
     validatePropertyNotExist(tableSchema, propertyName);
     if (dataType->getLogicalTypeID() == LogicalTypeID::SERIAL) {
@@ -356,8 +361,9 @@ std::unique_ptr<BoundStatement> Binder::bindDropProperty(const Statement& statem
     auto tableName = info->tableName;
     auto propertyName = extraInfo->propertyName;
     validateTableExist(tableName);
-    auto tableID = catalog.getTableID(clientContext->getTx(), tableName);
-    auto tableEntry = catalog.getTableCatalogEntry(clientContext->getTx(), tableID);
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
+    auto tableEntry = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     validatePropertyDDLOnTable(tableEntry, "drop");
     validatePropertyExist(tableEntry, propertyName);
     auto propertyID = tableEntry->getPropertyID(propertyName);
@@ -381,8 +387,9 @@ std::unique_ptr<BoundStatement> Binder::bindRenameProperty(const Statement& stat
     auto propertyName = extraInfo->propertyName;
     auto newName = extraInfo->newName;
     validateTableExist(tableName);
-    auto tableID = catalog.getTableID(clientContext->getTx(), tableName);
-    auto tableSchema = catalog.getTableCatalogEntry(clientContext->getTx(), tableID);
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
+    auto tableSchema = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     validatePropertyDDLOnTable(tableSchema, "rename");
     validatePropertyExist(tableSchema, propertyName);
     auto propertyID = tableSchema->getPropertyID(propertyName);

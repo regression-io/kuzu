@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "common/api.h"
+#include "common/case_insensitive_map.h"
 #include "kuzu_fwd.h"
 
 namespace kuzu {
@@ -12,6 +13,10 @@ namespace common {
 class FileSystem;
 enum class LogicalTypeID : uint8_t;
 } // namespace common
+
+namespace catalog {
+class CatalogEntry;
+} // namespace catalog
 
 namespace function {
 struct Function;
@@ -22,8 +27,13 @@ struct ExtensionUtils;
 struct ExtensionOptions;
 } // namespace extension
 
+namespace storage {
+class StorageExtension;
+} // namespace storage
+
 namespace main {
 struct ExtensionOption;
+class DatabaseManager;
 
 /**
  * @brief Stores runtime configuration for creating or opening a Database
@@ -75,8 +85,8 @@ public:
      * @param databasePath Database path.
      * @param systemConfig System configurations (buffer pool size and max num threads).
      */
-    KUZU_API explicit Database(
-        std::string_view databasePath, SystemConfig systemConfig = SystemConfig());
+    KUZU_API explicit Database(std::string_view databasePath,
+        SystemConfig systemConfig = SystemConfig());
     /**
      * @brief Destructs the database object.
      */
@@ -91,15 +101,23 @@ public:
 
     // TODO(Ziyi): Instead of exposing a dedicated API for adding a new function, we should consider
     // add function through the extension module.
-    void addBuiltInFunction(
-        std::string name, std::vector<std::unique_ptr<function::Function>> functionSet);
+    void addBuiltInFunction(std::string name,
+        std::vector<std::unique_ptr<function::Function>> functionSet);
 
     KUZU_API void registerFileSystem(std::unique_ptr<common::FileSystem> fs);
 
-    KUZU_API void addExtensionOption(
-        std::string name, common::LogicalTypeID type, common::Value defaultValue);
+    KUZU_API void registerStorageExtension(std::string name,
+        std::unique_ptr<storage::StorageExtension> storageExtension);
+
+    KUZU_API void addExtensionOption(std::string name, common::LogicalTypeID type,
+        common::Value defaultValue);
 
     ExtensionOption* getExtensionOption(std::string name);
+
+    common::case_insensitive_map_t<std::unique_ptr<storage::StorageExtension>>&
+    getStorageExtensions();
+
+    DatabaseManager* getDatabaseManagerUnsafe() const;
 
 private:
     void openLockFile();
@@ -131,6 +149,8 @@ private:
     std::shared_ptr<spdlog::logger> logger;
     std::unique_ptr<common::FileInfo> lockFile;
     std::unique_ptr<extension::ExtensionOptions> extensionOptions;
+    std::unique_ptr<DatabaseManager> databaseManager;
+    common::case_insensitive_map_t<std::unique_ptr<storage::StorageExtension>> storageExtensions;
 };
 
 } // namespace main

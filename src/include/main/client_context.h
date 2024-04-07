@@ -2,13 +2,15 @@
 
 #include <atomic>
 #include <cstdint>
-#include <functional>
 #include <memory>
 #include <mutex>
 
+#include "client_config.h"
+#include "common/task_system/progress_bar.h"
 #include "common/timer.h"
 #include "common/types/value/value.h"
-#include "function/scalar_function.h"
+#include "function/function.h"
+#include "function/table/scan_replacement.h"
 #include "main/kuzu_fwd.h"
 #include "parser/statement.h"
 #include "prepared_statement.h"
@@ -26,6 +28,10 @@ namespace common {
 class RandomEngine;
 }
 
+namespace extension {
+struct ExtensionOptions;
+}
+
 namespace main {
 class Database;
 
@@ -37,8 +43,6 @@ struct ActiveQuery {
     void reset();
 };
 
-using replace_func_t = std::function<std::unique_ptr<common::Value>(common::Value*)>;
-
 /**
  * @brief Contain client side configuration. We make profiler associated per query, so profiler is
  * not maintained in client context.
@@ -47,88 +51,83 @@ class ClientContext {
     friend class Connection;
     friend class binder::Binder;
     friend class binder::ExpressionBinder;
-    friend class testing::TinySnbDDLTest;
-    friend class testing::TinySnbCopyCSVTransactionTest;
-    friend struct ThreadsSetting;
-    friend struct TimeoutSetting;
-    friend struct VarLengthExtendMaxDepthSetting;
-    friend struct EnableSemiMaskSetting;
-    friend struct HomeDirectorySetting;
-    friend struct FileSearchPathSetting;
 
 public:
     explicit ClientContext(Database* database);
 
-    inline void interrupt() { activeQuery.interrupted = true; }
-
-    bool isInterrupted() const { return activeQuery.interrupted; }
-
-    inline bool isTimeOutEnabled() const { return timeoutInMS != 0; }
-
-    inline uint64_t getTimeoutRemainingInMS() {
-        KU_ASSERT(isTimeOutEnabled());
-        auto elapsed = activeQuery.timer.getElapsedTimeInMS();
-        return elapsed >= timeoutInMS ? 0 : timeoutInMS - elapsed;
-    }
-
-    inline bool isEnableSemiMask() const { return enableSemiMask; }
-
-    void startTimingIfEnabled();
-
+    // Client config
+    const ClientConfig* getClientConfig() const { return &config; }
+    ClientConfig* getClientConfigUnsafe() { return &config; }
     KUZU_API common::Value getCurrentSetting(const std::string& optionName);
+    // Timer and timeout
+    void interrupt() { activeQuery.interrupted = true; }
+    bool interrupted() const { return activeQuery.interrupted; }
+    bool hasTimeout() const { return config.timeoutInMS != 0; }
+    void setQueryTimeOut(uint64_t timeoutInMS);
+    uint64_t getQueryTimeOut() const;
+    void startTimer();
+    uint64_t getTimeoutRemainingInMS() const;
+    void resetActiveQuery() { activeQuery.reset(); }
 
+    // Parallelism
+    void setMaxNumThreadForExec(uint64_t numThreads);
+    uint64_t getMaxNumThreadForExec() const;
+
+    // Transaction.
     transaction::Transaction* getTx() const;
     KUZU_API transaction::TransactionContext* getTransactionContext() const;
 
-    inline bool hasReplaceFunc() { return replaceFunc != nullptr; }
-    inline void setReplaceFunc(replace_func_t func) { replaceFunc = func; }
+    // Progress bar
+    common::ProgressBar* getProgressBar() const;
 
+    // Replace function.
+    void addScanReplace(function::ScanReplacement scanReplacement);
+    std::unique_ptr<function::ScanReplacementData> tryReplace(const std::string& objectName) const;
+    // Extension
     KUZU_API void setExtensionOption(std::string name, common::Value value);
-
-    common::RandomEngine* getRandomEngine() { return randomEngine.get(); }
-
-    common::VirtualFileSystem* getVFSUnsafe() const;
-
+    extension::ExtensionOptions* getExtensionOptions() const;
     std::string getExtensionDir() const;
 
-    KUZU_API Database* getDatabase() const { return database; }
-    storage::StorageManager* getStorageManager();
-    storage::MemoryManager* getMemoryManager();
-    catalog::Catalog* getCatalog();
-
+    // Environment.
     KUZU_API std::string getEnvVariable(const std::string& name);
 
+    // Database component getters.
+    KUZU_API Database* getDatabase() const { return database; }
+    storage::StorageManager* getStorageManager() const;
+    KUZU_API storage::MemoryManager* getMemoryManager();
+    catalog::Catalog* getCatalog() const;
+    common::VirtualFileSystem* getVFSUnsafe() const;
+    common::RandomEngine* getRandomEngine();
+
+    // Query.
     std::unique_ptr<PreparedStatement> prepare(std::string_view query);
-
-    void setQueryTimeOut(uint64_t timeoutInMS);
-
-    uint64_t getQueryTimeOut();
-
-    void setMaxNumThreadForExec(uint64_t numThreads);
-
-    uint64_t getMaxNumThreadForExec();
-
     KUZU_API std::unique_ptr<QueryResult> executeWithParams(PreparedStatement* preparedStatement,
         std::unordered_map<std::string, std::unique_ptr<common::Value>> inputParams);
-
     std::unique_ptr<QueryResult> query(std::string_view queryStatement);
-
     void runQuery(std::string query);
 
-private:
-    inline void resetActiveQuery() { activeQuery.reset(); }
+    // TODO(Jiamin): should remove after supporting ddl in manual tx
+    std::unique_ptr<PreparedStatement> prepareTest(std::string_view query);
+    // only use for test framework
+    std::vector<std::shared_ptr<parser::Statement>> parseQuery(std::string_view query);
 
-    std::unique_ptr<QueryResult> query(
-        std::string_view query, std::string_view encodedJoin, bool enumerateAllPlans = true);
+private:
+    std::unique_ptr<QueryResult> query(std::string_view query, std::string_view encodedJoin,
+        bool enumerateAllPlans = true);
 
     std::unique_ptr<QueryResult> queryResultWithError(std::string_view errMsg);
 
     std::unique_ptr<PreparedStatement> preparedStatementWithError(std::string_view errMsg);
 
-    std::vector<std::unique_ptr<parser::Statement>> parseQuery(std::string_view query);
-
-    std::unique_ptr<PreparedStatement> prepareNoLock(parser::Statement* parsedStatement,
-        bool enumerateAllPlans = false, std::string_view joinOrder = std::string_view());
+    // when we do prepare, we will start a transaction for the query
+    // when we execute after prepare in a same context, we set requireNewTx to false and will not
+    // commit the transaction in prepare when we only prepare a query statement, we set requireNewTx
+    // to true and will commit the transaction in prepare
+    std::unique_ptr<PreparedStatement> prepareNoLock(
+        std::shared_ptr<parser::Statement> parsedStatement, bool enumerateAllPlans = false,
+        std::string_view joinOrder = std::string_view(), bool requireNewTx = true,
+        std::optional<std::unordered_map<std::string, std::shared_ptr<common::Value>>> inputParams =
+            std::nullopt);
 
     template<typename T, typename... Args>
     std::unique_ptr<QueryResult> executeWithParams(PreparedStatement* preparedStatement,
@@ -144,7 +143,7 @@ private:
         const std::unordered_map<std::string, std::unique_ptr<common::Value>>& inputParams);
 
     std::unique_ptr<QueryResult> executeAndAutoCommitIfNecessaryNoLock(
-        PreparedStatement* preparedStatement, uint32_t planIdx = 0u);
+        PreparedStatement* preparedStatement, uint32_t planIdx = 0u, bool requiredNexTx = true);
 
     void addScalarFunction(std::string name, function::function_set definitions);
 
@@ -152,18 +151,22 @@ private:
 
     void commitUDFTrx(bool isAutoCommitTrx);
 
-    uint64_t numThreadsForExecution;
+    // Client side configurable settings.
+    ClientConfig config;
+    // Current query.
     ActiveQuery activeQuery;
-    uint64_t timeoutInMS;
-    uint32_t varLengthExtendMaxDepth;
+    // Transaction context.
     std::unique_ptr<transaction::TransactionContext> transactionContext;
-    bool enableSemiMask;
-    replace_func_t replaceFunc;
+    // Replace external object as pointer Value;
+    std::vector<function::ScanReplacement> scanReplacements;
+    // Extension configurable settings.
     std::unordered_map<std::string, common::Value> extensionOptionValues;
+    // Random generator for UUID.
     std::unique_ptr<common::RandomEngine> randomEngine;
-    std::string homeDirectory;
-    std::string fileSearchPath;
+    // Attached database.
     Database* database;
+    // Progress bar for queries
+    std::unique_ptr<common::ProgressBar> progressBar;
     std::mutex mtx;
 };
 

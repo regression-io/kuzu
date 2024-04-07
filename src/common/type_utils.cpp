@@ -5,8 +5,8 @@
 namespace kuzu {
 namespace common {
 
-static std::string entryToString(
-    const LogicalType& dataType, const uint8_t* value, ValueVector* vector) {
+static std::string entryToString(const LogicalType& dataType, const uint8_t* value,
+    ValueVector* vector) {
     auto valueVector = reinterpret_cast<ValueVector*>(vector);
     switch (dataType.getLogicalTypeID()) {
     case LogicalTypeID::BOOL:
@@ -51,9 +51,8 @@ static std::string entryToString(
         return TypeUtils::toString(*reinterpret_cast<const ku_string_t*>(value));
     case LogicalTypeID::INTERNAL_ID:
         return TypeUtils::toString(*reinterpret_cast<const internalID_t*>(value));
-    case LogicalTypeID::FIXED_LIST:
-        return TypeUtils::fixedListToString(value, dataType, valueVector);
-    case LogicalTypeID::VAR_LIST:
+    case LogicalTypeID::ARRAY:
+    case LogicalTypeID::LIST:
         return TypeUtils::toString(*reinterpret_cast<const list_entry_t*>(value), valueVector);
     case LogicalTypeID::MAP:
         return TypeUtils::toString(*reinterpret_cast<const map_entry_t*>(value), valueVector);
@@ -64,8 +63,8 @@ static std::string entryToString(
     case LogicalTypeID::UUID:
         return TypeUtils::toString(*reinterpret_cast<const ku_uuid_t*>(value));
     case LogicalTypeID::NODE:
-        return TypeUtils::nodeToString(
-            *reinterpret_cast<const struct_entry_t*>(value), valueVector);
+        return TypeUtils::nodeToString(*reinterpret_cast<const struct_entry_t*>(value),
+            valueVector);
     case LogicalTypeID::REL:
         return TypeUtils::relToString(*reinterpret_cast<const struct_entry_t*>(value), valueVector);
     default:
@@ -77,24 +76,8 @@ static std::string entryToString(sel_t pos, ValueVector* vector) {
     if (vector->isNull(pos)) {
         return "";
     }
-    return entryToString(
-        vector->dataType, vector->getData() + vector->getNumBytesPerValue() * pos, vector);
-}
-
-std::string TypeUtils::fixedListToString(
-    const uint8_t* val, const LogicalType& type, ValueVector* dummyVector) {
-    std::string result = "[";
-    auto numValuesPerList = FixedListType::getNumValuesInList(&type);
-    auto childType = FixedListType::getChildType(&type);
-    for (auto i = 0u; i < numValuesPerList - 1; ++i) {
-        // Note: FixedList can only store numeric types and doesn't allow nulls.
-        result += entryToString(*childType, val, dummyVector);
-        result += ",";
-        val += PhysicalTypeUtils::getFixedTypeSize(childType->getPhysicalType());
-    }
-    result += entryToString(*childType, val, dummyVector);
-    result += "]";
-    return result;
+    return entryToString(vector->dataType, vector->getData() + vector->getNumBytesPerValue() * pos,
+        vector);
 }
 
 template<>
@@ -179,8 +162,8 @@ std::string TypeUtils::toString(const list_entry_t& val, void* valueVector) {
     return result;
 }
 
-static std::string getMapEntryStr(
-    sel_t pos, ValueVector* dataVector, ValueVector* keyVector, ValueVector* valVector) {
+static std::string getMapEntryStr(sel_t pos, ValueVector* dataVector, ValueVector* keyVector,
+    ValueVector* valVector) {
     if (dataVector->isNull(pos)) {
         return "";
     }

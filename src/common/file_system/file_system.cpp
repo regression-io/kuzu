@@ -7,6 +7,10 @@ void FileSystem::overwriteFile(const std::string& /*from*/, const std::string& /
     KU_UNREACHABLE;
 }
 
+void FileSystem::copyFile(const std::string& /*from*/, const std::string& /*to*/) const {
+    KU_UNREACHABLE;
+}
+
 void FileSystem::createDir(const std::string& /*dir*/) const {
     KU_UNREACHABLE;
 }
@@ -17,6 +21,11 @@ void FileSystem::removeFileIfExists(const std::string& /*path*/) const {
 
 bool FileSystem::fileOrPathExists(const std::string& /*path*/) const {
     KU_UNREACHABLE;
+}
+
+std::string FileSystem::expandPath(main::ClientContext* /*context*/,
+    const std::string& path) const {
+    return path;
 }
 
 std::string FileSystem::joinPath(const std::string& base, const std::string& part) {

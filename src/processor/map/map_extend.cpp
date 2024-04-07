@@ -3,7 +3,7 @@
 #include "processor/operator/scan/scan_multi_rel_tables.h"
 #include "processor/operator/scan/scan_rel_table.h"
 #include "processor/plan_mapper.h"
-#include "transaction/transaction.h"
+#include "storage/storage_manager.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;
@@ -15,10 +15,10 @@ namespace kuzu {
 namespace processor {
 
 static std::unique_ptr<ScanRelTableInfo> getRelTableScanInfo(TableCatalogEntry* tableCatalogEntry,
-    RelDataDirection direction, StorageManager& storageManager,
+    RelDataDirection direction, StorageManager* storageManager,
     const expression_vector& properties) {
     auto relTableID = tableCatalogEntry->getTableID();
-    auto relTable = storageManager.getRelTable(relTableID);
+    auto relTable = ku_dynamic_cast<Table*, RelTable*>(storageManager->getTable(relTableID));
     std::vector<column_id_t> columnIDs;
     for (auto& property : properties) {
         auto propertyExpression = ku_dynamic_cast<Expression*, PropertyExpression*>(property.get());
@@ -32,16 +32,18 @@ static std::unique_ptr<ScanRelTableInfo> getRelTableScanInfo(TableCatalogEntry* 
 
 static std::unique_ptr<RelTableCollectionScanner> populateRelTableCollectionScanner(
     table_id_t boundNodeTableID, const RelExpression& rel, ExtendDirection extendDirection,
-    const expression_vector& properties, StorageManager& storageManager, const Catalog& catalog) {
+    const expression_vector& properties, const main::ClientContext& clientContext) {
     std::vector<std::unique_ptr<ScanRelTableInfo>> scanInfos;
+    auto catalog = clientContext.getCatalog();
+    auto storageManager = clientContext.getStorageManager();
     for (auto relTableID : rel.getTableIDs()) {
         auto relTableEntry = ku_dynamic_cast<TableCatalogEntry*, RelTableCatalogEntry*>(
-            catalog.getTableCatalogEntry(&transaction::DUMMY_READ_TRANSACTION, relTableID));
+            catalog->getTableCatalogEntry(clientContext.getTx(), relTableID));
         switch (extendDirection) {
         case ExtendDirection::FWD: {
             if (relTableEntry->getBoundTableID(RelDataDirection::FWD) == boundNodeTableID) {
-                auto scanInfo = getRelTableScanInfo(
-                    relTableEntry, RelDataDirection::FWD, storageManager, properties);
+                auto scanInfo = getRelTableScanInfo(relTableEntry, RelDataDirection::FWD,
+                    storageManager, properties);
                 if (scanInfo != nullptr) {
                     scanInfos.push_back(std::move(scanInfo));
                 }
@@ -49,8 +51,8 @@ static std::unique_ptr<RelTableCollectionScanner> populateRelTableCollectionScan
         } break;
         case ExtendDirection::BWD: {
             if (relTableEntry->getBoundTableID(RelDataDirection::BWD) == boundNodeTableID) {
-                auto scanInfo = getRelTableScanInfo(
-                    relTableEntry, RelDataDirection::BWD, storageManager, properties);
+                auto scanInfo = getRelTableScanInfo(relTableEntry, RelDataDirection::BWD,
+                    storageManager, properties);
                 if (scanInfo != nullptr) {
                     scanInfos.push_back(std::move(scanInfo));
                 }
@@ -58,15 +60,15 @@ static std::unique_ptr<RelTableCollectionScanner> populateRelTableCollectionScan
         } break;
         case ExtendDirection::BOTH: {
             if (relTableEntry->getBoundTableID(RelDataDirection::FWD) == boundNodeTableID) {
-                auto scanInfoFWD = getRelTableScanInfo(
-                    relTableEntry, RelDataDirection::FWD, storageManager, properties);
+                auto scanInfoFWD = getRelTableScanInfo(relTableEntry, RelDataDirection::FWD,
+                    storageManager, properties);
                 if (scanInfoFWD != nullptr) {
                     scanInfos.push_back(std::move(scanInfoFWD));
                 }
             }
             if (relTableEntry->getBoundTableID(RelDataDirection::BWD) == boundNodeTableID) {
-                auto scanInfoBWD = getRelTableScanInfo(
-                    relTableEntry, RelDataDirection::BWD, storageManager, properties);
+                auto scanInfoBWD = getRelTableScanInfo(relTableEntry, RelDataDirection::BWD,
+                    storageManager, properties);
                 if (scanInfoBWD != nullptr) {
                     scanInfos.push_back(std::move(scanInfoBWD));
                 }
@@ -101,18 +103,18 @@ std::unique_ptr<PhysicalOperator> PlanMapper::mapExtend(LogicalOperator* logical
     if (!rel->isMultiLabeled() && !boundNode->isMultiLabeled() &&
         extendDirection != ExtendDirection::BOTH) {
         auto relTableEntry = ku_dynamic_cast<TableCatalogEntry*, RelTableCatalogEntry*>(
-            catalog->getTableCatalogEntry(
-                &transaction::DUMMY_READ_TRANSACTION, rel->getSingleTableID()));
+            clientContext->getCatalog()->getTableCatalogEntry(clientContext->getTx(),
+                rel->getSingleTableID()));
         auto relDataDirection = ExtendDirectionUtils::getRelDataDirection(extendDirection);
-        auto scanInfo = getRelTableScanInfo(
-            relTableEntry, relDataDirection, storageManager, extend->getProperties());
+        auto scanInfo = getRelTableScanInfo(relTableEntry, relDataDirection,
+            clientContext->getStorageManager(), extend->getProperties());
         return std::make_unique<ScanRelTable>(std::move(scanInfo), inNodeVectorPos, outVectorsPos,
             std::move(prevOperator), getOperatorID(), extend->getExpressionsForPrinting());
     } else { // map to generic extend
         std::unordered_map<table_id_t, std::unique_ptr<RelTableCollectionScanner>> scanners;
         for (auto boundNodeTableID : boundNode->getTableIDs()) {
             auto scanner = populateRelTableCollectionScanner(boundNodeTableID, *rel,
-                extendDirection, extend->getProperties(), storageManager, *catalog);
+                extendDirection, extend->getProperties(), *clientContext);
             if (scanner != nullptr) {
                 scanners.insert({boundNodeTableID, std::move(scanner)});
             }

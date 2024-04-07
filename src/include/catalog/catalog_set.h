@@ -2,7 +2,6 @@
 
 #include "catalog_entry/catalog_entry.h"
 #include "common/case_insensitive_map.h"
-#include "common/serializer/serializer.h"
 
 namespace kuzu {
 namespace catalog {
@@ -14,7 +13,7 @@ public:
     //===--------------------------------------------------------------------===//
     bool containsEntry(const std::string& name) const;
     CatalogEntry* getEntry(const std::string& name);
-    void createEntry(std::unique_ptr<CatalogEntry> entry);
+    KUZU_API void createEntry(std::unique_ptr<CatalogEntry> entry);
     void removeEntry(const std::string& name);
     void renameEntry(const std::string& oldName, const std::string& newName);
     common::case_insensitive_map_t<std::unique_ptr<CatalogEntry>>& getEntries() { return entries; }

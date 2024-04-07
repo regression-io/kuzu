@@ -1,7 +1,7 @@
 #pragma once
 
-#include "common/data_chunk/data_chunk_collection.h"
 #include "processor/operator/sink.h"
+#include "storage/store/chunked_node_group_collection.h"
 
 namespace kuzu {
 namespace storage {
@@ -20,7 +20,7 @@ struct PartitionerFunctions {
 // partitioning methods. For example, copy of rel tables require partitioning on both FWD and BWD
 // direction. Each partitioning method corresponds to a PartitioningState.
 struct PartitioningBuffer {
-    std::vector<std::unique_ptr<common::DataChunkCollection>> partitions;
+    std::vector<storage::ChunkedNodeGroupCollection> partitions;
 
     void merge(std::unique_ptr<PartitioningBuffer> localPartitioningStates);
 };
@@ -28,9 +28,10 @@ struct PartitioningBuffer {
 // NOTE: Currently, Partitioner is tightly coupled with RelBatchInsert. We should generalize it
 // later when necessary. Here, each partition is essentially a node group.
 struct BatchInsertSharedState;
+struct PartitioningInfo;
 struct PartitionerSharedState {
+    std::vector<common::logical_type_vec_t> columnTypes;
     std::mutex mtx;
-    storage::MemoryManager* mm;
     storage::NodeTable* srcNodeTable;
     storage::NodeTable* dstNodeTable;
 
@@ -42,18 +43,19 @@ struct PartitionerSharedState {
     // In copy rdf, we need to access num nodes before it is available in statistics.
     std::vector<std::shared_ptr<BatchInsertSharedState>> nodeBatchInsertSharedStates;
 
-    explicit PartitionerSharedState(storage::MemoryManager* mm) : mm{mm} {}
+    explicit PartitionerSharedState(std::vector<common::logical_type_vec_t> columnTypes)
+        : columnTypes{std::move(columnTypes)} {}
 
-    void initialize();
+    void initialize(std::vector<std::unique_ptr<PartitioningInfo>>& infos);
     common::partition_idx_t getNextPartition(common::vector_idx_t partitioningIdx);
     void resetState();
     void merge(std::vector<std::unique_ptr<PartitioningBuffer>> localPartitioningStates);
 
-    inline common::DataChunkCollection* getPartitionBuffer(
-        common::vector_idx_t partitioningIdx, common::partition_idx_t partitionIdx) {
+    inline const storage::ChunkedNodeGroupCollection& getPartitionBuffer(
+        common::vector_idx_t partitioningIdx, common::partition_idx_t partitionIdx) const {
         KU_ASSERT(partitioningIdx < partitioningBuffers.size());
         KU_ASSERT(partitionIdx < partitioningBuffers[partitioningIdx]->partitions.size());
-        return partitioningBuffers[partitioningIdx]->partitions[partitionIdx].get();
+        return partitioningBuffers[partitioningIdx]->partitions[partitionIdx];
     }
 };
 
@@ -69,11 +71,11 @@ struct PartitionerLocalState {
 struct PartitioningInfo {
     DataPos keyDataPos;
     std::vector<DataPos> columnDataPositions;
-    common::logical_types_t columnTypes;
+    std::vector<common::LogicalType> columnTypes;
     partitioner_func_t partitionerFunc;
 
     PartitioningInfo(DataPos keyDataPos, std::vector<DataPos> columnDataPositions,
-        common::logical_types_t columnTypes, partitioner_func_t partitionerFunc)
+        std::vector<common::LogicalType> columnTypes, partitioner_func_t partitionerFunc)
         : keyDataPos{keyDataPos}, columnDataPositions{std::move(columnDataPositions)},
           columnTypes{std::move(columnTypes)}, partitionerFunc{std::move(partitionerFunc)} {}
     inline std::unique_ptr<PartitioningInfo> copy() {
@@ -100,15 +102,18 @@ public:
 
     std::unique_ptr<PhysicalOperator> clone() final;
 
-    static void initializePartitioningStates(
+    static void initializePartitioningStates(std::vector<std::unique_ptr<PartitioningInfo>>& infos,
         std::vector<std::unique_ptr<PartitioningBuffer>>& partitioningBuffers,
-        std::vector<common::partition_idx_t> numPartitions, storage::MemoryManager* mm);
+        std::vector<common::partition_idx_t> numPartitions);
 
 private:
+    common::DataChunk constructDataChunk(const std::vector<DataPos>& columnPositions,
+        const std::vector<common::LogicalType>& columnTypes, const ResultSet& resultSet,
+        const std::shared_ptr<common::DataChunkState>& state);
     // TODO: For now, RelBatchInsert will guarantee all data are inside one data chunk. Should be
     //  generalized to resultSet later if needed.
-    void copyDataToPartitions(
-        common::partition_idx_t partitioningIdx, common::DataChunk* chunkToCopyFrom);
+    void copyDataToPartitions(common::partition_idx_t partitioningIdx,
+        common::DataChunk chunkToCopyFrom);
 
 private:
     std::vector<std::unique_ptr<PartitioningInfo>> infos;

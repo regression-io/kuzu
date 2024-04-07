@@ -2,6 +2,7 @@
 #include "binder/binder.h"
 #include "binder/bound_statement.h"
 #include "binder/query/bound_regular_query.h"
+#include "common/copier_config/csv_reader_config.h"
 #include "common/copier_config/reader_config.h"
 
 namespace kuzu {
@@ -17,7 +18,7 @@ struct ExportedTableData {
     inline const BoundRegularQuery* getRegularQuery() const { return regularQuery.get(); }
 };
 
-class BoundExportDatabase : public BoundStatement {
+class BoundExportDatabase final : public BoundStatement {
 public:
     BoundExportDatabase(std::string filePath, common::FileType fileType,
         std::vector<ExportedTableData> exportData,

@@ -3,7 +3,6 @@
 #include <utility>
 
 #include "binder/binder.h"
-#include "common/constants.h"
 #include "common/exception/connection.h"
 #include "common/exception/runtime.h"
 #include "common/random_engine.h"
@@ -18,6 +17,7 @@
 #include "planner/planner.h"
 #include "processor/plan_mapper.h"
 #include "processor/processor.h"
+#include "storage/storage_manager.h"
 #include "transaction/transaction_context.h"
 
 #if defined(_WIN32)
@@ -42,25 +42,53 @@ void ActiveQuery::reset() {
     timer = Timer();
 }
 
-ClientContext::ClientContext(Database* database)
-    : numThreadsForExecution{database->systemConfig.maxNumThreads},
-      timeoutInMS{ClientContextConstants::TIMEOUT_IN_MS},
-      varLengthExtendMaxDepth{DEFAULT_VAR_LENGTH_EXTEND_MAX_DEPTH},
-      enableSemiMask{DEFAULT_ENABLE_SEMI_MASK}, database{database} {
-    transactionContext = std::make_unique<TransactionContext>(database);
+ClientContext::ClientContext(Database* database) : database{database} {
+    progressBar = std::make_unique<common::ProgressBar>();
+    transactionContext = std::make_unique<TransactionContext>(*this);
     randomEngine = std::make_unique<common::RandomEngine>();
-    fileSearchPath = "";
 #if defined(_WIN32)
-    homeDirectory = getEnvVariable("USERPROFILE");
+    config.homeDirectory = getEnvVariable("USERPROFILE");
 #else
-    homeDirectory = getEnvVariable("HOME");
+    config.homeDirectory = getEnvVariable("HOME");
 #endif
+    config.fileSearchPath = "";
+    config.enableSemiMask = ClientConfigDefault::ENABLE_SEMI_MASK;
+    config.numThreads = database->systemConfig.maxNumThreads;
+    config.timeoutInMS = ClientConfigDefault::TIMEOUT_IN_MS;
+    config.varLengthMaxDepth = ClientConfigDefault::VAR_LENGTH_MAX_DEPTH;
+    config.enableProgressBar = ClientConfigDefault::ENABLE_PROGRESS_BAR;
+    config.showProgressAfter = ClientConfigDefault::SHOW_PROGRESS_AFTER;
+    config.enableMultiCopy = ClientConfigDefault::ENABLE_MULTI_COPY;
 }
 
-void ClientContext::startTimingIfEnabled() {
-    if (isTimeOutEnabled()) {
+uint64_t ClientContext::getTimeoutRemainingInMS() const {
+    KU_ASSERT(hasTimeout());
+    auto elapsed = activeQuery.timer.getElapsedTimeInMS();
+    return elapsed >= config.timeoutInMS ? 0 : config.timeoutInMS - elapsed;
+}
+
+void ClientContext::startTimer() {
+    if (hasTimeout()) {
         activeQuery.timer.start();
     }
+}
+
+void ClientContext::setQueryTimeOut(uint64_t timeoutInMS) {
+    lock_t lck{mtx};
+    config.timeoutInMS = timeoutInMS;
+}
+
+uint64_t ClientContext::getQueryTimeOut() const {
+    return config.timeoutInMS;
+}
+
+void ClientContext::setMaxNumThreadForExec(uint64_t numThreads) {
+    lock_t lck{mtx};
+    config.numThreads = numThreads;
+}
+
+uint64_t ClientContext::getMaxNumThreadForExec() const {
+    return config.numThreads;
 }
 
 Value ClientContext::getCurrentSetting(const std::string& optionName) {
@@ -91,20 +119,40 @@ TransactionContext* ClientContext::getTransactionContext() const {
     return transactionContext.get();
 }
 
+common::ProgressBar* ClientContext::getProgressBar() const {
+    return progressBar.get();
+}
+
+void ClientContext::addScanReplace(function::ScanReplacement scanReplacement) {
+    scanReplacements.push_back(std::move(scanReplacement));
+}
+
+std::unique_ptr<function::ScanReplacementData> ClientContext::tryReplace(
+    const std::string& objectName) const {
+    for (auto& scanReplacement : scanReplacements) {
+        auto replaceData = scanReplacement.replaceFunc(objectName);
+        if (replaceData == nullptr) {
+            continue; // Fail to replace.
+        }
+        return replaceData;
+    }
+    return nullptr;
+}
+
 void ClientContext::setExtensionOption(std::string name, common::Value value) {
     StringUtils::toLower(name);
     extensionOptionValues.insert_or_assign(name, std::move(value));
 }
 
-VirtualFileSystem* ClientContext::getVFSUnsafe() const {
-    return database->vfs.get();
+extension::ExtensionOptions* ClientContext::getExtensionOptions() const {
+    return database->extensionOptions.get();
 }
 
 std::string ClientContext::getExtensionDir() const {
-    return common::stringFormat("{}/.kuzu/extension", homeDirectory);
+    return common::stringFormat("{}/.kuzu/extension", config.homeDirectory);
 }
 
-storage::StorageManager* ClientContext::getStorageManager() {
+storage::StorageManager* ClientContext::getStorageManager() const {
     return database->storageManager.get();
 }
 
@@ -112,8 +160,16 @@ storage::MemoryManager* ClientContext::getMemoryManager() {
     return database->memoryManager.get();
 }
 
-catalog::Catalog* ClientContext::getCatalog() {
+catalog::Catalog* ClientContext::getCatalog() const {
     return database->catalog.get();
+}
+
+VirtualFileSystem* ClientContext::getVFSUnsafe() const {
+    return database->vfs.get();
+}
+
+common::RandomEngine* ClientContext::getRandomEngine() {
+    return randomEngine.get();
 }
 
 std::string ClientContext::getEnvVariable(const std::string& name) {
@@ -133,22 +189,34 @@ std::string ClientContext::getEnvVariable(const std::string& name) {
 #endif
 }
 
-void ClientContext::setMaxNumThreadForExec(uint64_t numThreads) {
-    numThreadsForExecution = numThreads;
-}
-
-uint64_t ClientContext::getMaxNumThreadForExec() {
-    std::unique_lock<std::mutex> lck{mtx};
-    return numThreadsForExecution;
-}
-
 std::unique_ptr<PreparedStatement> ClientContext::prepare(std::string_view query) {
     auto preparedStatement = std::unique_ptr<PreparedStatement>();
+    if (query.empty()) {
+        return preparedStatementWithError("Connection Exception: Query is empty.");
+    }
     std::unique_lock<std::mutex> lck{mtx};
-    auto parsedStatements = std::vector<std::unique_ptr<Statement>>();
+    auto parsedStatements = std::vector<std::shared_ptr<Statement>>();
     try {
-        parsedStatements = parseQuery(query);
-    } catch (std::exception& exception) { return preparedStatementWithError(exception.what()); }
+        parsedStatements = Parser::parseQuery(query);
+    } catch (std::exception& exception) {
+        return preparedStatementWithError(exception.what());
+    }
+    if (parsedStatements.size() > 1) {
+        return preparedStatementWithError(
+            "Connection Exception: We do not support prepare multiple statements.");
+    }
+    return prepareNoLock(parsedStatements[0]);
+}
+
+std::unique_ptr<PreparedStatement> ClientContext::prepareTest(std::string_view query) {
+    auto preparedStatement = std::unique_ptr<PreparedStatement>();
+    std::unique_lock<std::mutex> lck{mtx};
+    auto parsedStatements = std::vector<std::shared_ptr<Statement>>();
+    try {
+        parsedStatements = Parser::parseQuery(query);
+    } catch (std::exception& exception) {
+        return preparedStatementWithError(exception.what());
+    }
     if (parsedStatements.size() > 1) {
         return preparedStatementWithError(
             "Connection Exception: We do not support prepare multiple statements.");
@@ -156,30 +224,33 @@ std::unique_ptr<PreparedStatement> ClientContext::prepare(std::string_view query
     if (parsedStatements.empty()) {
         return preparedStatementWithError("Connection Exception: Query is empty.");
     }
-    return prepareNoLock(parsedStatements[0].get());
+    return prepareNoLock(parsedStatements[0], false /* enumerate all plans */, "",
+        false /*requireNewTx*/);
 }
 
 std::unique_ptr<QueryResult> ClientContext::query(std::string_view queryStatement) {
     return query(queryStatement, std::string_view() /*encodedJoin*/, false /*enumerateAllPlans */);
 }
 
-std::unique_ptr<QueryResult> ClientContext::query(
-    std::string_view query, std::string_view encodedJoin, bool enumerateAllPlans) {
+std::unique_ptr<QueryResult> ClientContext::query(std::string_view query,
+    std::string_view encodedJoin, bool enumerateAllPlans) {
     lock_t lck{mtx};
-    // parsing
-    auto parsedStatements = std::vector<std::unique_ptr<Statement>>();
-    try {
-        parsedStatements = parseQuery(query);
-    } catch (std::exception& exception) { return queryResultWithError(exception.what()); }
-    if (parsedStatements.empty()) {
+    if (query.empty()) {
         return queryResultWithError("Connection Exception: Query is empty.");
+    }
+    auto parsedStatements = std::vector<std::shared_ptr<Statement>>();
+    try {
+        parsedStatements = Parser::parseQuery(query);
+    } catch (std::exception& exception) {
+        return queryResultWithError(exception.what());
     }
     std::unique_ptr<QueryResult> queryResult;
     QueryResult* lastResult = nullptr;
     for (auto& statement : parsedStatements) {
-        auto preparedStatement = prepareNoLock(
-            statement.get(), enumerateAllPlans /* enumerate all plans */, encodedJoin);
-        auto currentQueryResult = executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get());
+        auto preparedStatement = prepareNoLock(statement,
+            enumerateAllPlans /* enumerate all plans */, encodedJoin, false /*requireNewTx*/);
+        auto currentQueryResult = executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get(), 0u,
+            false /*requiredNexTx*/);
         if (!lastResult) {
             // first result of the query
             queryResult = std::move(currentQueryResult);
@@ -197,6 +268,7 @@ std::unique_ptr<QueryResult> ClientContext::queryResultWithError(std::string_vie
     queryResult->success = false;
     queryResult->errMsg = errMsg;
     queryResult->nextQueryResult = nullptr;
+    queryResult->queryResultIterator = QueryResult::QueryResultIterator{queryResult.get()};
     return queryResult;
 }
 
@@ -209,7 +281,9 @@ std::unique_ptr<PreparedStatement> ClientContext::preparedStatementWithError(
 }
 
 std::unique_ptr<PreparedStatement> ClientContext::prepareNoLock(
-    Statement* parsedStatement, bool enumerateAllPlans, std::string_view encodedJoin) {
+    std::shared_ptr<Statement> parsedStatement, bool enumerateAllPlans,
+    std::string_view encodedJoin, bool requireNewTx,
+    std::optional<std::unordered_map<std::string, std::shared_ptr<common::Value>>> inputParams) {
     auto preparedStatement = std::make_unique<PreparedStatement>();
     auto compilingTimer = TimeMetric(true /* enable */);
     compilingTimer.start();
@@ -220,18 +294,8 @@ std::unique_ptr<PreparedStatement> ClientContext::prepareNoLock(
         if (database->systemConfig.readOnly && !preparedStatement->isReadOnly()) {
             throw ConnectionException("Cannot execute write operations in a read-only database!");
         }
-    } catch (std::exception& exception) {
-        preparedStatement->success = false;
-        preparedStatement->errMsg = exception.what();
-        compilingTimer.stop();
-        preparedStatement->preparedSummary.compilingTime = compilingTimer.getElapsedTimeMS();
-        return preparedStatement;
-    }
-    std::unique_ptr<ExecutionContext> executionContext;
-    std::unique_ptr<LogicalPlan> logicalPlan;
-    try {
-        // parsing
-        if (parsedStatement->getStatementType() != StatementType::TRANSACTION) {
+        preparedStatement->parsedStatement = parsedStatement;
+        if (parsedStatement->requireTx()) {
             if (transactionContext->isAutoTransaction()) {
                 transactionContext->beginAutoTransaction(preparedStatement->readOnly);
             } else {
@@ -244,15 +308,16 @@ std::unique_ptr<PreparedStatement> ClientContext::prepareNoLock(
             }
         }
         // binding
-        auto binder = Binder(*database->catalog, database->memoryManager.get(),
-            database->storageManager.get(), database->vfs.get(), this,
-            database->extensionOptions.get());
+        auto binder = Binder(this);
+        if (inputParams) {
+            binder.setInputParameters(*inputParams);
+        }
         auto boundStatement = binder.bind(*parsedStatement);
         preparedStatement->parameterMap = binder.getParameterMap();
         preparedStatement->statementResult =
             std::make_unique<BoundStatementResult>(boundStatement->getStatementResult()->copy());
         // planning
-        auto planner = Planner(database->catalog.get(), database->storageManager.get());
+        auto planner = Planner(this);
         std::vector<std::unique_ptr<LogicalPlan>> plans;
         if (enumerateAllPlans) {
             plans = planner.getAllPlans(*boundStatement);
@@ -278,6 +343,9 @@ std::unique_ptr<PreparedStatement> ClientContext::prepareNoLock(
         } else {
             preparedStatement->logicalPlans = std::move(plans);
         }
+        if (transactionContext->isAutoTransaction() && requireNewTx) {
+            this->transactionContext->commit();
+        }
     } catch (std::exception& exception) {
         preparedStatement->success = false;
         preparedStatement->errMsg = exception.what();
@@ -288,23 +356,13 @@ std::unique_ptr<PreparedStatement> ClientContext::prepareNoLock(
     return preparedStatement;
 }
 
-std::vector<std::unique_ptr<Statement>> ClientContext::parseQuery(std::string_view query) {
-    std::vector<std::unique_ptr<Statement>> statements;
+std::vector<std::shared_ptr<Statement>> ClientContext::parseQuery(std::string_view query) {
+    std::vector<std::shared_ptr<Statement>> statements;
     if (query.empty()) {
         return statements;
     }
     statements = Parser::parseQuery(query);
     return statements;
-}
-
-void ClientContext::setQueryTimeOut(uint64_t timeoutInMS) {
-    lock_t lck{mtx};
-    this->timeoutInMS = timeoutInMS;
-}
-
-uint64_t ClientContext::getQueryTimeOut() {
-    lock_t lck{mtx};
-    return this->timeoutInMS;
 }
 
 std::unique_ptr<QueryResult> ClientContext::executeWithParams(PreparedStatement* preparedStatement,
@@ -321,7 +379,11 @@ std::unique_ptr<QueryResult> ClientContext::executeWithParams(PreparedStatement*
         std::string errMsg = exception.what();
         return queryResultWithError(errMsg);
     }
-    return executeAndAutoCommitIfNecessaryNoLock(preparedStatement);
+    // rebind
+    KU_ASSERT(preparedStatement->parsedStatement != nullptr);
+    auto rebindPreparedStatement = prepareNoLock(preparedStatement->parsedStatement, false, "",
+        false, preparedStatement->parameterMap);
+    return executeAndAutoCommitIfNecessaryNoLock(rebindPreparedStatement.get(), 0u, false);
 }
 
 void ClientContext::bindParametersNoLock(PreparedStatement* preparedStatement,
@@ -332,11 +394,6 @@ void ClientContext::bindParametersNoLock(PreparedStatement* preparedStatement,
             throw Exception("Parameter " + name + " not found.");
         }
         auto expectParam = parameterMap.at(name);
-        if (*expectParam->getDataType() != *value->getDataType()) {
-            throw Exception("Parameter " + name + " has data type " +
-                            value->getDataType()->toString() + " but expects " +
-                            expectParam->getDataType()->toString() + ".");
-        }
         // The much more natural `parameterMap.at(name) = std::move(v)` fails.
         // The reason is that other parts of the code rely on the existing Value object to be
         // modified in-place, not replaced in this map.
@@ -345,12 +402,11 @@ void ClientContext::bindParametersNoLock(PreparedStatement* preparedStatement,
 }
 
 std::unique_ptr<QueryResult> ClientContext::executeAndAutoCommitIfNecessaryNoLock(
-    PreparedStatement* preparedStatement, uint32_t planIdx) {
+    PreparedStatement* preparedStatement, uint32_t planIdx, bool requiredNexTx) {
     if (!preparedStatement->isSuccess()) {
         return queryResultWithError(preparedStatement->errMsg);
     }
-    if (preparedStatement->preparedSummary.statementType != common::StatementType::TRANSACTION &&
-        this->getTx() == nullptr) {
+    if (preparedStatement->parsedStatement->requireTx() && requiredNexTx && getTx() == nullptr) {
         this->transactionContext->beginAutoTransaction(preparedStatement->isReadOnly());
         if (!preparedStatement->readOnly) {
             database->catalog->initCatalogContentForWriteTrxIfNecessary();
@@ -358,9 +414,8 @@ std::unique_ptr<QueryResult> ClientContext::executeAndAutoCommitIfNecessaryNoLoc
         }
     }
     this->resetActiveQuery();
-    this->startTimingIfEnabled();
-    auto mapper = PlanMapper(
-        *database->storageManager, database->memoryManager.get(), database->catalog.get(), this);
+    this->startTimer();
+    auto mapper = PlanMapper(this);
     std::unique_ptr<PhysicalPlan> physicalPlan;
     if (preparedStatement->isSuccess()) {
         try {
@@ -399,8 +454,8 @@ std::unique_ptr<QueryResult> ClientContext::executeAndAutoCommitIfNecessaryNoLoc
     }
     executingTimer.stop();
     queryResult->querySummary->executionTime = executingTimer.getElapsedTimeMS();
-    queryResult->initResultTableAndIterator(
-        std::move(resultFT), preparedStatement->statementResult->getColumns());
+    queryResult->initResultTableAndIterator(std::move(resultFT),
+        preparedStatement->statementResult->getColumns());
     return queryResult;
 }
 
@@ -433,23 +488,27 @@ void ClientContext::runQuery(std::string query) {
     if (transactionContext->hasActiveTransaction()) {
         transactionContext->commit();
     }
-    auto parsedStatements = std::vector<std::unique_ptr<Statement>>();
+    auto parsedStatements = std::vector<std::shared_ptr<Statement>>();
     try {
-        parsedStatements = parseQuery(query);
-    } catch (std::exception& exception) { throw ConnectionException(exception.what()); }
+        parsedStatements = Parser::parseQuery(query);
+    } catch (std::exception& exception) {
+        throw ConnectionException(exception.what());
+    }
     if (parsedStatements.empty()) {
         throw ConnectionException("Connection Exception: Query is empty.");
     }
     try {
         for (auto& statement : parsedStatements) {
-            auto preparedStatement = prepareNoLock(statement.get());
+            auto preparedStatement = prepareNoLock(statement, false, "", false);
             auto currentQueryResult =
-                executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get());
+                executeAndAutoCommitIfNecessaryNoLock(preparedStatement.get(), 0u, false);
             if (!currentQueryResult->isSuccess()) {
                 throw ConnectionException(currentQueryResult->errMsg);
             }
         }
-    } catch (std::exception& exception) { throw ConnectionException(exception.what()); }
+    } catch (std::exception& exception) {
+        throw ConnectionException(exception.what());
+    }
     return;
 }
 } // namespace main

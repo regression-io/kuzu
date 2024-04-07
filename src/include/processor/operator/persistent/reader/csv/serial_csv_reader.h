@@ -1,7 +1,7 @@
 #pragma once
 
 #include "base_csv_reader.h"
-#include "function/scalar_function.h"
+#include "function/function.h"
 #include "function/table/bind_input.h"
 #include "function/table/scan_functions.h"
 
@@ -25,12 +25,13 @@ protected:
 struct SerialCSVScanSharedState final : public function::ScanFileSharedState {
     std::unique_ptr<SerialCSVReader> reader;
     uint64_t numColumns;
+    uint64_t totalReadSizeByFile;
     common::CSVReaderConfig csvReaderConfig;
 
     SerialCSVScanSharedState(common::ReaderConfig readerConfig, uint64_t numRows,
         uint64_t numColumns, common::CSVReaderConfig csvReaderConfig, main::ClientContext* context)
         : ScanFileSharedState{std::move(readerConfig), numRows, context}, numColumns{numColumns},
-          csvReaderConfig{std::move(csvReaderConfig)} {
+          totalReadSizeByFile{0}, csvReaderConfig{std::move(csvReaderConfig)} {
         initReader(context);
     }
 
@@ -40,6 +41,8 @@ struct SerialCSVScanSharedState final : public function::ScanFileSharedState {
 };
 
 struct SerialCSVScan {
+    static constexpr const char* name = "READ_CSV_SERIAL";
+
     static function::function_set getFunctionSet();
     static void bindColumns(const function::ScanTableFuncBindInput* bindInput,
         std::vector<std::string>& columnNames, std::vector<common::LogicalType>& columnTypes);

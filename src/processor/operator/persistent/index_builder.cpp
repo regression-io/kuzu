@@ -34,34 +34,26 @@ void IndexBuilderGlobalQueues::maybeConsumeIndex(size_t index) {
     if (!mutexes[index].try_lock()) {
         return;
     }
-    std::unique_lock lck{mutexes[index], std::adopt_lock};
 
-    std::visit(overload{[&](Queue<std::string>&& queues) {
-                            using T = std::decay_t<decltype(queues.type)>;
-                            Buffer<T> elem;
-                            while (queues.array[index].pop(elem)) {
-                                for (auto [key, value] : elem) {
-                                    if (!pkIndex->appendWithIndexPos(key, value, index)) {
-                                        throw CopyException(
-                                            ExceptionMessage::duplicatePKException(std::move(key)));
-                                    }
-                                }
-                            }
-                            return;
-                        },
-                   [&](auto&& queues) {
-                       using T = std::decay_t<decltype(queues.type)>;
-                       Buffer<T> elem;
-                       while (queues.array[index].pop(elem)) {
-                           for (auto [key, value] : elem) {
-                               if (!pkIndex->appendWithIndexPos(key, value, index)) {
-                                   throw CopyException(ExceptionMessage::duplicatePKException(
-                                       TypeUtils::toString(key)));
-                               }
-                           }
-                       }
-                       return;
-                   }},
+    std::visit(
+        [&](auto&& queues) {
+            using T = std::decay_t<decltype(queues.type)>;
+            std::unique_lock lck{mutexes[index], std::adopt_lock};
+            IndexBuffer<T> buffer;
+            while (queues.array[index].pop(buffer)) {
+                auto numValuesInserted = pkIndex->appendWithIndexPos(buffer, index);
+                if (numValuesInserted < buffer.size()) {
+                    if constexpr (std::same_as<T, std::string>) {
+                        throw CopyException(ExceptionMessage::duplicatePKException(
+                            std::move(buffer[numValuesInserted].first)));
+                    } else {
+                        throw CopyException(ExceptionMessage::duplicatePKException(
+                            TypeUtils::toString(buffer[numValuesInserted].first)));
+                    }
+                }
+            }
+            return;
+        },
         std::move(queues));
 }
 
@@ -97,26 +89,27 @@ void IndexBuilderSharedState::quitProducer() {
     }
 }
 
-void IndexBuilder::insert(ColumnChunk* chunk, offset_t nodeOffset, offset_t numNodes) {
-    checkNonNullConstraint(chunk->getNullChunk(), numNodes);
+void IndexBuilder::insert(const ColumnChunk& chunk, offset_t nodeOffset, offset_t numNodes) {
+    checkNonNullConstraint(chunk.getNullChunk(), numNodes);
 
     TypeUtils::visit(
-        chunk->getDataType().getPhysicalType(),
+        chunk.getDataType().getPhysicalType(),
         [&]<HashablePrimitive T>(T) {
             for (auto i = 0u; i < numNodes; i++) {
-                auto value = chunk->getValue<T>(i);
+                auto value = chunk.getValue<T>(i);
                 localBuffers.insert(value, nodeOffset + i);
             }
         },
         [&](ku_string_t) {
-            auto stringColumnChunk = ku_dynamic_cast<ColumnChunk*, StringColumnChunk*>(chunk);
+            auto& stringColumnChunk =
+                ku_dynamic_cast<const ColumnChunk&, const StringColumnChunk&>(chunk);
             for (auto i = 0u; i < numNodes; i++) {
-                auto value = stringColumnChunk->getValue<std::string>(i);
+                auto value = stringColumnChunk.getValue<std::string>(i);
                 localBuffers.insert(std::move(value), nodeOffset + i);
             }
         },
         [&](auto) {
-            throw CopyException(ExceptionMessage::invalidPKType(chunk->getDataType().toString()));
+            throw CopyException(ExceptionMessage::invalidPKType(chunk.getDataType().toString()));
         });
 }
 
@@ -137,9 +130,9 @@ void IndexBuilder::finalize(ExecutionContext* /*context*/) {
     sharedState->flush();
 }
 
-void IndexBuilder::checkNonNullConstraint(NullColumnChunk* nullChunk, offset_t numNodes) {
+void IndexBuilder::checkNonNullConstraint(const NullColumnChunk& nullChunk, offset_t numNodes) {
     for (auto i = 0u; i < numNodes; i++) {
-        if (nullChunk->isNull(i)) {
+        if (nullChunk.isNull(i)) {
             throw CopyException(ExceptionMessage::nullPKException());
         }
     }

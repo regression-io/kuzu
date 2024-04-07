@@ -21,13 +21,13 @@ RelDataReadState::RelDataReadState()
 
 bool RelDataReadState::hasMoreToReadFromLocalStorage() const {
     KU_ASSERT(localNodeGroup);
-    return posInCurrentCSR < localNodeGroup->getRelNGInfo()->getNumInsertedTuples(
-                                 currentNodeOffset - startNodeOffset);
+    return posInCurrentCSR <
+           localNodeGroup->getNumInsertedRels(currentNodeOffset - startNodeOffset);
 }
 
 bool RelDataReadState::trySwitchToLocalStorage() {
-    if (localNodeGroup && localNodeGroup->getRelNGInfo()->getNumInsertedTuples(
-                              currentNodeOffset - startNodeOffset) > 0) {
+    if (localNodeGroup &&
+        localNodeGroup->getNumInsertedRels(currentNodeOffset - startNodeOffset) > 0) {
         readFromLocalStorage = true;
         posInCurrentCSR = 0;
         return true;
@@ -35,7 +35,7 @@ bool RelDataReadState::trySwitchToLocalStorage() {
     return false;
 }
 
-bool RelDataReadState::hasMoreToRead(transaction::Transaction* transaction) {
+bool RelDataReadState::hasMoreToRead(Transaction* transaction) {
     if (transaction->isWriteTransaction()) {
         if (readFromLocalStorage) {
             // Already read from local storage. Check if there are more in local storage.
@@ -71,8 +71,8 @@ std::pair<offset_t, offset_t> RelDataReadState::getStartAndEndOffset() {
     return {startOffset, startOffset + numRowsToRead};
 }
 
-offset_t CSRHeaderColumns::getNumNodes(
-    Transaction* transaction, node_group_idx_t nodeGroupIdx) const {
+offset_t CSRHeaderColumns::getNumNodes(Transaction* transaction,
+    node_group_idx_t nodeGroupIdx) const {
     auto numPersistentNodeGroups = offset->getNumNodeGroups(transaction);
     return nodeGroupIdx >= numPersistentNodeGroups ?
                0 :
@@ -139,21 +139,23 @@ RelTableData::RelTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH,
     csrHeaderColumns.length = std::make_unique<Column>(csrLengthColumnName, *LogicalType::UINT64(),
         *csrLengthMetadataDAHInfo, dataFH, metadataFH, bufferManager, wal, &DUMMY_WRITE_TRANSACTION,
         RWPropertyStats::empty(), enableCompression, false /* requireNUllColumn */);
-    // Adj column.
-    auto adjMetadataDAHInfo =
-        relsStoreStats->getAdjMetadataDAHInfo(&DUMMY_WRITE_TRANSACTION, tableID, direction);
-    auto adjColName = StorageUtils::getColumnName(
-        "", StorageUtils::ColumnType::ADJ, RelDataDirectionUtils::relDirectionToString(direction));
-    adjColumn = ColumnFactory::createColumn(adjColName, *LogicalType::INTERNAL_ID(),
-        *adjMetadataDAHInfo, dataFH, metadataFH, bufferManager, wal, &DUMMY_WRITE_TRANSACTION,
-        RWPropertyStats::empty(), enableCompression);
-    // Property columns.
+    // Columns (nbrID + properties).
     auto& properties = tableEntry->getPropertiesRef();
-    columns.reserve(properties.size());
+    columns.reserve(properties.size() + 1);
+    auto nbrIDMetadataDAHInfo = relsStoreStats->getColumnMetadataDAHInfo(&DUMMY_WRITE_TRANSACTION,
+        tableID, NBR_ID_COLUMN_ID, direction);
+    auto nbrIDColName = StorageUtils::getColumnName("NBR_ID", StorageUtils::ColumnType::DEFAULT,
+        RelDataDirectionUtils::relDirectionToString(direction));
+    auto nbrIDColumn = std::make_unique<InternalIDColumn>(nbrIDColName, *nbrIDMetadataDAHInfo,
+        dataFH, metadataFH, bufferManager, wal, &DUMMY_WRITE_TRANSACTION, RWPropertyStats::empty(),
+        enableCompression);
+    columns.push_back(std::move(nbrIDColumn));
+    // Property columns.
     for (auto i = 0u; i < properties.size(); i++) {
         auto& property = properties[i];
-        auto metadataDAHInfo = relsStoreStats->getPropertyMetadataDAHInfo(
-            &DUMMY_WRITE_TRANSACTION, tableID, i, direction);
+        auto columnID = tableEntry->getColumnID(property.getPropertyID());
+        auto metadataDAHInfo = relsStoreStats->getColumnMetadataDAHInfo(&DUMMY_WRITE_TRANSACTION,
+            tableID, columnID, direction);
         auto colName =
             StorageUtils::getColumnName(property.getName(), StorageUtils::ColumnType::DEFAULT,
                 RelDataDirectionUtils::relDirectionToString(direction));
@@ -161,65 +163,67 @@ RelTableData::RelTableData(BMFileHandle* dataFH, BMFileHandle* metadataFH,
             *metadataDAHInfo, dataFH, metadataFH, bufferManager, wal, &DUMMY_WRITE_TRANSACTION,
             RWPropertyStats(relsStoreStats, tableID, property.getPropertyID()), enableCompression));
     }
-    // Set common tableID for adjColumn and relIDColumn.
+    // Set common tableID for nbrIDColumn and relIDColumn.
     auto nbrTableID = ku_dynamic_cast<TableCatalogEntry*, RelTableCatalogEntry*>(tableEntry)
                           ->getNbrTableID(direction);
-    dynamic_cast<InternalIDColumn*>(adjColumn.get())->setCommonTableID(nbrTableID);
-    dynamic_cast<InternalIDColumn*>(columns[REL_ID_COLUMN_ID].get())->setCommonTableID(tableID);
+    ku_dynamic_cast<Column*, InternalIDColumn*>(columns[NBR_ID_COLUMN_ID].get())
+        ->setCommonTableID(nbrTableID);
+    ku_dynamic_cast<Column*, InternalIDColumn*>(columns[REL_ID_COLUMN_ID].get())
+        ->setCommonTableID(tableID);
     packedCSRInfo = PackedCSRInfo();
 }
 
 void RelTableData::initializeReadState(Transaction* transaction, std::vector<column_id_t> columnIDs,
-    ValueVector* inNodeIDVector, RelDataReadState* readState) {
-    readState->direction = direction;
-    readState->columnIDs = std::move(columnIDs);
+    const ValueVector& inNodeIDVector, RelDataReadState& readState) {
+    readState.direction = direction;
+    readState.columnIDs.clear();
+    readState.columnIDs.push_back(NBR_ID_COLUMN_ID);
+    readState.columnIDs.insert(readState.columnIDs.end(), columnIDs.begin(), columnIDs.end());
     // Reset to read from persistent storage.
-    readState->readFromLocalStorage = false;
+    readState.readFromLocalStorage = false;
     auto nodeOffset =
-        inNodeIDVector->readNodeOffset(inNodeIDVector->state->selVector->selectedPositions[0]);
+        inNodeIDVector.readNodeOffset(inNodeIDVector.state->selVector->selectedPositions[0]);
     auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(nodeOffset);
     auto startNodeOffset = StorageUtils::getStartOffsetOfNodeGroup(nodeGroupIdx);
     // Reset to read from beginning for the csr of the new node offset.
-    readState->posInCurrentCSR = 0;
-    if (readState->isOutOfRange(nodeOffset)) {
+    readState.posInCurrentCSR = 0;
+    if (readState.isOutOfRange(nodeOffset)) {
         // Scan csr offsets and populate csr list entries for the new node group.
-        readState->startNodeOffset = startNodeOffset;
-        csrHeaderColumns.scan(transaction, nodeGroupIdx, readState->csrHeaderChunks);
-        KU_ASSERT(readState->csrHeaderChunks.offset->getNumValues() ==
-                  readState->csrHeaderChunks.length->getNumValues());
-        readState->numNodes = readState->csrHeaderChunks.offset->getNumValues();
-        readState->populateCSRListEntries();
+        readState.startNodeOffset = startNodeOffset;
+        csrHeaderColumns.scan(transaction, nodeGroupIdx, readState.csrHeaderChunks);
+        KU_ASSERT(readState.csrHeaderChunks.offset->getNumValues() ==
+                  readState.csrHeaderChunks.length->getNumValues());
+        readState.numNodes = readState.csrHeaderChunks.offset->getNumValues();
+        readState.populateCSRListEntries();
         if (transaction->isWriteTransaction()) {
-            readState->localNodeGroup = getLocalNodeGroup(transaction, nodeGroupIdx);
+            readState.localNodeGroup = getLocalNodeGroup(transaction, nodeGroupIdx);
         }
     }
-    if (nodeOffset != readState->currentNodeOffset) {
-        readState->currentNodeOffset = nodeOffset;
+    if (nodeOffset != readState.currentNodeOffset) {
+        readState.currentNodeOffset = nodeOffset;
     }
 }
 
-void RelTableData::scan(Transaction* transaction, TableReadState& readState,
-    ValueVector* inNodeIDVector, const std::vector<ValueVector*>& outputVectors) {
-    auto& relReadState = ku_dynamic_cast<TableReadState&, RelDataReadState&>(readState);
+void RelTableData::scan(Transaction* transaction, TableDataReadState& readState,
+    const ValueVector& inNodeIDVector, const std::vector<ValueVector*>& outputVectors) {
+    auto& relReadState = ku_dynamic_cast<TableDataReadState&, RelDataReadState&>(readState);
     if (relReadState.readFromLocalStorage) {
         auto offsetInChunk = relReadState.currentNodeOffset - relReadState.startNodeOffset;
         KU_ASSERT(relReadState.localNodeGroup);
-        auto numValuesRead = relReadState.localNodeGroup->scanCSR(
-            offsetInChunk, relReadState.posInCurrentCSR, relReadState.columnIDs, outputVectors);
+        auto numValuesRead = relReadState.localNodeGroup->scanCSR(offsetInChunk,
+            relReadState.posInCurrentCSR, relReadState.columnIDs, outputVectors);
         relReadState.posInCurrentCSR += numValuesRead;
         return;
     }
     auto [startOffset, endOffset] = relReadState.getStartAndEndOffset();
     auto numRowsToRead = endOffset - startOffset;
-    outputVectors[0]->state->selVector->resetSelectorToUnselectedWithSize(numRowsToRead);
+    outputVectors[0]->state->selVector->setToUnfiltered(numRowsToRead);
     outputVectors[0]->state->setOriginalSize(numRowsToRead);
     auto nodeGroupIdx = StorageUtils::getNodeGroupIdx(relReadState.currentNodeOffset);
-    adjColumn->scan(transaction, nodeGroupIdx, startOffset, endOffset, outputVectors[0],
-        0 /* offsetInVector */);
     auto relIDVectorIdx = INVALID_VECTOR_IDX;
     for (auto i = 0u; i < relReadState.columnIDs.size(); i++) {
         auto columnID = relReadState.columnIDs[i];
-        auto outputVectorId = i + 1; // Skip output from adj column.
+        auto outputVectorId = i; // Skip output from nbrID column.
         if (columnID == INVALID_COLUMN_ID) {
             outputVectors[outputVectorId]->setAllNull();
             continue;
@@ -227,57 +231,37 @@ void RelTableData::scan(Transaction* transaction, TableReadState& readState,
         if (columnID == REL_ID_COLUMN_ID) {
             relIDVectorIdx = outputVectorId;
         }
-        columns[relReadState.columnIDs[i]]->scan(transaction, nodeGroupIdx, startOffset, endOffset,
+        getColumn(columnID)->scan(transaction, nodeGroupIdx, startOffset, endOffset,
             outputVectors[outputVectorId], 0 /* offsetInVector */);
     }
     if (transaction->isWriteTransaction() && relReadState.localNodeGroup) {
         auto nodeOffset =
-            inNodeIDVector->readNodeOffset(inNodeIDVector->state->selVector->selectedPositions[0]);
+            inNodeIDVector.readNodeOffset(inNodeIDVector.state->selVector->selectedPositions[0]);
         KU_ASSERT(relIDVectorIdx != INVALID_VECTOR_IDX);
         auto relIDVector = outputVectors[relIDVectorIdx];
-        relReadState.localNodeGroup->applyLocalChangesForCSRColumns(
+        relReadState.localNodeGroup->applyLocalChangesToScannedVectors(
             nodeOffset - relReadState.startNodeOffset, relReadState.columnIDs, relIDVector,
             outputVectors);
     }
 }
 
-void RelTableData::lookup(Transaction* /*transaction*/, TableReadState& /*readState*/,
-    ValueVector* /*inNodeIDVector*/, const std::vector<ValueVector*>& /*outputVectors*/) {
+void RelTableData::lookup(Transaction* /*transaction*/, TableDataReadState& /*readState*/,
+    const ValueVector& /*inNodeIDVector*/, const std::vector<ValueVector*>& /*outputVectors*/) {
     KU_ASSERT(false);
 }
 
-void RelTableData::insert(transaction::Transaction* transaction, ValueVector* srcNodeIDVector,
-    ValueVector* dstNodeIDVector, const std::vector<ValueVector*>& propertyVectors) {
-    auto localTableData = ku_dynamic_cast<LocalTableData*, LocalRelTableData*>(
-        transaction->getLocalStorage()->getOrCreateLocalTableData(
-            tableID, columns, TableType::REL, getDataIdxFromDirection(direction), multiplicity));
-    auto checkPersistent =
-        localTableData->insert(srcNodeIDVector, dstNodeIDVector, propertyVectors);
-    if (checkPersistent && multiplicity == common::RelMultiplicity::ONE) {
-        checkRelMultiplicityConstraint(transaction, srcNodeIDVector);
-    }
-}
-
-void RelTableData::update(transaction::Transaction* transaction, column_id_t columnID,
-    ValueVector* srcNodeIDVector, ValueVector* relIDVector, ValueVector* propertyVector) {
-    KU_ASSERT(columnID < columns.size() && columnID != REL_ID_COLUMN_ID);
-    auto localTableData = ku_dynamic_cast<LocalTableData*, LocalRelTableData*>(
-        transaction->getLocalStorage()->getOrCreateLocalTableData(
-            tableID, columns, TableType::REL, getDataIdxFromDirection(direction), multiplicity));
-    localTableData->update(srcNodeIDVector, relIDVector, columnID, propertyVector);
-}
-
 bool RelTableData::delete_(Transaction* transaction, ValueVector* srcNodeIDVector,
-    ValueVector* dstNodeIDVector, ValueVector* relIDVector) {
-    auto localTableData = ku_dynamic_cast<LocalTableData*, LocalRelTableData*>(
-        transaction->getLocalStorage()->getOrCreateLocalTableData(
-            tableID, columns, TableType::REL, getDataIdxFromDirection(direction), multiplicity));
-    return localTableData->delete_(srcNodeIDVector, dstNodeIDVector, relIDVector);
+    ValueVector* relIDVector) {
+    auto localTable = transaction->getLocalStorage()->getLocalTable(tableID,
+        LocalStorage::NotExistAction::CREATE);
+    auto localRelTable = ku_dynamic_cast<LocalTable*, LocalRelTable*>(localTable);
+    auto localTableData = localRelTable->getTableData(direction);
+    return localTableData->delete_(srcNodeIDVector, relIDVector);
 }
 
-void RelTableData::checkRelMultiplicityConstraint(
-    Transaction* transaction, ValueVector* srcNodeIDVector) const {
-    KU_ASSERT(srcNodeIDVector->state->isFlat() && multiplicity == common::RelMultiplicity::ONE);
+void RelTableData::checkRelMultiplicityConstraint(Transaction* transaction,
+    ValueVector* srcNodeIDVector) const {
+    KU_ASSERT(srcNodeIDVector->state->isFlat() && multiplicity == RelMultiplicity::ONE);
     auto nodeIDPos = srcNodeIDVector->state->selVector->selectedPositions[0];
     auto nodeOffset = srcNodeIDVector->getValue<nodeID_t>(nodeIDPos).offset;
     if (checkIfNodeHasRels(transaction, nodeOffset)) {
@@ -301,27 +285,26 @@ bool RelTableData::checkIfNodeHasRels(Transaction* transaction, offset_t nodeOff
     return length > 0;
 }
 
-void RelTableData::append(NodeGroup* nodeGroup) {
-    auto csrNodeGroup = ku_dynamic_cast<NodeGroup*, CSRNodeGroup*>(nodeGroup);
+void RelTableData::append(ChunkedNodeGroup* nodeGroup) {
+    auto csrNodeGroup = ku_dynamic_cast<ChunkedNodeGroup*, ChunkedCSRNodeGroup*>(nodeGroup);
     csrHeaderColumns.append(csrNodeGroup->getCSRHeader(), nodeGroup->getNodeGroupIdx());
-    adjColumn->append(nodeGroup->getColumnChunk(0), nodeGroup->getNodeGroupIdx());
     for (auto columnID = 0u; columnID < columns.size(); columnID++) {
-        columns[columnID]->append(
-            nodeGroup->getColumnChunk(columnID + 1), nodeGroup->getNodeGroupIdx());
+        getColumn(columnID)->append(&nodeGroup->getColumnChunkUnsafe(columnID),
+            nodeGroup->getNodeGroupIdx());
     }
 }
 
-static length_t getGapSizeForNode(const CSRHeaderChunks& header, offset_t nodeOffset) {
+static length_t getGapSizeForNode(const ChunkedCSRHeader& header, offset_t nodeOffset) {
     return header.getEndCSROffset(nodeOffset) - header.getStartCSROffset(nodeOffset) -
            header.getCSRLength(nodeOffset);
 }
 
-static length_t getRegionCapacity(const CSRHeaderChunks& header, PackedCSRRegion region) {
+static length_t getRegionCapacity(const ChunkedCSRHeader& header, PackedCSRRegion region) {
     auto [startNodeOffset, endNodeOffset] = region.getNodeOffsetBoundaries();
     return header.getEndCSROffset(endNodeOffset) - header.getStartCSROffset(startNodeOffset);
 }
 
-length_t RelTableData::getNewRegionSize(const CSRHeaderChunks& header,
+length_t RelTableData::getNewRegionSize(const ChunkedCSRHeader& header,
     const std::vector<int64_t>& sizeChangesPerSegment, PackedCSRRegion& region) {
     auto [startNodeOffsetInNG, endNodeOffsetInNG] = region.getNodeOffsetBoundaries();
     endNodeOffsetInNG = std::min(endNodeOffsetInNG, header.offset->getNumValues() - 1);
@@ -338,8 +321,8 @@ static PackedCSRRegion upgradeLevel(const PackedCSRRegion& region) {
     return PackedCSRRegion{regionIdx, region.level + 1};
 }
 
-static uint64_t findPosOfRelIDFromArray(
-    ColumnChunk* relIDInRegion, offset_t startPos, offset_t endPos, offset_t relOffset) {
+static uint64_t findPosOfRelIDFromArray(ColumnChunk* relIDInRegion, offset_t startPos,
+    offset_t endPos, offset_t relOffset) {
     KU_ASSERT(endPos <= relIDInRegion->getNumValues());
     for (auto i = startPos; i < endPos; i++) {
         if (relIDInRegion->getValue<offset_t>(i) == relOffset) {
@@ -349,8 +332,8 @@ static uint64_t findPosOfRelIDFromArray(
     return UINT64_MAX;
 }
 
-offset_t RelTableData::findCSROffsetInRegion(
-    const PersistentState& persistentState, offset_t nodeOffset, offset_t relOffset) const {
+offset_t RelTableData::findCSROffsetInRegion(const PersistentState& persistentState,
+    offset_t nodeOffset, offset_t relOffset) const {
     auto startPos =
         persistentState.header.getStartCSROffset(nodeOffset) - persistentState.leftCSROffset;
     auto endPos = startPos + persistentState.header.getCSRLength(nodeOffset);
@@ -358,6 +341,14 @@ offset_t RelTableData::findCSROffsetInRegion(
         findPosOfRelIDFromArray(persistentState.relIDChunk.get(), startPos, endPos, relOffset);
     KU_ASSERT(posInCSRList != UINT64_MAX);
     return posInCSRList + persistentState.leftCSROffset;
+}
+
+bool RelTableData::isNewNodeGroup(Transaction* transaction, node_group_idx_t nodeGroupIdx) const {
+    if (nodeGroupIdx >= getNumNodeGroups(transaction) ||
+        getNbrIDColumn()->getMetadata(nodeGroupIdx, transaction->getType()).numValues == 0) {
+        return true;
+    }
+    return false;
 }
 
 void RelTableData::prepareLocalTableToCommit(Transaction* transaction, LocalTableData* localTable) {
@@ -368,7 +359,7 @@ void RelTableData::prepareLocalTableToCommit(Transaction* transaction, LocalTabl
     }
 }
 
-bool RelTableData::isWithinDensityBound(const CSRHeaderChunks& header,
+bool RelTableData::isWithinDensityBound(const ChunkedCSRHeader& header,
     const std::vector<int64_t>& sizeChangesPerSegment, PackedCSRRegion& region) {
     auto sizeInRegion = getNewRegionSize(header, sizeChangesPerSegment, region);
     auto capacityInRegion = getRegionCapacity(header, region);
@@ -385,66 +376,44 @@ double RelTableData::getHighDensity(uint64_t level) const {
            (packedCSRInfo.highDensityStep * (double)(packedCSRInfo.calibratorTreeHeight - level));
 }
 
-static vector_idx_t getSegmentIdx(offset_t offset) {
-    return offset >> StorageConstants::CSR_SEGMENT_SIZE_LOG2;
-}
-
-void RelTableData::LocalState::initChangesPerSegment() {
-    auto numSegments = StorageConstants::NODE_GROUP_SIZE / StorageConstants::CSR_SEGMENT_SIZE;
-    sizeChangesPerSegment.resize(numSegments, 0 /*initValue*/);
-    hasChangesPerSegment.resize(numSegments, false /*initValue*/);
-    auto relNGInfo = localNG->getRelNGInfo();
-    for (auto& [offset, insertions] : relNGInfo->adjInsertInfo) {
-        auto segmentIdx = getSegmentIdx(offset);
-        sizeChangesPerSegment[segmentIdx] += insertions.size();
-        hasChangesPerSegment[segmentIdx] = true;
-    }
-    for (auto& [offset, deletions] : relNGInfo->deleteInfo) {
-        auto segmentIdx = getSegmentIdx(offset);
-        sizeChangesPerSegment[segmentIdx] -= deletions.size();
-        hasChangesPerSegment[segmentIdx] = true;
-    }
-    for (auto& updateInfoPerColumn : relNGInfo->updateInfoPerChunk) {
-        for (auto& [offset, updates] : updateInfoPerColumn) {
-            auto segmentIdx = getSegmentIdx(offset);
-            hasChangesPerSegment[segmentIdx] = true;
-        }
-    }
+RelTableData::LocalState::LocalState(LocalRelNG* localNG) : localNG{localNG} {
+    localNG->getChangesPerCSRSegment(sizeChangesPerSegment, hasChangesPerSegment);
 }
 
 void RelTableData::applyUpdatesToChunk(const PersistentState& persistentState,
-    const PackedCSRRegion& region, LocalVectorCollection* localChunk,
-    const update_insert_info_t& updateInfo, ColumnChunk* chunk) {
-    std::map<offset_t, row_idx_t> csrOffsetInRegionToRowIdx;
-    auto [leftNodeBoundary, rightNodeBoundary] = region.getNodeOffsetBoundaries();
-    for (auto& [nodeOffset, updates] : updateInfo) {
+    LocalState& localState, const ChunkCollection& localChunk, ColumnChunk* chunk,
+    column_id_t columnID) {
+    offset_to_row_idx_t csrOffsetInRegionToRowIdx;
+    auto [leftNodeBoundary, rightNodeBoundary] = localState.region.getNodeOffsetBoundaries();
+    auto& updateChunk = localState.localNG->getUpdateChunks(columnID);
+    for (auto& [nodeOffset, updates] : updateChunk.getSrcNodeOffsetToRelOffsets()) {
         if (nodeOffset < leftNodeBoundary || nodeOffset > rightNodeBoundary) {
             continue;
         }
-        for (auto [relID, rowIdx] : updates) {
-            auto csrOffsetInRegion = findCSROffsetInRegion(persistentState, nodeOffset, relID);
-            csrOffsetInRegionToRowIdx[csrOffsetInRegion] = rowIdx;
+        for (auto relOffset : updates) {
+            auto csrOffsetInRegion = findCSROffsetInRegion(persistentState, nodeOffset, relOffset);
+            csrOffsetInRegionToRowIdx[csrOffsetInRegion] =
+                updateChunk.getRowIdxFromOffset(relOffset);
         }
     }
     Column::applyLocalChunkToColumnChunk(localChunk, chunk, csrOffsetInRegionToRowIdx);
 }
 
 void RelTableData::applyInsertionsToChunk(const PersistentState& persistentState,
-    const LocalState& localState, LocalVectorCollection* localChunk,
-    const update_insert_info_t& insertInfo, ColumnChunk* newChunk) {
-    std::map<offset_t, row_idx_t> csrOffsetToRowIdx;
+    const LocalState& localState, const ChunkCollection& localChunk, ColumnChunk* newChunk) {
+    offset_to_row_idx_t csrOffsetToRowIdx;
     auto [leftNodeBoundary, rightNodeBoundary] = localState.region.getNodeOffsetBoundaries();
-    for (auto& [nodeOffset, insertions] : insertInfo) {
+    auto& insertChunks = localState.localNG->insertChunks;
+    for (auto& [nodeOffset, insertions] : insertChunks.getSrcNodeOffsetToRelOffsets()) {
         if (nodeOffset < leftNodeBoundary || nodeOffset > rightNodeBoundary) {
             continue;
         }
-        // TODO: Separate this into a function.
         auto csrOffsetInRegion = localState.header.getStartCSROffset(nodeOffset) +
                                  persistentState.header.getCSRLength(nodeOffset) -
                                  localState.leftCSROffset;
-        for (auto& [_, rowIdx] : insertions) {
+        for (auto relOffset : insertions) {
             KU_ASSERT(csrOffsetInRegion != UINT64_MAX);
-            csrOffsetToRowIdx[csrOffsetInRegion++] = rowIdx;
+            csrOffsetToRowIdx[csrOffsetInRegion++] = insertChunks.getRowIdxFromOffset(relOffset);
         }
     }
     Column::applyLocalChunkToColumnChunk(localChunk, newChunk, csrOffsetToRowIdx);
@@ -453,8 +422,9 @@ void RelTableData::applyInsertionsToChunk(const PersistentState& persistentState
 // TODO(Guodong): This should be refactored to share the same control logic with
 // `applyDeletionsToColumn`.
 void RelTableData::applyDeletionsToChunk(const PersistentState& persistentState,
-    const LocalState& localState, const delete_info_t& deleteInfo, ColumnChunk* chunk) {
-    for (auto& [offset, deletions] : deleteInfo) {
+    const LocalState& localState, ColumnChunk* chunk) {
+    auto& deleteInfo = localState.localNG->deleteInfo;
+    for (auto& [offset, deletions] : deleteInfo.getSrcNodeOffsetToRelOffsetVec()) {
         if (localState.region.isOutOfBoundary(offset)) {
             continue;
         }
@@ -488,27 +458,26 @@ void RelTableData::applyDeletionsToChunk(const PersistentState& persistentState,
 void RelTableData::distributeAndUpdateColumn(Transaction* transaction,
     node_group_idx_t nodeGroupIdx, column_id_t columnID, const PersistentState& persistentState,
     LocalState& localState) {
-    KU_ASSERT(columnID < columns.size() || columnID == INVALID_COLUMN_ID);
+    auto column = getColumn(columnID);
     auto [leftNodeBoundary, rightNodeBoundary] = localState.region.getNodeOffsetBoundaries();
-    auto column = columnID == INVALID_COLUMN_ID ? adjColumn.get() : columns[columnID].get();
     KU_ASSERT(localState.regionCapacity >= (localState.rightCSROffset - localState.leftCSROffset));
     // First, scan the whole region to a temp chunk.
     auto oldSize = persistentState.rightCSROffset - persistentState.leftCSROffset + 1;
-    auto chunk = ColumnChunkFactory::createColumnChunk(
-        *column->getDataType().copy(), enableCompression, oldSize);
+    auto chunk = ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(),
+        enableCompression, oldSize);
     column->scan(transaction, nodeGroupIdx, chunk.get(), persistentState.leftCSROffset,
         persistentState.rightCSROffset + 1);
-    auto relNGInfo = localState.localNG->getRelNGInfo();
-    auto& updateInfo = relNGInfo->getUpdateInfo(columnID);
-    auto localChunk = getLocalChunk(localState, columnID);
-    applyUpdatesToChunk(persistentState, localState.region, localChunk, updateInfo, chunk.get());
-    applyDeletionsToChunk(persistentState, localState, relNGInfo->deleteInfo, chunk.get());
+    auto localUpdateChunk =
+        localState.localNG->getUpdateChunks(columnID).getLocalChunk(0 /*columnID*/);
+    applyUpdatesToChunk(persistentState, localState, localUpdateChunk, chunk.get(), columnID);
+    applyDeletionsToChunk(persistentState, localState, chunk.get());
     // Second, create a new temp chunk for the region.
     auto newSize = localState.rightCSROffset - localState.leftCSROffset + 1;
-    auto newChunk = ColumnChunkFactory::createColumnChunk(
-        *column->getDataType().copy(), enableCompression, newSize);
-    auto maxNumNodesToDistribute = std::min(
-        rightNodeBoundary - leftNodeBoundary + 1, persistentState.header.offset->getNumValues());
+    auto newChunk = ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(),
+        enableCompression, newSize);
+    newChunk->getNullChunk()->resetToAllNull();
+    auto maxNumNodesToDistribute = std::min(rightNodeBoundary - leftNodeBoundary + 1,
+        persistentState.header.offset->getNumValues());
     // Third, copy the rels to the new chunk.
     for (auto i = 0u; i < maxNumNodesToDistribute; i++) {
         auto nodeOffset = i + leftNodeBoundary;
@@ -520,21 +489,21 @@ void RelTableData::distributeAndUpdateColumn(Transaction* transaction,
         }
         auto newCSROffsetInRegion =
             localState.header.getStartCSROffset(nodeOffset) - localState.leftCSROffset;
-        KU_ASSERT(!relNGInfo->deleteInfo.contains(nodeOffset));
         KU_ASSERT(newCSROffsetInRegion >= newChunk->getNumValues());
         newChunk->copy(chunk.get(), csrOffsetInRegion, newCSROffsetInRegion, length);
     }
-    auto& insertInfo = relNGInfo->getInsertInfo(columnID);
-    applyInsertionsToChunk(persistentState, localState, localChunk, insertInfo, newChunk.get());
+    auto insertLocalChunk = localState.localNG->insertChunks.getLocalChunk(columnID);
+    applyInsertionsToChunk(persistentState, localState, insertLocalChunk, newChunk.get());
     std::vector<offset_t> dstOffsets;
     dstOffsets.resize(newChunk->getNumValues());
     fillSequence(dstOffsets, localState.leftCSROffset);
-    column->prepareCommitForChunk(
-        transaction, nodeGroupIdx, dstOffsets, newChunk.get(), 0 /*srcOffset*/);
+    KU_ASSERT(newChunk->sanityCheck());
+    column->prepareCommitForChunk(transaction, nodeGroupIdx, dstOffsets, newChunk.get(),
+        0 /*srcOffset*/);
 }
 
-std::vector<PackedCSRRegion> RelTableData::findRegions(
-    const CSRHeaderChunks& headerChunks, LocalState& localState) {
+std::vector<PackedCSRRegion> RelTableData::findRegions(const ChunkedCSRHeader& headerChunks,
+    LocalState& localState) {
     std::vector<PackedCSRRegion> regions;
     auto segmentIdx = 0u;
     auto numSegments = StorageConstants::NODE_GROUP_SIZE / StorageConstants::CSR_SEGMENT_SIZE;
@@ -566,35 +535,32 @@ std::vector<PackedCSRRegion> RelTableData::findRegions(
 
 void RelTableData::updateRegion(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     PersistentState& persistentState, LocalState& localState) {
-    auto localInfo = localState.localNG->getRelNGInfo();
     // Scan RelID column chunk when there are updates or deletions.
     // TODO(Guodong): Should track for each region if it has updates or deletions.
-    if (localInfo->hasUpdates() || !localInfo->deleteInfo.empty()) {
+    if (localState.localNG->hasUpdatesOrDeletions()) {
         // NOTE: There is an implicit trick happening. Due to the mismatch of storage type and
         // in-memory representation of INTERNAL_ID, we only store offset as INT64 on disk. Here
         // we directly read relID's offset part from disk into an INT64 column chunk.
-        persistentState.relIDChunk = ColumnChunkFactory::createColumnChunk(
-            *LogicalType::INT64(), enableCompression, localState.regionCapacity);
-        columns[REL_ID_COLUMN_ID]->scan(transaction, nodeGroupIdx, persistentState.relIDChunk.get(),
-            persistentState.leftCSROffset, persistentState.rightCSROffset + 1);
+        persistentState.relIDChunk = ColumnChunkFactory::createColumnChunk(*LogicalType::INT64(),
+            enableCompression, localState.regionCapacity);
+        getColumn(REL_ID_COLUMN_ID)
+            ->scan(transaction, nodeGroupIdx, persistentState.relIDChunk.get(),
+                persistentState.leftCSROffset, persistentState.rightCSROffset + 1);
     }
     if (localState.region.level == 0) {
-        updateColumn(transaction, nodeGroupIdx, INVALID_COLUMN_ID, persistentState, localState);
         for (auto columnID = 0u; columnID < columns.size(); columnID++) {
             updateColumn(transaction, nodeGroupIdx, columnID, persistentState, localState);
         }
     } else {
-        distributeAndUpdateColumn(
-            transaction, nodeGroupIdx, INVALID_COLUMN_ID, persistentState, localState);
         for (auto columnID = 0u; columnID < columns.size(); columnID++) {
-            distributeAndUpdateColumn(
-                transaction, nodeGroupIdx, columnID, persistentState, localState);
+            distributeAndUpdateColumn(transaction, nodeGroupIdx, columnID, persistentState,
+                localState);
         }
     }
 }
 
-void RelTableData::findPositionsForInsertions(
-    offset_t nodeOffset, length_t numInsertions, LocalState& localState) {
+void RelTableData::findPositionsForInsertions(offset_t nodeOffset, length_t numInsertions,
+    LocalState& localState) {
     auto& header = localState.header;
     KU_ASSERT(nodeOffset < header.offset->getNumValues());
     // Try insert to the end of nodeOffset.
@@ -609,8 +575,8 @@ void RelTableData::findPositionsForInsertions(
     }
 }
 
-void RelTableData::slideForInsertions(
-    offset_t nodeOffset, length_t numInsertions, LocalState& localState) {
+void RelTableData::slideForInsertions(offset_t nodeOffset, length_t numInsertions,
+    LocalState& localState) {
     // Now, we have to slide. Heuristically, the sliding happens both left and right.
     auto& header = localState.header;
     auto [leftBoundary, rightBoundary] = localState.region.getNodeOffsetBoundaries();
@@ -701,16 +667,6 @@ void RelTableData::slideRightForInsertions(offset_t nodeOffset, offset_t rightBo
     }
 }
 
-LocalVectorCollection* RelTableData::getLocalChunk(
-    const RelTableData::LocalState& localState, column_id_t columnID) {
-    return columnID == INVALID_COLUMN_ID ? localState.localNG->getAdjChunk() :
-                                           localState.localNG->getPropertyChunk(columnID);
-}
-
-Column* RelTableData::getColumn(column_id_t columnID) {
-    return columnID == INVALID_COLUMN_ID ? adjColumn.get() : TableData::getColumn(columnID);
-}
-
 void RelTableData::updateColumn(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     column_id_t columnID, const RelTableData::PersistentState& persistentState,
     LocalState& localState) {
@@ -718,41 +674,39 @@ void RelTableData::updateColumn(Transaction* transaction, node_group_idx_t nodeG
     applyUpdatesToColumn(transaction, nodeGroupIdx, columnID, persistentState, localState, column);
     applyDeletionsToColumn(transaction, nodeGroupIdx, localState, persistentState, column);
     applySliding(transaction, nodeGroupIdx, localState, persistentState, column);
-    applyInsertionsToColumn(
-        transaction, nodeGroupIdx, columnID, localState, persistentState, column);
+    applyInsertionsToColumn(transaction, nodeGroupIdx, columnID, localState, persistentState,
+        column);
 }
 
 void RelTableData::applyUpdatesToColumn(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     column_id_t columnID, const PersistentState& persistentState, LocalState& localState,
     Column* column) {
-    std::map<offset_t, row_idx_t> writeInfo;
-    auto relNGInfo = localState.localNG->getRelNGInfo();
-    auto& updateInfo = relNGInfo->getUpdateInfo(columnID);
-    for (auto& [offset, updatesPerNode] : updateInfo) {
-        if (localState.region.isOutOfBoundary(offset)) {
+    offset_to_row_idx_t writeInfo;
+    auto& updateChunk = localState.localNG->getUpdateChunks(columnID);
+    for (auto& [srcOffset, updatesPerNode] : updateChunk.getSrcNodeOffsetToRelOffsets()) {
+        if (localState.region.isOutOfBoundary(srcOffset)) {
             // TODO: Should also partition local storage into regions. So we can avoid this check.
             continue;
         }
-        for (auto& [relID, rowIdx] : updatesPerNode) {
-            auto csrOffsetInRegion = findCSROffsetInRegion(persistentState, offset, relID);
-            writeInfo[csrOffsetInRegion] = rowIdx;
+        for (auto relOffset : updatesPerNode) {
+            auto csrOffsetInRegion = findCSROffsetInRegion(persistentState, srcOffset, relOffset);
+            writeInfo[csrOffsetInRegion] = updateChunk.getRowIdxFromOffset(relOffset);
         }
     }
     if (!writeInfo.empty()) {
-        auto localChunk = getLocalChunk(localState, columnID);
-        column->prepareCommitForChunk(
-            transaction, nodeGroupIdx, localChunk, {} /*insertInfo*/, writeInfo, {} /*deleteInfo*/);
+        auto localChunk = updateChunk.getLocalChunk(0 /*columnID*/);
+        column->prepareCommitForChunk(transaction, nodeGroupIdx, {}, {} /*insertInfo*/, localChunk,
+            writeInfo, {} /*deleteInfo*/);
     }
 }
 
 void RelTableData::applyInsertionsToColumn(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     column_id_t columnID, LocalState& localState, const PersistentState& persistentState,
     Column* column) {
-    std::map<offset_t, row_idx_t> writeInfo;
-    auto relNGInfo = localState.localNG->getRelNGInfo();
-    auto& insertInfo = relNGInfo->getInsertInfo(columnID);
-    auto& deleteInfo = relNGInfo->getDeleteInfo();
-    for (auto& [offset, insertions] : insertInfo) {
+    (void)persistentState; // Avoid unused variable warning.
+    offset_to_row_idx_t writeInfo;
+    auto& insertChunks = localState.localNG->insertChunks;
+    for (auto& [offset, insertions] : insertChunks.getSrcNodeOffsetToRelOffsets()) {
         if (localState.region.isOutOfBoundary(offset)) {
             continue;
         }
@@ -760,22 +714,22 @@ void RelTableData::applyInsertionsToColumn(Transaction* transaction, node_group_
         auto length = localState.header.getCSRLength(offset);
         KU_ASSERT(length >= insertions.size());
         KU_ASSERT((startCSROffset + persistentState.header.getCSRLength(offset) -
-                      (deleteInfo.contains(offset) ? deleteInfo.at(offset).size() : 0) +
+                      localState.localNG->deleteInfo.getNumDeletedRelsFromSrcOffset(offset) +
                       insertions.size()) <= localState.header.getEndCSROffset(offset));
         auto idx = startCSROffset + length - insertions.size();
-        for (auto& [relID, rowIdx] : insertions) {
-            writeInfo[idx++] = rowIdx;
+        for (auto relOffset : insertions) {
+            writeInfo[idx++] = insertChunks.getRowIdxFromOffset(relOffset);
         }
     }
-    auto localChunk = getLocalChunk(localState, columnID);
-    column->prepareCommitForChunk(transaction, nodeGroupIdx, localChunk, writeInfo, {}, {});
+    auto localChunk = insertChunks.getLocalChunk(columnID);
+    column->prepareCommitForChunk(transaction, nodeGroupIdx, localChunk, writeInfo, {}, {}, {});
 }
 
 std::vector<std::pair<offset_t, offset_t>> RelTableData::getSlidesForDeletions(
-    const PersistentState& persistentState, const LocalState& localState,
-    const delete_info_t& deleteInfo) {
+    const PersistentState& persistentState, const LocalState& localState) {
     std::vector<std::pair<offset_t, offset_t>> slides;
-    for (auto& [offset, deletions] : deleteInfo) {
+    for (auto& [offset, deletions] :
+        localState.localNG->deleteInfo.getSrcNodeOffsetToRelOffsetVec()) {
         if (localState.region.isOutOfBoundary(offset)) {
             continue;
         }
@@ -817,21 +771,19 @@ std::vector<std::pair<offset_t, offset_t>> RelTableData::getSlidesForDeletions(
 //                3. `getSlidesForDeletions` can be done once for all columns.
 void RelTableData::applyDeletionsToColumn(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     LocalState& localState, const PersistentState& persistentState, Column* column) {
-    auto relNGInfo = localState.localNG->getRelNGInfo();
-    auto& deleteInfo = relNGInfo->getDeleteInfo();
-    auto slides = getSlidesForDeletions(persistentState, localState, deleteInfo);
+    auto slides = getSlidesForDeletions(persistentState, localState);
     if (slides.empty()) {
         return;
     }
-    auto chunk = ColumnChunkFactory::createColumnChunk(
-        *column->getDataType().copy(), enableCompression, slides.size());
+    auto chunk = ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(),
+        enableCompression, slides.size());
     std::vector<offset_t> dstOffsets;
     dstOffsets.resize(slides.size());
     auto tmpChunkForRead =
         ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(), enableCompression, 1);
     for (auto i = 0u; i < slides.size(); i++) {
-        column->scan(
-            transaction, nodeGroupIdx, tmpChunkForRead.get(), slides[i].first, slides[i].first + 1);
+        column->scan(transaction, nodeGroupIdx, tmpChunkForRead.get(), slides[i].first,
+            slides[i].first + 1);
         chunk->append(tmpChunkForRead.get(), 0, 1);
         dstOffsets[i] = slides[i].second;
     }
@@ -864,26 +816,26 @@ void RelTableData::applySliding(Transaction* transaction, node_group_idx_t nodeG
     if (slides.empty()) {
         return;
     }
-    auto chunk = ColumnChunkFactory::createColumnChunk(
-        *column->getDataType().copy(), enableCompression, slides.size());
+    auto chunk = ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(),
+        enableCompression, slides.size());
     std::vector<offset_t> dstOffsets;
     dstOffsets.resize(slides.size());
     auto tmpChunkForRead =
         ColumnChunkFactory::createColumnChunk(*column->getDataType().copy(), enableCompression, 1);
     for (auto i = 0u; i < slides.size(); i++) {
-        column->scan(
-            transaction, nodeGroupIdx, tmpChunkForRead.get(), slides[i].first, slides[i].first + 1);
+        column->scan(transaction, nodeGroupIdx, tmpChunkForRead.get(), slides[i].first,
+            slides[i].first + 1);
         chunk->append(tmpChunkForRead.get(), 0, 1);
         dstOffsets[i] = slides[i].second;
     }
     column->prepareCommitForChunk(transaction, nodeGroupIdx, dstOffsets, chunk.get(), 0);
 }
 
-static offset_t getMaxNumNodesInRegion(
-    const CSRHeaderChunks& header, const PackedCSRRegion& region, const RelNGInfo* localInfo) {
+offset_t RelTableData::getMaxNumNodesInRegion(const ChunkedCSRHeader& header,
+    const PackedCSRRegion& region, const LocalRelNG* localNG) {
     auto numNodes = header.offset->getNumValues();
     KU_ASSERT(numNodes == header.length->getNumValues());
-    for (auto& [offset, _] : localInfo->adjInsertInfo) {
+    for (auto& [offset, _] : localNG->insertChunks.getSrcNodeOffsetToRelOffsets()) {
         if (!region.isOutOfBoundary(offset) && offset >= numNodes) {
             numNodes = offset + 1;
         }
@@ -893,26 +845,27 @@ static offset_t getMaxNumNodesInRegion(
 
 void RelTableData::updateCSRHeader(Transaction* transaction, node_group_idx_t nodeGroupIdx,
     PersistentState& persistentState, LocalState& localState) {
-    auto localInfo = localState.localNG->getRelNGInfo();
     auto [leftBoundary, rightBoundary] = localState.region.getNodeOffsetBoundaries();
     auto& header = persistentState.header;
-    auto maxNumNodesInRegion = getMaxNumNodesInRegion(header, localState.region, localInfo);
+    auto maxNumNodesInRegion =
+        getMaxNumNodesInRegion(header, localState.region, localState.localNG);
     // Update the region boundary based on actual num nodes in the region.
     localState.region.leftBoundary = std::min(leftBoundary, header.offset->getNumValues());
     localState.region.rightBoundary = std::min(rightBoundary, maxNumNodesInRegion - 1);
     persistentState.leftCSROffset = header.getStartCSROffset(localState.region.leftBoundary);
     persistentState.rightCSROffset = header.getEndCSROffset(localState.region.rightBoundary);
-    localState.header = CSRHeaderChunks(enableCompression, maxNumNodesInRegion);
+    localState.header = ChunkedCSRHeader(enableCompression, maxNumNodesInRegion);
     auto& newHeader = localState.header;
     newHeader.copyFrom(header);
     newHeader.fillDefaultValues(localState.region.rightBoundary + 1);
-    if (localInfo->adjInsertInfo.empty() && localInfo->deleteInfo.empty()) {
+    if (localState.localNG->insertChunks.isEmpty() && localState.localNG->deleteInfo.isEmpty()) {
         // No need to update the csr header.
         localState.leftCSROffset = persistentState.leftCSROffset;
         localState.rightCSROffset = persistentState.rightCSROffset;
         return;
     }
-    for (auto& [offset, deletions] : localInfo->deleteInfo) {
+    for (auto& [offset, deletions] :
+        localState.localNG->deleteInfo.getSrcNodeOffsetToRelOffsetVec()) {
         if (localState.region.isOutOfBoundary(offset)) {
             continue;
         }
@@ -920,19 +873,21 @@ void RelTableData::updateCSRHeader(Transaction* transaction, node_group_idx_t no
         int64_t newLength = (int64_t)oldLength - deletions.size();
         KU_ASSERT(newLength >= 0);
         newHeader.length->setValue<length_t>(newLength, offset);
+        newHeader.length->getNullChunk()->setNull(offset, false);
     }
-    for (auto& [offset, _] : localInfo->adjInsertInfo) {
+    for (auto& [offset, _] : localState.localNG->insertChunks.getSrcNodeOffsetToRelOffsets()) {
         if (localState.region.isOutOfBoundary(offset)) {
             continue;
         }
         auto oldLength = newHeader.getCSRLength(offset);
-        auto numInsertions = localInfo->adjInsertInfo.at(offset).size();
+        auto numInsertions = localState.localNG->getNumInsertedRels(offset);
         if (localState.region.level == 0) {
             findPositionsForInsertions(offset, numInsertions, localState);
         }
         int64_t newLength = (int64_t)oldLength + numInsertions;
         KU_ASSERT(newLength >= 0);
         newHeader.length->setValue<length_t>(newLength, offset);
+        newHeader.length->getNullChunk()->setNull(offset, false);
     }
     if (localState.region.level > 0) {
         distributeOffsets(header, localState, localState.region.leftBoundary, maxNumNodesInRegion);
@@ -941,7 +896,6 @@ void RelTableData::updateCSRHeader(Transaction* transaction, node_group_idx_t no
             getNewRegionSize(header, localState.sizeChangesPerSegment, localState.region);
         localState.regionCapacity = getRegionCapacity(header, localState.region);
     }
-    KU_ASSERT(newHeader.sanityCheck());
     localState.leftCSROffset = newHeader.getStartCSROffset(localState.region.leftBoundary);
     localState.rightCSROffset = newHeader.getEndCSROffset(localState.region.rightBoundary);
     std::vector<offset_t> dstOffsets;
@@ -953,7 +907,7 @@ void RelTableData::updateCSRHeader(Transaction* transaction, node_group_idx_t no
         newHeader.length.get(), localState.region.leftBoundary);
 }
 
-void RelTableData::distributeOffsets(const CSRHeaderChunks& header, LocalState& localState,
+void RelTableData::distributeOffsets(const ChunkedCSRHeader& header, LocalState& localState,
     offset_t leftBoundary, offset_t rightBoundary) {
     if (localState.region.level > packedCSRInfo.calibratorTreeHeight) {
         // Need to resize the capacity and reset regionToDistribute to the top level one.
@@ -961,8 +915,8 @@ void RelTableData::distributeOffsets(const CSRHeaderChunks& header, LocalState& 
             PackedCSRRegion{0, static_cast<vector_idx_t>(packedCSRInfo.calibratorTreeHeight)};
         localState.regionSize =
             getNewRegionSize(header, localState.sizeChangesPerSegment, localState.region);
-        localState.regionCapacity = StorageUtils::divideAndRoundUpTo(
-            localState.regionSize, StorageConstants::PACKED_CSR_DENSITY);
+        localState.regionCapacity = StorageUtils::divideAndRoundUpTo(localState.regionSize,
+            StorageConstants::PACKED_CSR_DENSITY);
     } else {
         localState.regionSize =
             getNewRegionSize(header, localState.sizeChangesPerSegment, localState.region);
@@ -978,12 +932,13 @@ void RelTableData::distributeOffsets(const CSRHeaderChunks& header, LocalState& 
         auto startCSROffset = newHeader.getStartCSROffset(nodeOffset);
         auto newOffset = startCSROffset + newLength + newGap;
         newHeader.offset->setValue(newOffset, nodeOffset);
+        newHeader.offset->getNullChunk()->setNull(nodeOffset, false);
     }
     localState.needSliding = true;
 }
 
-void RelTableData::prepareCommitNodeGroup(
-    Transaction* transaction, node_group_idx_t nodeGroupIdx, LocalRelNG* localRelNG) {
+void RelTableData::prepareCommitNodeGroup(Transaction* transaction, node_group_idx_t nodeGroupIdx,
+    LocalRelNG* localRelNG) {
     auto numNodesInPersistentStorage = csrHeaderColumns.getNumNodes(transaction, nodeGroupIdx);
     PersistentState persistentState(numNodesInPersistentStorage);
     csrHeaderColumns.scan(transaction, nodeGroupIdx, persistentState.header);
@@ -998,33 +953,37 @@ void RelTableData::prepareCommitNodeGroup(
     }
 }
 
-LocalRelNG* RelTableData::getLocalNodeGroup(
-    transaction::Transaction* transaction, node_group_idx_t nodeGroupIdx) {
-    auto localTableData = transaction->getLocalStorage()->getLocalTableData(
-        tableID, getDataIdxFromDirection(direction));
+LocalRelNG* RelTableData::getLocalNodeGroup(Transaction* transaction,
+    node_group_idx_t nodeGroupIdx) {
+    auto localTable = transaction->getLocalStorage()->getLocalTable(tableID);
+    if (!localTable) {
+        return nullptr;
+    }
+    auto localRelTable = ku_dynamic_cast<LocalTable*, LocalRelTable*>(localTable);
+    auto localTableData = localRelTable->getTableData(direction);
     LocalRelNG* localNodeGroup = nullptr;
-    if (localTableData) {
-        auto localRelTableData =
-            ku_dynamic_cast<LocalTableData*, LocalRelTableData*>(localTableData);
-        if (localRelTableData->nodeGroups.contains(nodeGroupIdx)) {
-            localNodeGroup = ku_dynamic_cast<LocalNodeGroup*, LocalRelNG*>(
-                localRelTableData->nodeGroups.at(nodeGroupIdx).get());
-        }
+    if (localTableData->nodeGroups.contains(nodeGroupIdx)) {
+        localNodeGroup = ku_dynamic_cast<LocalNodeGroup*, LocalRelNG*>(
+            localTableData->nodeGroups.at(nodeGroupIdx).get());
     }
     return localNodeGroup;
+}
+
+void RelTableData::prepareCommit() {
+    csrHeaderColumns.offset->prepareCommit();
+    csrHeaderColumns.length->prepareCommit();
+    TableData::prepareCommit();
 }
 
 void RelTableData::checkpointInMemory() {
     csrHeaderColumns.offset->checkpointInMemory();
     csrHeaderColumns.length->checkpointInMemory();
-    adjColumn->checkpointInMemory();
     TableData::checkpointInMemory();
 }
 
 void RelTableData::rollbackInMemory() {
     csrHeaderColumns.offset->rollbackInMemory();
     csrHeaderColumns.length->rollbackInMemory();
-    adjColumn->rollbackInMemory();
     TableData::rollbackInMemory();
 }
 

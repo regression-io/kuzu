@@ -39,8 +39,8 @@ std::unique_ptr<QueryResult> Connection::query(std::string_view queryStatement) 
     return clientContext->query(queryStatement);
 }
 
-std::unique_ptr<QueryResult> Connection::query(
-    std::string_view query, std::string_view encodedJoin, bool enumerateAllPlans) {
+std::unique_ptr<QueryResult> Connection::query(std::string_view query, std::string_view encodedJoin,
+    bool enumerateAllPlans) {
     return clientContext->query(query, encodedJoin, enumerateAllPlans);
 }
 
@@ -53,12 +53,9 @@ std::unique_ptr<PreparedStatement> Connection::preparedStatementWithError(std::s
 }
 
 std::unique_ptr<PreparedStatement> Connection::prepareNoLock(
-    Statement* parsedStatement, bool enumerateAllPlans, std::string_view encodedJoin) {
+    std::shared_ptr<Statement> parsedStatement, bool enumerateAllPlans,
+    std::string_view encodedJoin) {
     return clientContext->prepareNoLock(parsedStatement, enumerateAllPlans, encodedJoin);
-}
-
-std::vector<std::unique_ptr<Statement>> Connection::parseQuery(std::string_view query) {
-    return clientContext->parseQuery(query);
 }
 
 void Connection::interrupt() {
