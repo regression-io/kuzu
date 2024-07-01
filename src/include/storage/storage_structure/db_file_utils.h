@@ -1,22 +1,44 @@
 #pragma once
 
-#include <cstdint>
 #include <functional>
 
+#include "common/copy_constructors.h"
 #include "common/types/types.h"
-#include "storage/buffer_manager/bm_file_handle.h"
-#include "storage/buffer_manager/buffer_manager.h"
-#include "storage/wal/wal.h"
-#include "transaction/transaction.h"
 
 namespace kuzu {
+namespace transaction {
+enum class TransactionType : uint8_t;
+} // namespace transaction
+
 namespace storage {
+
+struct DBFileID;
+class BMFileHandle;
+class BufferManager;
+class WAL;
+
+struct WALPageIdxAndFrame {
+    WALPageIdxAndFrame(common::page_idx_t originalPageIdx, common::page_idx_t pageIdxInWAL,
+        uint8_t* frame)
+        : originalPageIdx{originalPageIdx}, pageIdxInWAL{pageIdxInWAL}, frame{frame} {}
+
+    DELETE_COPY_DEFAULT_MOVE(WALPageIdxAndFrame);
+
+    common::page_idx_t originalPageIdx;
+    common::page_idx_t pageIdxInWAL;
+    uint8_t* frame;
+};
 
 class DBFileUtils {
 public:
     constexpr static common::page_idx_t NULL_PAGE_IDX = common::INVALID_PAGE_IDX;
 
 public:
+    // Where possible, updatePage/insertNewPage should be used instead
+    static WALPageIdxAndFrame createWALVersionIfNecessaryAndPinPage(
+        common::page_idx_t originalPageIdx, bool insertingNewPage, BMFileHandle& fileHandle,
+        DBFileID dbFileID, BufferManager& bufferManager, WAL& wal);
+
     static std::pair<BMFileHandle*, common::page_idx_t> getFileHandleAndPhysicalPageIdxToPin(
         BMFileHandle& fileHandle, common::page_idx_t physicalPageIdx, WAL& wal,
         transaction::TransactionType trxType);

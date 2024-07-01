@@ -1,8 +1,8 @@
--GROUP CreateDeleteInt64NodeTrxTest
 -DATASET CSV node-insertion-deletion-tests/int64-pk
 --
 
 -CASE MixedInsertDeleteCommitNormalExecution
+-PARALLELISM 1
 -CREATE_CONNECTION conn_read
 -CREATE_CONNECTION conn_write
 -STATEMENT [conn_write] BEGIN TRANSACTION
@@ -26,7 +26,7 @@
 ---- 1
 10000
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_read] Match (:person) RETURN COUNT(*);
@@ -41,7 +41,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_read] Match (:person) RETURN COUNT(*);
 ---- 1
 0
@@ -56,7 +56,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_read] Match (a:person) where a.ID=10000099 RETURN COUNT(*);
 ---- 1
 1
@@ -85,7 +85,7 @@
 ---- 1
 10002
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -101,7 +101,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -117,13 +117,15 @@
 ---- 1
 1
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_read] Match (a:person) where a.ID=10000099 RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
 
 -CASE MixedInsertDeleteRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -149,7 +151,7 @@
 ---- 1
 10002
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (:person) RETURN COUNT(*);
@@ -164,7 +166,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -180,12 +182,14 @@
 ---- 1
 1
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_read] Match (a:person) where a.ID=10000099 RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
 
 -CASE MixedInsertDeleteRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -211,7 +215,7 @@
 ---- 1
 10002
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -227,7 +231,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -243,7 +247,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_read] Match (a:person) where a.ID=10000099 RETURN COUNT(*);
 ---- 1
@@ -271,7 +275,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_read] Match (a:person) WHERE a.ID=10003 RETURN COUNT(*);
@@ -280,6 +284,9 @@
 -STATEMENT [conn_read] Match (a:person) WHERE a.ID=10005 RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterInsertionCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -303,7 +310,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -313,6 +320,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=10005 RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterInsertionRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -336,7 +346,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=10003 RETURN COUNT(*);
@@ -345,6 +355,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=10005 RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterInsertionRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -368,7 +381,7 @@
 ---- 1
 0
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -378,6 +391,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=10005 RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionCommitNormalExecution
 -CREATE_CONNECTION conn_read
@@ -409,7 +425,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_read] Match (a:person) WHERE a.ID=10 RETURN COUNT(*);
@@ -421,6 +437,9 @@
 -STATEMENT [conn_read] Match (a:person) WHERE a.ID=6000 RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -452,7 +471,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -465,6 +484,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=6000 RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionRollbackNormalExecution
 -LOG Index Scan After Deletion Rollback Normal Execution
@@ -497,7 +519,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=10 RETURN COUNT(*);
@@ -509,6 +531,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=6000 RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -540,7 +565,7 @@
 ---- 1
 1
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
@@ -553,6 +578,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID=6000 RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesCommitNormalExecution
 -CREATE_CONNECTION conn_read
@@ -568,12 +596,15 @@
 ---- 1
 10000
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -589,13 +620,16 @@
 ---- 1
 10000
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -611,12 +645,15 @@
 ---- 1
 10000
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -632,13 +669,16 @@
 ---- 1
 10000
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE SimpleAddCommitNormalExecution
 -CREATE_CONNECTION conn_read
@@ -654,12 +694,15 @@
 ---- 1
 10000
 -STATEMENT [conn_write] COMMIT
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 11000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE SimpleAddCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -675,13 +718,16 @@
 ---- 1
 10000
 -STATEMENT [conn_write] COMMIT_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 11000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE SimpleAddRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -697,12 +743,15 @@
 ---- 1
 10000
 -STATEMENT [conn_write] Rollback
----- ok 
+---- ok
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE SimpleAddRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -718,10 +767,12 @@
 ---- 1
 10000
 -STATEMENT [conn_write] ROLLBACK_SKIP_CHECKPOINT
----- ok 
+---- ok
 -RELOADDB
 -STATEMENT [conn_write] BEGIN TRANSACTION
 ---- ok
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok

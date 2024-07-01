@@ -1,4 +1,5 @@
 #include "binder/binder.h"
+#include "binder/expression/expression_util.h"
 #include "binder/expression/function_expression.h"
 #include "binder/expression_binder.h"
 #include "catalog/catalog.h"
@@ -25,40 +26,34 @@ std::shared_ptr<Expression> ExpressionBinder::bindComparisonExpression(
 std::shared_ptr<Expression> ExpressionBinder::bindComparisonExpression(
     ExpressionType expressionType, const expression_vector& children) {
     auto functions = context->getCatalog()->getFunctions(binder->clientContext->getTx());
-    auto functionName = expressionTypeToString(expressionType);
+    auto functionName = ExpressionTypeUtil::toString(expressionType);
+    LogicalType combinedType(LogicalTypeID::ANY);
+    if (!ExpressionUtil::tryCombineDataType(children, combinedType)) {
+        throw BinderException(stringFormat("Type Mismatch: Cannot compare types {} and {}",
+            children[0]->dataType.toString(), children[1]->dataType.toString()));
+    }
+    if (combinedType.getLogicalTypeID() == LogicalTypeID::ANY) {
+        combinedType = LogicalType(LogicalTypeID::INT8);
+    } else if (combinedType.getLogicalTypeID() == LogicalTypeID::RDF_VARIANT) {
+        combinedType = LogicalType(LogicalTypeID::STRING);
+    }
     std::vector<LogicalType> childrenTypes;
-    for (auto& child : children) {
-        childrenTypes.push_back(child->dataType);
+    for (auto i = 0u; i < children.size(); i++) {
+        childrenTypes.push_back(combinedType.copy());
     }
     auto function = ku_dynamic_cast<function::Function*, function::ScalarFunction*>(
-        function::BuiltInFunctionsUtils::matchFunction(functionName, childrenTypes, functions));
+        function::BuiltInFunctionsUtils::matchFunction(context->getTx(), functionName,
+            childrenTypes, functions));
     expression_vector childrenAfterCast;
     for (auto i = 0u; i < children.size(); ++i) {
-        if (LogicalTypeUtils::isNested(function->parameterTypeIDs[i]) &&
-            children[i]->dataType.getLogicalTypeID() == LogicalTypeID::ANY) {
-            // try matching the type to any other children
-            bool foundValidChild = false;
-            for (auto j = 0u; !foundValidChild && j < children.size(); ++j) {
-                if (children[j]->dataType.getLogicalTypeID() == function->parameterTypeIDs[i]) {
-                    childrenAfterCast.push_back(
-                        implicitCastIfNecessary(children[i], children[j]->dataType));
-                    foundValidChild = true;
-                }
-            }
-            // LCOV_EXCL_START
-            if (!foundValidChild) {
-                throw common::BinderException(
-                    stringFormat("Cannot resolve recursive data type for expression {}.",
-                        children[i]->toString()));
-            }
-            // LCOV_EXCL_STOP
+        if (children[i]->dataType != combinedType) {
+            childrenAfterCast.push_back(forceCast(children[i], combinedType));
         } else {
-            childrenAfterCast.push_back(
-                implicitCastIfNecessary(children[i], function->parameterTypeIDs[i]));
+            childrenAfterCast.push_back(children[i]);
         }
     }
-    auto bindData = std::make_unique<function::FunctionBindData>(
-        std::make_unique<LogicalType>(function->returnTypeID));
+    auto bindData =
+        std::make_unique<function::FunctionBindData>(LogicalType(function->returnTypeID));
     auto uniqueExpressionName =
         ScalarFunctionExpression::getUniqueName(function->name, childrenAfterCast);
     return make_shared<ScalarFunctionExpression>(functionName, expressionType, std::move(bindData),

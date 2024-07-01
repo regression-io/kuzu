@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from decimal import Decimal
 import datetime
 from uuid import UUID
 
@@ -54,7 +55,7 @@ def test_uint16(conn_db_readonly: ConnDB) -> None:
 
 def test_uint32(conn_db_readonly: ConnDB) -> None:
     conn, db = conn_db_readonly
-    result = conn.execute("MATCH (a:person) -[r:studyAt]-> (b:organisation) WHERE r.length = 5 RETURN r.temprature;")
+    result = conn.execute("MATCH (a:person) -[r:studyAt]-> (b:organisation) WHERE r.length = 5 RETURN r.temperature;")
     assert result.has_next()
     assert result.get_next() == [32800]
     assert not result.has_next()
@@ -96,6 +97,32 @@ def test_double(conn_db_readonly: ConnDB) -> None:
     assert not result.has_next()
     result.close()
 
+def test_decimal(conn_db_readonly: ConnDB) -> None:
+    conn, _ = conn_db_readonly
+    res = conn.execute("UNWIND [1, 2, 3] AS A UNWIND [5.7, 8.3, 2.9] AS B WITH cast(CAST(A AS DECIMAL) * CAST(B AS DECIMAL) AS DECIMAL(18, 1)) AS PROD RETURN COLLECT(PROD) AS RES")
+    assert sorted(res.get_next()[0]) == sorted([
+        Decimal('5.7'),
+        Decimal('8.3'),
+        Decimal('2.9'),
+        Decimal('11.4'),
+        Decimal('16.6'),
+        Decimal('5.8'),
+        Decimal('17.1'),
+        Decimal('24.9'),
+        Decimal('8.7'),
+    ])
+    res = conn.execute("UNWIND [1, 2, 3] AS A UNWIND [5.7, 8.3, 2.9] AS B WITH CAST(CAST(A AS DECIMAL) * CAST(B AS DECIMAL) AS DECIMAL(4, 1)) AS PROD RETURN COLLECT(PROD) AS RES")
+    assert sorted(res.get_next()[0]) == sorted([
+        Decimal('5.7'),
+        Decimal('8.3'),
+        Decimal('2.9'),
+        Decimal('11.4'),
+        Decimal('16.6'),
+        Decimal('5.8'),
+        Decimal('17.1'),
+        Decimal('24.9'),
+        Decimal('8.7'),
+    ])
 
 def test_string(conn_db_readonly: ConnDB) -> None:
     conn, db = conn_db_readonly
@@ -309,7 +336,7 @@ def test_recursive_rel(conn_db_readonly: ConnDB) -> None:
         "length": 5,
         "level": 5,
         "code": 9223372036854775808,
-        "temprature": 32800,
+        "temperature": 32800,
         "ulength": 33768,
         "ulevel": 250,
         "hugedata": 1844674407370955161811111111,

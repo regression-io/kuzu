@@ -25,6 +25,9 @@ struct overload : Funcs... {
 
 class TypeUtils {
 public:
+    static std::string entryToString(const LogicalType& dataType, const uint8_t* value,
+        ValueVector* vector);
+
     template<typename T>
     static inline std::string toString(const T& val, void* /*valueVector*/ = nullptr) {
         static_assert(std::is_same<T, int64_t>::value || std::is_same<T, int32_t>::value ||
@@ -38,15 +41,15 @@ public:
     static std::string relToString(const struct_entry_t& val, ValueVector* vector);
 
     static inline void encodeOverflowPtr(uint64_t& overflowPtr, page_idx_t pageIdx,
-        uint16_t pageOffset) {
+        uint32_t pageOffset) {
         memcpy(&overflowPtr, &pageIdx, 4);
-        memcpy(((uint8_t*)&overflowPtr) + 4, &pageOffset, 2);
+        memcpy(((uint8_t*)&overflowPtr) + 4, &pageOffset, 4);
     }
     static inline void decodeOverflowPtr(uint64_t overflowPtr, page_idx_t& pageIdx,
-        uint16_t& pageOffset) {
+        uint32_t& pageOffset) {
         pageIdx = 0;
         memcpy(&pageIdx, &overflowPtr, 4);
-        memcpy(&pageOffset, ((uint8_t*)&overflowPtr) + 4, 2);
+        memcpy(&pageOffset, ((uint8_t*)&overflowPtr) + 4, 4);
     }
 
     template<typename T>
@@ -120,11 +123,11 @@ public:
      * See https://en.cppreference.com/w/cpp/utility/variant/visit
      */
     template<typename... Fs>
-    static inline void visit(LogicalTypeID dataType, Fs... funcs) {
+    static inline auto visit(const LogicalType& dataType, Fs... funcs) {
         // Note: arguments are used only for type deduction and have no meaningful value.
         // They should be optimized out by the compiler
         auto func = overload(funcs...);
-        switch (dataType) {
+        switch (dataType.getLogicalTypeID()) {
         /* NOLINTBEGIN(bugprone-branch-clone)*/
         case LogicalTypeID::INT8:
             return func(int8_t());
@@ -151,6 +154,19 @@ public:
             return func(double());
         case LogicalTypeID::FLOAT:
             return func(float());
+        case LogicalTypeID::DECIMAL:
+            switch (dataType.getPhysicalType()) {
+            case PhysicalTypeID::INT16:
+                return func(int16_t());
+            case PhysicalTypeID::INT32:
+                return func(int32_t());
+            case PhysicalTypeID::INT64:
+                return func(int64_t());
+            case PhysicalTypeID::INT128:
+                return func(int128_t());
+            default:
+                KU_UNREACHABLE;
+            }
         case LogicalTypeID::INTERVAL:
             return func(interval_t());
         case LogicalTypeID::INTERNAL_ID:
@@ -189,12 +205,15 @@ public:
         case LogicalTypeID::ANY:
         case LogicalTypeID::POINTER:
         case LogicalTypeID::RDF_VARIANT:
+            // Unsupported type
             KU_UNREACHABLE;
+            // Needed for return type deduction to work
+            return func(uint8_t());
         }
     }
 
     template<typename... Fs>
-    static inline void visit(PhysicalTypeID dataType, Fs&&... funcs) {
+    static inline auto visit(PhysicalTypeID dataType, Fs&&... funcs) {
         // Note: arguments are used only for type deduction and have no meaningful value.
         // They should be optimized out by the compiler
         auto func = overload(funcs...);
@@ -230,6 +249,7 @@ public:
             return func(internalID_t());
         case PhysicalTypeID::STRING:
             return func(ku_string_t());
+        case PhysicalTypeID::ARRAY:
         case PhysicalTypeID::LIST:
             return func(list_entry_t());
         case PhysicalTypeID::STRUCT:
@@ -238,6 +258,10 @@ public:
         case PhysicalTypeID::ANY:
         case PhysicalTypeID::POINTER:
             // Unsupported type
+            KU_UNREACHABLE;
+            // Needed for return type deduction to work
+            return func(uint8_t());
+        default:
             KU_UNREACHABLE;
         }
     }

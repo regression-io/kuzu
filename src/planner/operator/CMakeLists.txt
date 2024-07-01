@@ -3,12 +3,13 @@ add_subdirectory(extend)
 add_subdirectory(factorization)
 add_subdirectory(persistent)
 add_subdirectory(scan)
+add_subdirectory(simple)
 
 add_library(kuzu_planner_operator
         OBJECT
         logical_accumulate.cpp
         logical_aggregate.cpp
-        logical_comment_on.cpp
+        logical_gds_call.cpp
         logical_create_macro.cpp
         logical_cross_product.cpp
         logical_distinct.cpp
@@ -17,7 +18,7 @@ add_library(kuzu_planner_operator
         logical_filter.cpp
         logical_flatten.cpp
         logical_hash_join.cpp
-        logical_in_query_call.cpp
+        logical_table_function_call.cpp
         logical_intersect.cpp
         logical_limit.cpp
         logical_mark_accumulate.cpp

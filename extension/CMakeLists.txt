@@ -2,19 +2,32 @@ if("httpfs" IN_LIST BUILD_EXTENSIONS)
     add_subdirectory(httpfs)
 endif()
 
-if ("duckdb_scanner" IN_LIST BUILD_EXTENSIONS)
+if ("duckdb" IN_LIST BUILD_EXTENSIONS)
     if(NOT __32BIT__)
         # DuckDB does not officially support 32-bit builds, so we disable the 
         # extension for 32-bit builds
-        add_subdirectory(duckdb_scanner)
+        add_subdirectory(duckdb)
     endif()
 endif()
 
-if ("postgres_scanner" IN_LIST BUILD_EXTENSIONS)
-    add_subdirectory(postgres_scanner)
+if ("postgres" IN_LIST BUILD_EXTENSIONS)
+    if(NOT __32BIT__)
+        # DuckDB does not officially support 32-bit builds, so we disable the
+        # extension for 32-bit builds
+        add_subdirectory(postgres)
+    endif()
+endif()
+
+if ("sqlite" IN_LIST BUILD_EXTENSIONS)
+    if(NOT __32BIT__)
+        # DuckDB does not officially support 32-bit builds, so we disable the
+        # extension for 32-bit builds
+        add_subdirectory(sqlite)
+    endif()
 endif()
 
 if (${BUILD_EXTENSION_TESTS})
+    include_directories(${CMAKE_SOURCE_DIR}/third_party/spdlog)
     add_definitions(-DTEST_FILES_DIR="extension")
     add_subdirectory(${CMAKE_SOURCE_DIR}/test/gtest ${CMAKE_CURRENT_BINARY_DIR}/test/gtest EXCLUDE_FROM_ALL)
     # Make gtest available to subdirectories.

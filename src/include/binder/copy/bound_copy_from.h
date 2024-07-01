@@ -1,6 +1,7 @@
 #pragma once
 
 #include "binder/bound_scan_source.h"
+#include "binder/expression/expression.h"
 #include "catalog/catalog_entry/table_catalog_entry.h"
 #include "index_look_up_info.h"
 
@@ -19,18 +20,23 @@ struct BoundCopyFromInfo {
     std::unique_ptr<BoundBaseScanSource> source;
     // Row offset of input data to generate internal ID.
     std::shared_ptr<Expression> offset;
+    expression_vector columnExprs;
+    std::vector<bool> defaultColumns;
     std::unique_ptr<ExtraBoundCopyFromInfo> extraInfo;
 
     BoundCopyFromInfo(catalog::TableCatalogEntry* tableEntry,
         std::unique_ptr<BoundBaseScanSource> source, std::shared_ptr<Expression> offset,
+        expression_vector columnExprs, std::vector<bool> defaultColumns,
         std::unique_ptr<ExtraBoundCopyFromInfo> extraInfo)
         : tableEntry{tableEntry}, source{std::move(source)}, offset{offset},
+          columnExprs{std::move(columnExprs)}, defaultColumns{std::move(defaultColumns)},
           extraInfo{std::move(extraInfo)} {}
     EXPLICIT_COPY_DEFAULT_MOVE(BoundCopyFromInfo);
 
 private:
     BoundCopyFromInfo(const BoundCopyFromInfo& other)
-        : tableEntry{other.tableEntry}, source{other.source->copy()}, offset{other.offset} {
+        : tableEntry{other.tableEntry}, source{other.source->copy()}, offset{other.offset},
+          columnExprs{other.columnExprs}, defaultColumns{other.defaultColumns} {
         if (other.extraInfo) {
             extraInfo = other.extraInfo->copy();
         }
@@ -39,14 +45,9 @@ private:
 
 struct ExtraBoundCopyRelInfo final : public ExtraBoundCopyFromInfo {
     std::vector<IndexLookupInfo> infos;
-    std::shared_ptr<Expression> fromOffset;
-    std::shared_ptr<Expression> toOffset;
-    expression_vector propertyColumns;
 
     ExtraBoundCopyRelInfo() = default;
-    ExtraBoundCopyRelInfo(const ExtraBoundCopyRelInfo& other)
-        : infos{copyVector(other.infos)}, fromOffset{other.fromOffset}, toOffset{other.toOffset},
-          propertyColumns{other.propertyColumns} {}
+    ExtraBoundCopyRelInfo(const ExtraBoundCopyRelInfo& other) : infos{copyVector(other.infos)} {}
 
     inline std::unique_ptr<ExtraBoundCopyFromInfo> copy() const override {
         return std::make_unique<ExtraBoundCopyRelInfo>(*this);

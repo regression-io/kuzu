@@ -10,12 +10,11 @@ namespace kuzu {
 namespace processor {
 
 struct ProbeState {
-    explicit ProbeState() : nextMatchedTupleIdx{0} {
+    explicit ProbeState()
+        : matchedSelVector{common::DEFAULT_VECTOR_CAPACITY}, nextMatchedTupleIdx{0} {
         matchedTuples = std::make_unique<uint8_t*[]>(common::DEFAULT_VECTOR_CAPACITY);
         probedTuples = std::make_unique<uint8_t*[]>(common::DEFAULT_VECTOR_CAPACITY);
-        matchedSelVector =
-            std::make_unique<common::SelectionVector>(common::DEFAULT_VECTOR_CAPACITY);
-        matchedSelVector->setToFiltered();
+        matchedSelVector.setToFiltered();
     }
 
     // Each key corresponds to a pointer with the same hash value from the ht directory.
@@ -23,7 +22,7 @@ struct ProbeState {
     // Pointers to tuples in ht that actually matched.
     std::unique_ptr<uint8_t*[]> matchedTuples;
     // Selective index mapping each probed tuple to its probe side key vector.
-    std::unique_ptr<common::SelectionVector> matchedSelVector;
+    common::SelectionVector matchedSelVector;
     common::sel_t nextMatchedTupleIdx;
 };
 
@@ -48,22 +47,24 @@ public:
 
 // Probe side on left, i.e. children[0] and build side on right, i.e. children[1]
 class HashJoinProbe : public PhysicalOperator, public SelVectorOverWriter {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::HASH_JOIN_PROBE;
+
 public:
     HashJoinProbe(std::shared_ptr<HashJoinSharedState> sharedState, common::JoinType joinType,
         bool flatProbe, const ProbeDataInfo& probeDataInfo,
         std::unique_ptr<PhysicalOperator> probeChild, std::unique_ptr<PhysicalOperator> buildChild,
-        uint32_t id, const std::string& paramsString)
-        : PhysicalOperator{PhysicalOperatorType::HASH_JOIN_PROBE, std::move(probeChild),
-              std::move(buildChild), id, paramsString},
+        uint32_t id, std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{type_, std::move(probeChild), std::move(buildChild), id,
+              std::move(printInfo)},
           sharedState{std::move(sharedState)}, joinType{joinType}, flatProbe{flatProbe},
           probeDataInfo{probeDataInfo} {}
 
     // This constructor is used for cloning only.
     HashJoinProbe(std::shared_ptr<HashJoinSharedState> sharedState, common::JoinType joinType,
         bool flatProbe, const ProbeDataInfo& probeDataInfo,
-        std::unique_ptr<PhysicalOperator> probeChild, uint32_t id, const std::string& paramsString)
-        : PhysicalOperator{PhysicalOperatorType::HASH_JOIN_PROBE, std::move(probeChild), id,
-              paramsString},
+        std::unique_ptr<PhysicalOperator> probeChild, uint32_t id,
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{type_, std::move(probeChild), id, std::move(printInfo)},
           sharedState{std::move(sharedState)}, joinType{joinType}, flatProbe{flatProbe},
           probeDataInfo{probeDataInfo} {}
 
@@ -73,7 +74,7 @@ public:
 
     inline std::unique_ptr<PhysicalOperator> clone() override {
         return make_unique<HashJoinProbe>(sharedState, joinType, flatProbe, probeDataInfo,
-            children[0]->clone(), id, paramsString);
+            children[0]->clone(), id, printInfo->copy());
     }
 
 private:
@@ -104,11 +105,12 @@ private:
     std::vector<common::ValueVector*> vectorsToReadInto;
     std::vector<uint32_t> columnIdxsToReadFrom;
     std::vector<common::ValueVector*> keyVectors;
-    std::shared_ptr<common::ValueVector> markVector;
+    common::ValueVector* markVector;
     std::unique_ptr<ProbeState> probeState;
 
     std::unique_ptr<common::ValueVector> hashVector;
     std::unique_ptr<common::ValueVector> tmpHashVector;
+    common::SelectionVector hashSelVec;
 };
 
 } // namespace processor

@@ -8,7 +8,7 @@ using namespace kuzu::common;
 using namespace kuzu;
 
 NPArrayWrapper::NPArrayWrapper(const LogicalType& type, uint64_t numFlatTuple)
-    : type{type}, numElements{0} {
+    : type{type.copy()}, numElements{0} {
     data = py::array(convertToArrayType(type), numFlatTuple);
     dataBuffer = (uint8_t*)data.mutable_data();
     mask = py::array(py::dtype("bool"), numFlatTuple);
@@ -24,6 +24,7 @@ void NPArrayWrapper::appendElement(Value* value) {
         case LogicalTypeID::INT128: {
             Int128_t::tryCast(value->getValue<int128_t>(), ((double*)dataBuffer)[numElements]);
         } break;
+        case LogicalTypeID::SERIAL:
         case LogicalTypeID::INT64: {
             ((int64_t*)dataBuffer)[numElements] = value->getValue<int64_t>();
         } break;
@@ -85,6 +86,7 @@ void NPArrayWrapper::appendElement(Value* value) {
         case LogicalTypeID::BLOB: {
             ((py::bytes*)dataBuffer)[numElements] = PyQueryResult::convertValueToPyObject(*value);
         } break;
+        case LogicalTypeID::DECIMAL:
         case LogicalTypeID::UUID:
         case LogicalTypeID::UNION:
         case LogicalTypeID::MAP:
@@ -117,6 +119,7 @@ py::dtype NPArrayWrapper::convertToArrayType(const LogicalType& type) {
     case LogicalTypeID::INT128: {
         dtype = "float64";
     } break;
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64: {
         dtype = "int64";
     } break;
@@ -167,6 +170,7 @@ py::dtype NPArrayWrapper::convertToArrayType(const LogicalType& type) {
     case LogicalTypeID::INTERVAL: {
         dtype = "timedelta64[ns]";
     } break;
+    case LogicalTypeID::DECIMAL:
     case LogicalTypeID::UNION:
     case LogicalTypeID::BLOB:
     case LogicalTypeID::UUID:

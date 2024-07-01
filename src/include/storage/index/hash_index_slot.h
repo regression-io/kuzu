@@ -1,7 +1,11 @@
 #pragma once
 
+#include <array>
 #include <cstdint>
+#include <cstring>
+#include <type_traits>
 
+#include "common/assert.h"
 #include "common/constants.h"
 #include "common/types/internal_id_t.h"
 #include <bit>
@@ -15,17 +19,18 @@ using slot_id_t = uint64_t;
 class SlotHeader {
 public:
     static const entry_pos_t INVALID_ENTRY_POS = UINT8_MAX;
+    static const slot_id_t INVALID_OVERFLOW_SLOT_ID = UINT64_MAX;
     // For a header of 32 bytes.
     // This is smaller than the possible number of entries with an 1-byte key like uint8_t,
     // but the additional size would limit the number of entries for 8-byte keys, so we
     // instead restrict the capacity to 20
     static constexpr uint8_t FINGERPRINT_CAPACITY = 20;
 
-    SlotHeader() : validityMask{0}, nextOvfSlotId{0} {}
+    SlotHeader() : fingerprints{}, validityMask{0}, nextOvfSlotId{INVALID_OVERFLOW_SLOT_ID} {}
 
     void reset() {
         validityMask = 0;
-        nextOvfSlotId = 0;
+        nextOvfSlotId = INVALID_OVERFLOW_SLOT_ID;
     }
 
     inline bool isEntryValid(uint32_t entryPos) const {
@@ -42,22 +47,27 @@ public:
     inline entry_pos_t numEntries() const { return std::popcount(validityMask); }
 
 public:
-    uint8_t fingerprints[FINGERPRINT_CAPACITY];
+    std::array<uint8_t, FINGERPRINT_CAPACITY> fingerprints;
     uint32_t validityMask;
     slot_id_t nextOvfSlotId;
 };
+static_assert(std::has_unique_object_representations_v<SlotHeader>);
 
 template<typename T>
 struct SlotEntry {
+    SlotEntry(T _key, common::offset_t _value) : key{_key}, value{_value} {
+        // Zero padding, if any
+        if constexpr (sizeof(T) + sizeof(common::offset_t) < sizeof(SlotEntry<T>)) {
+            auto padding = sizeof(SlotEntry<T>) - sizeof(T) - sizeof(common::offset_t);
+            memset(reinterpret_cast<uint8_t*>(&key) + sizeof(T), 0, padding);
+            // Assumes that all the padding follows the key
+            KU_ASSERT((std::byte*)&key + sizeof(key) + padding == (std::byte*)&value);
+        }
+    }
+    SlotEntry() : SlotEntry(T{}, 0) {}
+
     T key;
     common::offset_t value;
-
-    inline uint8_t* data() const { return (uint8_t*)&key; }
-
-    // otherEntry must be a pointer to the beginning of another slot's key field
-    inline void copyFrom(const uint8_t* otherEntry) {
-        memcpy(data(), otherEntry, sizeof(SlotEntry<T>));
-    }
 };
 
 template<typename T>
@@ -69,8 +79,9 @@ static constexpr uint8_t getSlotCapacity() {
 
 template<typename T>
 struct Slot {
+    Slot() : header{}, entries{} {}
     SlotHeader header;
-    SlotEntry<T> entries[getSlotCapacity<T>()];
+    std::array<SlotEntry<T>, getSlotCapacity<T>()> entries;
 };
 
 } // namespace storage

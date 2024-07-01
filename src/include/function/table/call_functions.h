@@ -28,7 +28,7 @@ struct CallFuncSharedState : public TableFuncSharedState {
 
     explicit CallFuncSharedState(common::offset_t maxOffset) : maxOffset{maxOffset}, curOffset{0} {}
 
-    CallFuncMorsel getMorsel();
+    KUZU_API CallFuncMorsel getMorsel();
 };
 
 struct CallTableFuncBindData : public TableFuncBindData {
@@ -40,11 +40,12 @@ struct CallTableFuncBindData : public TableFuncBindData {
           maxOffset{maxOffset} {}
 
     inline std::unique_ptr<TableFuncBindData> copy() const override {
-        return std::make_unique<CallTableFuncBindData>(columnTypes, columnNames, maxOffset);
+        return std::make_unique<CallTableFuncBindData>(common::LogicalType::copy(columnTypes),
+            columnNames, maxOffset);
     }
 };
 
-struct CallFunction {
+struct KUZU_API CallFunction {
     static std::unique_ptr<TableFuncSharedState> initSharedState(TableFunctionInitInput& input);
     static std::unique_ptr<TableFuncLocalState> initEmptyLocalState(TableFunctionInitInput& input,
         TableFuncSharedState* state, storage::MemoryManager* mm);
@@ -74,6 +75,12 @@ struct TableInfoFunction : public CallFunction {
     static function_set getFunctionSet();
 };
 
+struct ShowSequencesFunction : public CallFunction {
+    static constexpr const char* name = "SHOW_SEQUENCES";
+
+    static function_set getFunctionSet();
+};
+
 struct ShowConnectionFunction final : public CallFunction {
     static constexpr const char* name = "SHOW_CONNECTION";
 
@@ -82,6 +89,18 @@ struct ShowConnectionFunction final : public CallFunction {
 
 struct StorageInfoFunction final : public CallFunction {
     static constexpr const char* name = "STORAGE_INFO";
+
+    static function_set getFunctionSet();
+};
+
+struct ShowAttachedDatabasesFunction final : public CallFunction {
+    static constexpr const char* name = "SHOW_ATTACHED_DATABASES";
+
+    static function_set getFunctionSet();
+};
+
+struct CheckpointFunction final : public CallFunction {
+    static constexpr const char* name = "CHECKPOINT";
 
     static function_set getFunctionSet();
 };

@@ -182,33 +182,34 @@ BoundProjectionBody Binder::bindProjectionBody(const parser::ProjectionBody& pro
 
 expression_vector Binder::bindProjectionExpressions(
     const parsed_expr_vector& projectionExpressions) {
-    expression_vector result;
-    for (auto& expression : projectionExpressions) {
-        if (expression->getExpressionType() == ExpressionType::STAR) {
+    expression_vector exprs;
+    // Rewrite star expressions, including RETURN * or RETURN a.*
+    for (auto& e : projectionExpressions) {
+        if (e->getExpressionType() == ExpressionType::STAR) {
             // Rewrite star expression as all expression in scope.
             if (scope.empty()) {
                 throw BinderException(
                     "RETURN or WITH * is not allowed when there are no variables in scope.");
             }
             for (auto& expr : scope.getExpressions()) {
-                result.push_back(expr);
+                exprs.push_back(expr);
             }
-        } else if (expression->getExpressionType() == ExpressionType::PROPERTY) {
-            auto propertyExpression = (ParsedPropertyExpression*)expression.get();
-            if (propertyExpression->isStar()) {
+        } else if (e->getExpressionType() == ExpressionType::PROPERTY) {
+            auto& propExpr = e->constCast<ParsedPropertyExpression>();
+            if (propExpr.isStar()) {
                 // Rewrite property star expression
-                for (auto& expr : expressionBinder.bindPropertyStarExpression(*expression)) {
-                    result.push_back(expr);
+                for (auto& expr : expressionBinder.bindPropertyStarExpression(*e)) {
+                    exprs.push_back(expr);
                 }
             } else {
-                result.push_back(expressionBinder.bindExpression(*expression));
+                exprs.push_back(expressionBinder.bindExpression(*e));
             }
         } else {
-            result.push_back(expressionBinder.bindExpression(*expression));
+            exprs.push_back(expressionBinder.bindExpression(*e));
         }
     }
-    validateProjectionColumnNamesAreUnique(result);
-    return result;
+    validateProjectionColumnNamesAreUnique(exprs);
+    return exprs;
 }
 
 expression_vector Binder::bindOrderByExpressions(
@@ -232,18 +233,19 @@ uint64_t Binder::bindSkipLimitExpression(const ParsedExpression& expression) {
     if (!ExpressionVisitor::isConstant(*boundExpression)) {
         throw BinderException(errorMsg);
     }
-    auto value = ((LiteralExpression&)(*boundExpression)).value.get();
+    auto& literalExpr = boundExpression->constCast<LiteralExpression>();
+    auto value = literalExpr.getValue();
     int64_t num = 0;
     // TODO: replace the following switch with value.cast()
-    switch (value->getDataType()->getLogicalTypeID()) {
+    switch (value.getDataType().getLogicalTypeID()) {
     case LogicalTypeID::INT64: {
-        num = value->getValue<int64_t>();
+        num = value.getValue<int64_t>();
     } break;
     case LogicalTypeID::INT32: {
-        num = value->getValue<int32_t>();
+        num = value.getValue<int32_t>();
     } break;
     case LogicalTypeID::INT16: {
-        num = value->getValue<int16_t>();
+        num = value.getValue<int16_t>();
     } break;
     default:
         throw BinderException(errorMsg);
@@ -258,7 +260,7 @@ void Binder::addExpressionsToScope(const expression_vector& projectionExpression
     for (auto& expression : projectionExpressions) {
         // In RETURN clause, if expression is not aliased, its input name will serve its alias.
         auto alias = expression->hasAlias() ? expression->getAlias() : expression->toString();
-        scope.addExpression(alias, expression);
+        addToScope(alias, expression);
     }
 }
 

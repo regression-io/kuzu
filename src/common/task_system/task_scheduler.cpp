@@ -5,18 +5,19 @@ using namespace kuzu::common;
 namespace kuzu {
 namespace common {
 
-TaskScheduler::TaskScheduler(uint64_t numThreads) : stopThreads{false}, nextScheduledTaskID{0} {
-    for (auto n = 0u; n < numThreads; ++n) {
-        threads.emplace_back([&] { runWorkerThread(); });
+TaskScheduler::TaskScheduler(uint64_t numWorkerThreads)
+    : stopWorkerThreads{false}, nextScheduledTaskID{0} {
+    for (auto n = 0u; n < numWorkerThreads; ++n) {
+        workerThreads.emplace_back([&] { runWorkerThread(); });
     }
 }
 
 TaskScheduler::~TaskScheduler() {
     lock_t lck{mtx};
-    stopThreads = true;
+    stopWorkerThreads = true;
     lck.unlock();
     cv.notify_all();
-    for (auto& thread : threads) {
+    for (auto& thread : workerThreads) {
         thread.join();
     }
 }
@@ -110,15 +111,15 @@ void TaskScheduler::removeErroringTask(uint64_t scheduledTaskID) {
 void TaskScheduler::runWorkerThread() {
     std::unique_lock<std::mutex> lck{mtx, std::defer_lock};
     while (true) {
+        std::shared_ptr<ScheduledTask> scheduledTask = nullptr;
         lck.lock();
-        cv.wait(lck, [&] { return !taskQueue.empty() || stopThreads; });
-        if (stopThreads) {
-            return;
-        }
-        auto scheduledTask = getTaskAndRegister();
+        cv.wait(lck, [&] {
+            scheduledTask = getTaskAndRegister();
+            return scheduledTask != nullptr || stopWorkerThreads;
+        });
         lck.unlock();
-        if (!scheduledTask) {
-            continue;
+        if (stopWorkerThreads) {
+            return;
         }
         try {
             scheduledTask->task->run();

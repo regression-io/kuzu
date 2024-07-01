@@ -1,9 +1,9 @@
 #pragma once
 
 #include "function/scalar_function.h"
-#include "function/table_functions.h"
 #include "function/table/bind_data.h"
 #include "function/table/scan_functions.h"
+#include "function/table_functions.h"
 #include "pandas_bind.h"
 #include "pybind_include.h"
 
@@ -16,9 +16,9 @@ struct PandasScanLocalState : public function::TableFuncLocalState {
     uint64_t end;
 };
 
-struct PandasScanSharedState : public function::BaseScanSharedState {
+struct PandasScanSharedState : public function::BaseFileScanSharedState {
     explicit PandasScanSharedState(uint64_t numRows)
-        : BaseScanSharedState{numRows}, position{0}, numReadRows{0} {}
+        : BaseFileScanSharedState{numRows}, position{0}, numReadRows{0} {}
 
     std::mutex lock;
     uint64_t position;
@@ -27,7 +27,7 @@ struct PandasScanSharedState : public function::BaseScanSharedState {
 
 struct PandasScanFunction {
     static constexpr const char* name = "READ_PANDAS";
-    
+
     static function::function_set getFunctionSet();
 };
 
@@ -50,11 +50,11 @@ struct PandasScanFunctionData : public function::TableFuncBindData {
     std::vector<std::unique_ptr<PandasColumnBindData>> copyColumnBindData() const;
 
     std::unique_ptr<function::TableFuncBindData> copy() const override {
-        return std::make_unique<PandasScanFunctionData>(
-            columnTypes, columnNames, df, numRows, copyColumnBindData());
+        return std::make_unique<PandasScanFunctionData>(common::LogicalType::copy(columnTypes),
+            columnNames, df, numRows, copyColumnBindData());
     }
 };
 
-std::unique_ptr<function::ScanReplacementData> replacePD(const std::string& objectName);
+std::unique_ptr<function::ScanReplacementData> tryReplacePD(py::dict& dict, py::str& objectName);
 
 } // namespace kuzu

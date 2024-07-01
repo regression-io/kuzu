@@ -1,4 +1,3 @@
--GROUP TinySnbCreateNodeTest
 -DATASET CSV tinysnb
 
 --
@@ -21,16 +20,19 @@
 32|1997-03-22|2 years
 9|1980-10-26|10 years 5 months 13:00:00.000024
 
--CASE InsertNodeWithStringTest
+-CASE InsertNodeWithStringAndNestedTest
 -STATEMENT CREATE (:person {ID:32, fName:'A'}), (:person {ID:33, fName:'BCD'}), (:person {ID:34, fName:'this is a long name'})
 ---- ok
--STATEMENT MATCH (a:person) WHERE a.ID > 8 RETURN a.ID, a.fName
----- 5
-10|Hubert Blaine Wolfeschlegelsteinhausenbergerdorff
-32|A
-33|BCD
-34|this is a long name
-9|Greg
+-STATEMENT CREATE (:person {ID: 99, workedHours: [1], courseScoresPerTerm: [[7,20],[],[]]});
+---- ok
+-STATEMENT MATCH (a:person) WHERE a.ID > 8 RETURN a.ID, a.fName, a.workedHours, a.courseScoresPerTerm
+---- 6
+10|Hubert Blaine Wolfeschlegelsteinhausenbergerdorff|[10,11,12,3,4,5,6,7]|[[7],[10],[6,7]]
+32|A||
+33|BCD||
+34|this is a long name||
+99||[1]|[[7,20],[],[]]
+9|Greg|[1]|[[10]]
 
 -CASE InsertNodeWithUUIDTest
 -STATEMENT CREATE (:person {ID:32, fName: 'Emma', age: 25, u: UUID('A0EEBC99-9C0B-4EF8-BB6D-6BB9BD380A20')});
@@ -86,7 +88,7 @@ a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a20
 ---- ok
 -STATEMENT MATCH (a:person)-[e:studyAt]->(b:organisation) WHERE a.ID > 5 RETURN a.ID, b.orgCode, e, ID(e)
 ---- 2
-8|325|(0:5)-{_LABEL: studyAt, _ID: 4:2, year: 2020, places: [awndsnjwejwen,isuhuwennjnuhuhuwewe], length: 22, level: 2, code: 23, temprature: 20, ulength: 180, ulevel: 12, hugedata: -15}->(1:0)|4:2
+8|325|(0:5)-{_LABEL: studyAt, _ID: 4:2, year: 2020, places: [awndsnjwejwen,isuhuwennjnuhuhuwewe], length: 22, level: 2, code: 23, temperature: 20, ulength: 180, ulevel: 12, hugedata: -15}->(1:0)|4:2
 9|934|(0:6)-{_LABEL: studyAt, _ID: 4:3, year: 2022}->(1:1)|4:3
 
 -CASE InsertRepeatedNToNRelTest
@@ -129,9 +131,7 @@ a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a20
 ---- 1
 100|50|4:3|5:3
 
-# TODO: Fix issue 2257 to enable this test
 -CASE InsertNodeWithListTest
--SKIP
 -STATEMENT BEGIN TRANSACTION
 ---- ok
 -STATEMENT CREATE (:person {ID:11, workedHours:[1,2,3], usedNames:['A', 'this is a long name']})
@@ -141,7 +141,8 @@ a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a20
 10|[10,11,12,3,4,5,6,7]|[Ad,De,Hi,Kye,Orlan]
 11|[1,2,3]|[A,this is a long name]
 9|[1]|[Grad]
-#-COMMIT
+-STATEMENT COMMIT
+---- ok
 -STATEMENT MATCH (a:person) WHERE a.ID > 8 RETURN a.ID, a.workedHours,a.usedNames
 ---- 3
 10|[10,11,12,3,4,5,6,7]|[Ad,De,Hi,Kye,Orlan]

@@ -23,33 +23,45 @@ using scalar_func_select_t = std::function<bool(
     const std::vector<std::shared_ptr<common::ValueVector>>&, common::SelectionVector&)>;
 
 struct ScalarFunction final : public BaseScalarFunction {
+    scalar_func_exec_t execFunc;
+    scalar_func_select_t selectFunc;
+    scalar_func_compile_exec_t compileFunc;
 
     ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
-        common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc, bool isVarLength = false)
+        common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc)
         : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
-              std::move(execFunc), nullptr, nullptr, nullptr, isVarLength} {}
-
-    ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
-        common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc,
-        scalar_func_select_t selectFunc, bool isVarLength = false)
-        : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
-              std::move(execFunc), std::move(selectFunc), nullptr, nullptr, isVarLength} {}
+              std::move(execFunc), nullptr, nullptr, nullptr} {}
 
     ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
         common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc,
-        scalar_func_select_t selectFunc, scalar_bind_func bindFunc, bool isVarLength = false)
+        scalar_func_select_t selectFunc)
         : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
-              std::move(execFunc), std::move(selectFunc), nullptr, std::move(bindFunc),
-              isVarLength} {}
+              std::move(execFunc), std::move(selectFunc), nullptr, nullptr} {}
+
+    ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
+        common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc,
+        scalar_func_select_t selectFunc, scalar_bind_func bindFunc)
+        : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
+              std::move(execFunc), std::move(selectFunc), nullptr, std::move(bindFunc)} {}
 
     ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
         common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc,
         scalar_func_select_t selectFunc, scalar_func_compile_exec_t compileFunc,
-        scalar_bind_func bindFunc, bool isVarLength = false)
-        : BaseScalarFunction{FunctionType::SCALAR, std::move(name), std::move(parameterTypeIDs),
-              returnTypeID, std::move(bindFunc)},
+        scalar_bind_func bindFunc)
+        : BaseScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
+              std::move(bindFunc)},
           execFunc{std::move(execFunc)}, selectFunc(std::move(selectFunc)),
-          compileFunc{std::move(compileFunc)}, isVarLength{isVarLength} {}
+          compileFunc{std::move(compileFunc)} {}
+
+    ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
+        common::LogicalTypeID returnTypeID, scalar_bind_func bindFunc)
+        : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID,
+              nullptr /* execFunc */, nullptr /* selectFunc */, bindFunc} {}
+
+    ScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypeIDs,
+        common::LogicalTypeID returnTypeID, scalar_func_exec_t execFunc, scalar_bind_func bindFunc)
+        : ScalarFunction{std::move(name), std::move(parameterTypeIDs), returnTypeID, execFunc,
+              nullptr /* selectFunc */, bindFunc} {}
 
     template<typename A_TYPE, typename B_TYPE, typename C_TYPE, typename RESULT_TYPE, typename FUNC>
     static void TernaryExecFunction(const std::vector<std::shared_ptr<common::ValueVector>>& params,
@@ -104,6 +116,15 @@ struct ScalarFunction final : public BaseScalarFunction {
     }
 
     template<typename OPERAND_TYPE, typename RESULT_TYPE, typename FUNC>
+    static void UnarySequenceExecFunction(
+        const std::vector<std::shared_ptr<common::ValueVector>>& params,
+        common::ValueVector& result, void* dataPtr) {
+        KU_ASSERT(params.size() == 1);
+        UnaryFunctionExecutor::executeSequence<OPERAND_TYPE, RESULT_TYPE, FUNC>(*params[0], result,
+            dataPtr);
+    }
+
+    template<typename OPERAND_TYPE, typename RESULT_TYPE, typename FUNC>
     static void UnaryStringExecFunction(
         const std::vector<std::shared_ptr<common::ValueVector>>& params,
         common::ValueVector& result, void* /*dataPtr*/ = nullptr) {
@@ -152,7 +173,7 @@ struct ScalarFunction final : public BaseScalarFunction {
     }
 
     template<typename RESULT_TYPE, typename FUNC>
-    static void ConstExecFunction(const std::vector<std::shared_ptr<common::ValueVector>>& params,
+    static void NullaryExecFunction(const std::vector<std::shared_ptr<common::ValueVector>>& params,
         common::ValueVector& result, void* /*dataPtr*/ = nullptr) {
         KU_ASSERT(params.empty());
         (void)params;
@@ -160,7 +181,8 @@ struct ScalarFunction final : public BaseScalarFunction {
     }
 
     template<typename RESULT_TYPE, typename FUNC>
-    static void PoniterExecFunction(const std::vector<std::shared_ptr<common::ValueVector>>& params,
+    static void NullaryAuxilaryExecFunction(
+        const std::vector<std::shared_ptr<common::ValueVector>>& params,
         common::ValueVector& result, void* dataPtr) {
         KU_ASSERT(params.empty());
         (void)params;
@@ -188,13 +210,6 @@ struct ScalarFunction final : public BaseScalarFunction {
     std::unique_ptr<Function> copy() const override {
         return std::make_unique<ScalarFunction>(*this);
     }
-
-    scalar_func_exec_t execFunc;
-    scalar_func_select_t selectFunc;
-    scalar_func_compile_exec_t compileFunc;
-    // Currently we only one variable-length function which is list creation. The expectation is
-    // that all parameters must have the same type as parameterTypes[0].
-    bool isVarLength;
 };
 
 } // namespace function

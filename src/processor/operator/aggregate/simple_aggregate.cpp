@@ -1,10 +1,19 @@
 #include "processor/operator/aggregate/simple_aggregate.h"
 
+#include "binder/expression/expression_util.h"
+
 using namespace kuzu::common;
 using namespace kuzu::function;
 
 namespace kuzu {
 namespace processor {
+
+std::string SimpleAggregatePrintInfo::toString() const {
+    std::string result = "";
+    result += "Aggregate: ";
+    result += binder::ExpressionUtil::toString(aggregates);
+    return result;
+}
 
 SimpleAggregateSharedState::SimpleAggregateSharedState(
     const std::vector<std::unique_ptr<AggregateFunction>>& aggregateFunctions)
@@ -44,12 +53,20 @@ std::pair<uint64_t, uint64_t> SimpleAggregateSharedState::getNextRangeToRead() {
 
 void SimpleAggregate::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) {
     BaseAggregate::initLocalStateInternal(resultSet, context);
-    for (auto& aggregateFunction : this->aggregateFunctions) {
-        localAggregateStates.push_back(aggregateFunction->createInitialNullAggregateState());
-    }
-    distinctHashTables = AggregateHashTableUtils::createDistinctHashTables(
-        *context->clientContext->getMemoryManager(), std::vector<LogicalType>{},
-        this->aggregateFunctions);
+    for (auto i = 0u; i < aggregateFunctions.size(); ++i) {
+        auto func = aggregateFunctions[i].get();
+        localAggregateStates.push_back(func->createInitialNullAggregateState());
+        std::unique_ptr<AggregateHashTable> distinctHT;
+        if (func->isDistinct) {
+            auto mm = context->clientContext->getMemoryManager();
+            distinctHT = AggregateHashTableUtils::createDistinctHashTable(*mm,
+                std::vector<LogicalType>{} /* empty group by keys */,
+                aggInfos[i].distinctAggKeyType);
+        } else {
+            distinctHT = nullptr;
+        }
+        distinctHashTables.push_back(std::move(distinctHT));
+    };
 }
 
 void SimpleAggregate::executeInternal(ExecutionContext* context) {
@@ -59,10 +76,10 @@ void SimpleAggregate::executeInternal(ExecutionContext* context) {
             auto aggregateFunction = aggregateFunctions[i].get();
             if (aggregateFunction->isFunctionDistinct()) {
                 computeDistinctAggregate(distinctHashTables[i].get(), aggregateFunction,
-                    aggregateInputs[i].get(), localAggregateStates[i].get(), memoryManager);
+                    &aggInputs[i], localAggregateStates[i].get(), memoryManager);
             } else {
-                computeAggregate(aggregateFunction, aggregateInputs[i].get(),
-                    localAggregateStates[i].get(), memoryManager);
+                computeAggregate(aggregateFunction, &aggInputs[i], localAggregateStates[i].get(),
+                    memoryManager);
             }
         }
     }
@@ -75,7 +92,7 @@ void SimpleAggregate::computeDistinctAggregate(AggregateHashTable* distinctHT,
     auto multiplicity = 1; // Distinct aggregate should ignore multiplicity.
     if (distinctHT->isAggregateValueDistinctForGroupByKeys(std::vector<ValueVector*>{},
             input->aggregateVector)) {
-        auto pos = input->aggregateVector->state->selVector->selectedPositions[0];
+        auto pos = input->aggregateVector->state->getSelVector()[0];
         if (!input->aggregateVector->isNull(pos)) {
             function->updatePosState((uint8_t*)state, input->aggregateVector, multiplicity, pos,
                 memoryManager);
@@ -87,10 +104,10 @@ void SimpleAggregate::computeAggregate(function::AggregateFunction* function, Ag
     function::AggregateState* state, storage::MemoryManager* memoryManager) {
     auto multiplicity = resultSet->multiplicity;
     for (auto dataChunk : input->multiplicityChunks) {
-        multiplicity *= dataChunk->state->selVector->selectedSize;
+        multiplicity *= dataChunk->state->getSelVector().getSelSize();
     }
     if (input->aggregateVector && input->aggregateVector->state->isFlat()) {
-        auto pos = input->aggregateVector->state->selVector->selectedPositions[0];
+        auto pos = input->aggregateVector->state->getSelVector()[0];
         if (!input->aggregateVector->isNull(pos)) {
             function->updatePosState((uint8_t*)state, input->aggregateVector, multiplicity, pos,
                 memoryManager);

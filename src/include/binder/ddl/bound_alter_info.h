@@ -2,12 +2,22 @@
 
 #include "binder/expression/expression.h"
 #include "common/enums/alter_type.h"
+#include "parser/expression/parsed_expression.h"
 
 namespace kuzu {
 namespace binder {
 
 struct BoundExtraAlterInfo {
     virtual ~BoundExtraAlterInfo() = default;
+
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const BoundExtraAlterInfo*, const TARGET*>(this);
+    }
+    template<class TARGET>
+    const TARGET& constCast() const {
+        return common::ku_dynamic_cast<const BoundExtraAlterInfo&, const TARGET&>(*this);
+    }
 
     virtual std::unique_ptr<BoundExtraAlterInfo> copy() const = 0;
 };
@@ -44,15 +54,17 @@ struct BoundExtraRenameTableInfo : public BoundExtraAlterInfo {
 struct BoundExtraAddPropertyInfo : public BoundExtraAlterInfo {
     std::string propertyName;
     common::LogicalType dataType;
-    std::shared_ptr<Expression> defaultValue;
+    std::unique_ptr<parser::ParsedExpression> defaultValue;
+    std::shared_ptr<Expression> boundDefault;
 
     BoundExtraAddPropertyInfo(std::string propertyName, common::LogicalType dataType,
-        std::shared_ptr<Expression> defaultValue)
+        std::unique_ptr<parser::ParsedExpression> defaultValue,
+        std::shared_ptr<Expression> boundDefault)
         : propertyName{std::move(propertyName)}, dataType{std::move(dataType)},
-          defaultValue{std::move(defaultValue)} {}
+          defaultValue{std::move(defaultValue)}, boundDefault{std::move(boundDefault)} {}
     BoundExtraAddPropertyInfo(const BoundExtraAddPropertyInfo& other)
-        : propertyName{other.propertyName}, dataType{other.dataType},
-          defaultValue{other.defaultValue} {}
+        : propertyName{other.propertyName}, dataType{other.dataType.copy()},
+          defaultValue{other.defaultValue->copy()}, boundDefault{other.boundDefault} {}
 
     inline std::unique_ptr<BoundExtraAlterInfo> copy() const final {
         return std::make_unique<BoundExtraAddPropertyInfo>(*this);
@@ -61,11 +73,12 @@ struct BoundExtraAddPropertyInfo : public BoundExtraAlterInfo {
 
 struct BoundExtraDropPropertyInfo : public BoundExtraAlterInfo {
     common::property_id_t propertyID;
+    std::string propertyName;
 
-    explicit BoundExtraDropPropertyInfo(common::property_id_t propertyID)
-        : propertyID{propertyID} {}
+    explicit BoundExtraDropPropertyInfo(common::property_id_t propertyID, std::string propertyName)
+        : propertyID{propertyID}, propertyName{propertyName} {}
     BoundExtraDropPropertyInfo(const BoundExtraDropPropertyInfo& other)
-        : propertyID{other.propertyID} {}
+        : propertyID{other.propertyID}, propertyName{other.propertyName} {}
 
     inline std::unique_ptr<BoundExtraAlterInfo> copy() const final {
         return std::make_unique<BoundExtraDropPropertyInfo>(*this);
@@ -75,13 +88,25 @@ struct BoundExtraDropPropertyInfo : public BoundExtraAlterInfo {
 struct BoundExtraRenamePropertyInfo : public BoundExtraAlterInfo {
     common::property_id_t propertyID;
     std::string newName;
+    std::string oldName;
 
-    BoundExtraRenamePropertyInfo(common::property_id_t propertyID, std::string newName)
-        : propertyID{propertyID}, newName{std::move(newName)} {}
+    BoundExtraRenamePropertyInfo(common::property_id_t propertyID, std::string newName,
+        std::string oldName)
+        : propertyID{propertyID}, newName{std::move(newName)}, oldName{std::move(oldName)} {}
     BoundExtraRenamePropertyInfo(const BoundExtraRenamePropertyInfo& other)
-        : propertyID{other.propertyID}, newName{other.newName} {}
+        : propertyID{other.propertyID}, newName{other.newName}, oldName{other.oldName} {}
     inline std::unique_ptr<BoundExtraAlterInfo> copy() const final {
         return std::make_unique<BoundExtraRenamePropertyInfo>(*this);
+    }
+};
+
+struct BoundExtraCommentInfo : public BoundExtraAlterInfo {
+    std::string comment;
+
+    explicit BoundExtraCommentInfo(std::string comment) : comment{std::move(comment)} {}
+    BoundExtraCommentInfo(const BoundExtraCommentInfo& other) : comment{other.comment} {}
+    inline std::unique_ptr<BoundExtraAlterInfo> copy() const final {
+        return std::make_unique<BoundExtraCommentInfo>(*this);
     }
 };
 

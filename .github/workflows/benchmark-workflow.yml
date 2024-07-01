@@ -2,19 +2,25 @@ name: Benchmark
 on:
   workflow_dispatch:
   workflow_call:
-    
+
 jobs:
   benchmark:
     name: benchmark
     env:
       NUM_THREADS: 30
-      GEN: ninja
+      GEN: Ninja
     runs-on: kuzu-self-hosted-benchmarking
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Build
-        run: make benchmark LTO=1
+        run: make benchmark
 
       - name: Benchmark
         run: python3 benchmark/benchmark_runner.py --dataset ldbc-sf100 --thread 10
+
+      - name: Upload comparison results
+        uses: actions/upload-artifact@v4
+        with:
+          name: comparison-results
+          path: benchmark/compare_result.md

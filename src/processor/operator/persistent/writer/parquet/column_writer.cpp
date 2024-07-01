@@ -1,5 +1,6 @@
 #include "processor/operator/persistent/writer/parquet/column_writer.h"
 
+#include "common/exception/runtime.h"
 #include "common/string_format.h"
 #include "function/cast/functions/numeric_limits.h"
 #include "processor/operator/persistent/writer/parquet/boolean_column_writer.h"
@@ -53,7 +54,7 @@ ColumnWriter::ColumnWriter(ParquetWriter& writer, uint64_t schemaIdx,
 
 std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
     std::vector<kuzu_parquet::format::SchemaElement>& schemas, ParquetWriter& writer,
-    LogicalType* type, const std::string& name, std::vector<std::string> schemaPathToCreate,
+    const LogicalType& type, const std::string& name, std::vector<std::string> schemaPathToCreate,
     storage::MemoryManager* mm, uint64_t maxRepeatToCreate, uint64_t maxDefineToCreate,
     bool canHaveNullsToCreate) {
     auto nullType =
@@ -62,10 +63,10 @@ std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
         maxDefineToCreate--;
     }
     auto schemaIdx = schemas.size();
-    switch (type->getLogicalTypeID()) {
+    switch (type.getLogicalTypeID()) {
     case LogicalTypeID::UNION:
     case LogicalTypeID::STRUCT: {
-        auto fields = StructType::getFields(type);
+        const auto& fields = StructType::getFields(type);
         // set up the schema element for this struct
         kuzu_parquet::format::SchemaElement schema_element;
         schema_element.repetition_type = nullType;
@@ -81,16 +82,15 @@ std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
         std::vector<std::unique_ptr<ColumnWriter>> childWriters;
         childWriters.reserve(fields.size());
         for (auto& field : fields) {
-            childWriters.push_back(
-                createWriterRecursive(schemas, writer, field->getType(), field->getName(),
-                    schemaPathToCreate, mm, maxRepeatToCreate, maxDefineToCreate + 1));
+            childWriters.push_back(createWriterRecursive(schemas, writer, field.getType(),
+                field.getName(), schemaPathToCreate, mm, maxRepeatToCreate, maxDefineToCreate + 1));
         }
         return std::make_unique<StructColumnWriter>(writer, schemaIdx,
             std::move(schemaPathToCreate), maxRepeatToCreate, maxDefineToCreate,
             std::move(childWriters), canHaveNullsToCreate);
     }
     case LogicalTypeID::LIST: {
-        auto childType = ListType::getChildType(type);
+        const auto& childType = ListType::getChildType(type);
         // Set up the two schema elements for the list
         // for some reason we only set the converted type in the OPTIONAL element
         // first an OPTIONAL element.
@@ -154,8 +154,9 @@ std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
         schemaPathToCreate.emplace_back("key_value");
 
         // Construct the child types recursively.
-        std::vector<common::LogicalType*> kvTypes{MapType::getKeyType(type),
-            MapType::getValueType(type)};
+        std::vector<common::LogicalType> kvTypes;
+        kvTypes.push_back(MapType::getKeyType(type).copy());
+        kvTypes.push_back(MapType::getValueType(type).copy());
         std::vector<std::string> kvNames{"key", "value"};
         std::vector<std::unique_ptr<ColumnWriter>> childrenWriters;
         childrenWriters.reserve(2);
@@ -182,7 +183,7 @@ std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
         schemas.push_back(std::move(schemaElement));
         schemaPathToCreate.push_back(name);
 
-        switch (type->getLogicalTypeID()) {
+        switch (type.getLogicalTypeID()) {
         case LogicalTypeID::BOOL:
             return std::make_unique<BooleanColumnWriter>(writer, schemaIdx,
                 std::move(schemaPathToCreate), maxRepeatToCreate, maxDefineToCreate,
@@ -203,6 +204,7 @@ std::unique_ptr<ColumnWriter> ColumnWriter::createWriterRecursive(
         case LogicalTypeID::TIMESTAMP_TZ:
         case LogicalTypeID::TIMESTAMP_MS:
         case LogicalTypeID::TIMESTAMP:
+        case LogicalTypeID::SERIAL:
         case LogicalTypeID::INT64:
             return std::make_unique<StandardColumnWriter<int64_t, int64_t>>(writer, schemaIdx,
                 std::move(schemaPathToCreate), maxRepeatToCreate, maxDefineToCreate,

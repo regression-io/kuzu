@@ -32,8 +32,11 @@ struct PageCursor {
     }
 
     common::page_idx_t pageIdx;
-    uint16_t elemPosInPage;
+    // Larger than necessary, but PageCursor is directly written to disk
+    // and adding an explicit padding field messes with structured bindings
+    uint32_t elemPosInPage;
 };
+static_assert(std::has_unique_object_representations_v<PageCursor>);
 
 struct PageUtils {
     static constexpr uint32_t getNumElementsInAPage(uint32_t elementSize, bool hasNull) {
@@ -156,12 +159,14 @@ public:
         return std::make_pair(i / divisor, i % divisor);
     }
 
-    static inline void removeAllWALFiles(const std::string& directory) {
-        for (auto& folderIter : std::filesystem::directory_iterator(directory)) {
-            if (folderIter.path().extension() == common::StorageConstants::WAL_FILE_SUFFIX) {
-                std::filesystem::remove(folderIter.path());
-            }
-        }
+    static inline void removeCatalogAndStatsWALFiles(const std::string& directory,
+        common::VirtualFileSystem* vfs) {
+        vfs->removeFileIfExists(
+            StorageUtils::getCatalogFilePath(vfs, directory, common::FileVersionType::WAL_VERSION));
+        vfs->removeFileIfExists(StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(vfs,
+            directory, common::FileVersionType::WAL_VERSION));
+        vfs->removeFileIfExists(StorageUtils::getRelsStatisticsFilePath(vfs, directory,
+            common::FileVersionType::WAL_VERSION));
     }
 
     static inline std::string appendWALFileSuffixIfNecessary(const std::string& fileName,

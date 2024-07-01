@@ -38,7 +38,7 @@ public:
         std::vector<bool>& hasChangesPerSegment);
 
 private:
-    static common::vector_idx_t getSegmentIdx(common::offset_t offset) {
+    static common::idx_t getSegmentIdx(common::offset_t offset) {
         return offset >> common::StorageConstants::CSR_SEGMENT_SIZE_LOG2;
     }
 
@@ -51,8 +51,9 @@ class LocalRelTableData final : public LocalTableData {
     friend class RelTableData;
 
 public:
-    explicit LocalRelTableData(std::vector<common::LogicalType> dataTypes)
-        : LocalTableData{std::move(dataTypes)} {}
+    explicit LocalRelTableData(common::table_id_t tableID,
+        std::vector<common::LogicalType> dataTypes)
+        : LocalTableData{tableID, std::move(dataTypes)} {}
 
 private:
     LocalNodeGroup* getOrCreateLocalNodeGroup(common::ValueVector* nodeIDVector) override;
@@ -65,9 +66,6 @@ public:
     bool insert(TableInsertState& insertState) override;
     bool update(TableUpdateState& updateState) override;
     bool delete_(TableDeleteState& deleteState) override;
-
-    void scan(TableReadState& state) override;
-    void lookup(TableReadState& state) override;
 
     LocalRelTableData* getTableData(common::RelDataDirection direction) {
         KU_ASSERT(localTableDataCollection.size() == 2);

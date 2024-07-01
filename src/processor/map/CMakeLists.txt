@@ -6,12 +6,9 @@ add_library(kuzu_processor_mapper
         map_acc_hash_join.cpp
         map_accumulate.cpp
         map_aggregate.cpp
-        map_acc_hash_join.cpp
-        map_attach_database.cpp
-        map_detach_database.cpp
+        map_gds.cpp
         map_standalone_call.cpp
-        map_in_query_call.cpp
-        map_comment_on.cpp
+        map_table_function_call.cpp
         map_copy_to.cpp
         map_copy_from.cpp
         map_insert.cpp
@@ -22,7 +19,6 @@ add_library(kuzu_processor_mapper
         map_distinct.cpp
         map_explain.cpp
         map_expressions_scan.cpp
-        map_extension.cpp
         map_dummy_scan.cpp
         map_empty_result.cpp
         map_extend.cpp
@@ -41,15 +37,13 @@ add_library(kuzu_processor_mapper
         map_projection.cpp
         map_recursive_extend.cpp
         map_scan_file.cpp
-        map_scan_frontier.cpp
-        map_scan_node.cpp
-        map_scan_node_property.cpp
+        map_scan_node_table.cpp
         map_semi_masker.cpp
         map_set.cpp
+        map_simple.cpp
         map_transaction.cpp
         map_union.cpp
         map_unwind.cpp
-        map_port_db.cpp
         plan_mapper.cpp)
 
 set(ALL_OBJECT_FILES

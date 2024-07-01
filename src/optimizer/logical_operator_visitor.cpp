@@ -5,7 +5,7 @@ using namespace kuzu::planner;
 namespace kuzu {
 namespace optimizer {
 
-void LogicalOperatorVisitor::visitOperatorSwitch(planner::LogicalOperator* op) {
+void LogicalOperatorVisitor::visitOperatorSwitch(LogicalOperator* op) {
     switch (op->getOperatorType()) {
     case LogicalOperatorType::FLATTEN: {
         visitFlatten(op);
@@ -16,11 +16,8 @@ void LogicalOperatorVisitor::visitOperatorSwitch(planner::LogicalOperator* op) {
     case LogicalOperatorType::EXPRESSIONS_SCAN: {
         visitExpressionsScan(op);
     } break;
-    case LogicalOperatorType::SCAN_INTERNAL_ID: {
-        visitScanInternalID(op);
-    } break;
-    case LogicalOperatorType::INDEX_SCAN_NODE: {
-        visitIndexScanNode(op);
+    case LogicalOperatorType::SCAN_NODE_TABLE: {
+        visitScanNodeTable(op);
     } break;
     case LogicalOperatorType::EXTEND: {
         visitExtend(op);
@@ -67,17 +64,11 @@ void LogicalOperatorVisitor::visitOperatorSwitch(planner::LogicalOperator* op) {
     case LogicalOperatorType::FILTER: {
         visitFilter(op);
     } break;
-    case LogicalOperatorType::SET_NODE_PROPERTY: {
-        visitSetNodeProperty(op);
+    case LogicalOperatorType::SET_PROPERTY: {
+        visitSetProperty(op);
     } break;
-    case LogicalOperatorType::SET_REL_PROPERTY: {
-        visitSetRelProperty(op);
-    } break;
-    case LogicalOperatorType::DELETE_NODE: {
-        visitDeleteNode(op);
-    } break;
-    case LogicalOperatorType::DELETE_REL: {
-        visitDeleteRel(op);
+    case LogicalOperatorType::DELETE: {
+        visitDelete(op);
     } break;
     case LogicalOperatorType::INSERT: {
         visitInsert(op);
@@ -91,13 +82,16 @@ void LogicalOperatorVisitor::visitOperatorSwitch(planner::LogicalOperator* op) {
     case LogicalOperatorType::COPY_FROM: {
         visitCopyFrom(op);
     } break;
+    case LogicalOperatorType::GDS_CALL: {
+        visitGDSCall(op);
+    } break;
     default:
         return;
     }
 }
 
-std::shared_ptr<planner::LogicalOperator> LogicalOperatorVisitor::visitOperatorReplaceSwitch(
-    std::shared_ptr<planner::LogicalOperator> op) {
+std::shared_ptr<LogicalOperator> LogicalOperatorVisitor::visitOperatorReplaceSwitch(
+    std::shared_ptr<LogicalOperator> op) {
     switch (op->getOperatorType()) {
     case LogicalOperatorType::FLATTEN: {
         return visitFlattenReplace(op);
@@ -108,11 +102,8 @@ std::shared_ptr<planner::LogicalOperator> LogicalOperatorVisitor::visitOperatorR
     case LogicalOperatorType::EXPRESSIONS_SCAN: {
         return visitExpressionsScanReplace(op);
     }
-    case LogicalOperatorType::SCAN_INTERNAL_ID: {
-        return visitScanInternalIDReplace(op);
-    }
-    case LogicalOperatorType::INDEX_SCAN_NODE: {
-        return visitIndexScanNodeReplace(op);
+    case LogicalOperatorType::SCAN_NODE_TABLE: {
+        return visitScanNodeTableReplace(op);
     }
     case LogicalOperatorType::EXTEND: {
         return visitExtendReplace(op);
@@ -159,17 +150,11 @@ std::shared_ptr<planner::LogicalOperator> LogicalOperatorVisitor::visitOperatorR
     case LogicalOperatorType::FILTER: {
         return visitFilterReplace(op);
     }
-    case LogicalOperatorType::SET_NODE_PROPERTY: {
-        return visitSetNodePropertyReplace(op);
+    case LogicalOperatorType::SET_PROPERTY: {
+        return visitSetPropertyReplace(op);
     }
-    case LogicalOperatorType::SET_REL_PROPERTY: {
-        return visitSetRelPropertyReplace(op);
-    }
-    case LogicalOperatorType::DELETE_NODE: {
-        return visitDeleteNodeReplace(op);
-    }
-    case LogicalOperatorType::DELETE_REL: {
-        return visitDeleteRelReplace(op);
+    case LogicalOperatorType::DELETE: {
+        return visitDeleteReplace(op);
     }
     case LogicalOperatorType::INSERT: {
         return visitInsertReplace(op);
@@ -182,6 +167,9 @@ std::shared_ptr<planner::LogicalOperator> LogicalOperatorVisitor::visitOperatorR
     }
     case LogicalOperatorType::COPY_FROM: {
         return visitCopyFromReplace(op);
+    }
+    case LogicalOperatorType::GDS_CALL: {
+        return visitGDSCallReplace(op);
     }
     default:
         return op;

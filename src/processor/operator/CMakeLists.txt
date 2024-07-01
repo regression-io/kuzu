@@ -5,35 +5,31 @@ add_subdirectory(intersect)
 add_subdirectory(order_by)
 add_subdirectory(persistent)
 add_subdirectory(scan)
+add_subdirectory(simple)
 add_subdirectory(table_scan)
 add_subdirectory(recursive_extend)
-add_subdirectory(call)
 add_subdirectory(macro)
 
 add_library(kuzu_processor_operator
         OBJECT
-        attach_database.cpp
-        detach_database.cpp
-        comment_on.cpp
         cross_product.cpp
         empty_result.cpp
         filter.cpp
         filtering_operator.cpp
         flatten.cpp
+        gds_call.cpp
         index_lookup.cpp
-        index_scan.cpp
-        install_extension.cpp
         limit.cpp
-        load_extension.cpp
         multiplicity_reducer.cpp
         partitioner.cpp
         physical_operator.cpp
         projection.cpp
         profile.cpp
         result_collector.cpp
-        scan_node_id.cpp
         semi_masker.cpp
         skip.cpp
+        standalone_call.cpp
+        table_function_call.cpp
         transaction.cpp
         unwind.cpp)
 

@@ -350,7 +350,6 @@ std::unique_ptr<ParsedExpression> Transformer::transformNullOperatorExpression(
 std::unique_ptr<ParsedExpression> Transformer::transformPropertyOrLabelsExpression(
     CypherParser::OC_PropertyOrLabelsExpressionContext& ctx) {
     auto atom = transformAtom(*ctx.oC_Atom());
-    auto raw = ctx.oC_Atom()->getText();
     if (!ctx.oC_PropertyLookup().empty()) {
         auto lookUpCtx = ctx.oC_PropertyLookup(0);
         auto result = createPropertyExpression(*lookUpCtx, std::move(atom));
@@ -398,8 +397,7 @@ std::unique_ptr<ParsedExpression> Transformer::transformLiteral(
             Value(LogicalType::STRING(), transformStringLiteral(*ctx.StringLiteral())),
             ctx.getText());
     } else if (ctx.NULL_()) {
-        return std::make_unique<ParsedLiteralExpression>(Value(Value::createNullValue()),
-            ctx.getText());
+        return std::make_unique<ParsedLiteralExpression>(Value::createNullValue(), ctx.getText());
     } else if (ctx.kU_StructLiteral()) {
         return transformStructLiteral(*ctx.kU_StructLiteral());
     } else {
@@ -476,13 +474,25 @@ std::unique_ptr<ParsedExpression> Transformer::transformFunctionInvocation(
     std::string functionName;
     if (ctx.COUNT()) {
         functionName = "COUNT";
+    } else if (ctx.CAST()) {
+        functionName = "CAST";
     } else {
         functionName = transformFunctionName(*ctx.oC_FunctionName());
     }
     auto expression = std::make_unique<ParsedFunctionExpression>(functionName, ctx.getText(),
         ctx.DISTINCT() != nullptr);
-    for (auto& functionParameter : ctx.kU_FunctionParameter()) {
-        expression->addChild(transformFunctionParameterExpression(*functionParameter));
+    if (ctx.CAST()) {
+        for (auto& functionParameter : ctx.kU_FunctionParameter()) {
+            expression->addChild(transformFunctionParameterExpression(*functionParameter));
+        }
+        if (ctx.kU_DataType()) {
+            expression->addChild(std::make_unique<ParsedLiteralExpression>(
+                common::Value(transformDataType(*ctx.kU_DataType()))));
+        }
+    } else {
+        for (auto& functionParameter : ctx.kU_FunctionParameter()) {
+            expression->addChild(transformFunctionParameterExpression(*functionParameter));
+        }
     }
     return expression;
 }

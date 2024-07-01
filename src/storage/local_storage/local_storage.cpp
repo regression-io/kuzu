@@ -1,5 +1,6 @@
 #include "storage/local_storage/local_storage.h"
 
+#include "main/client_context.h"
 #include "storage/local_storage/local_node_table.h"
 #include "storage/local_storage/local_rel_table.h"
 #include "storage/local_storage/local_table.h"
@@ -16,7 +17,7 @@ LocalTable* LocalStorage::getLocalTable(table_id_t tableID, NotExistAction actio
     if (!tables.contains(tableID)) {
         switch (action) {
         case NotExistAction::CREATE: {
-            auto table = clientContext.getStorageManager()->getTable(tableID);
+            const auto table = clientContext.getStorageManager()->getTable(tableID);
             switch (table->getTableType()) {
             case TableType::NODE: {
                 tables[tableID] = std::make_unique<LocalNodeTable>(*table);

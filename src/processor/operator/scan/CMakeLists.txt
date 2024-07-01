@@ -1,6 +1,7 @@
 add_library(kuzu_processor_operator_scan
         OBJECT
-        scan_multi_node_tables.cpp
+        offset_scan_node_table.cpp
+        primary_key_scan_node_table.cpp
         scan_multi_rel_tables.cpp
         scan_node_table.cpp
         scan_rel_table.cpp

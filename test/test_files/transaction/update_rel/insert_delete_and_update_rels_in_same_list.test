@@ -1,4 +1,3 @@
--GROUP UpdateRelTest
 -DATASET CSV rel-update-tests
 --
 
@@ -28,6 +27,9 @@
 -STATEMENT MATCH (p0:person)-[e:knows]->(p1:person) WHERE p0.ID = 0 return e.length
 ---- 2298
 <FILE>:insert_delete_and_update_rels_in_same_list_commit.txt
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE insertDeleteAndUpdateRelsInSameListCommitRecovery
 -LOG insertDeleteAndUpdateRelsInSameListCommitRecovery
@@ -42,6 +44,9 @@
 -STATEMENT MATCH (p0:person)-[e:knows]->(p1:person) WHERE p0.ID = 0 return e.length
 ---- 2298
 <FILE>:insert_delete_and_update_rels_in_same_list_commit.txt
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE insertDeleteAndUpdateRelsInSameListRollbackNormalExecution
 -STATEMENT BEGIN TRANSACTION
@@ -54,6 +59,8 @@
 -STATEMENT MATCH (p0:person)-[e:knows]->(p1:person) WHERE p0.ID = 0 return e.length
 ---- 2300
 <FILE>:delete_rels.txt
+-STATEMENT COMMIT;
+---- ok
 
 
 -CASE insertDeleteAndUpdateRelsInSameListRollbackRecovery
@@ -68,3 +75,5 @@
 -STATEMENT MATCH (p0:person)-[e:knows]->(p1:person) WHERE p0.ID = 0 return e.length
 ---- 2300
 <FILE>:delete_rels.txt
+-STATEMENT COMMIT;
+---- ok

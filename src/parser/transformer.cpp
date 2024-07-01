@@ -30,8 +30,22 @@ std::vector<std::shared_ptr<Statement>> Transformer::transform() {
 std::unique_ptr<Statement> Transformer::transformStatement(CypherParser::OC_StatementContext& ctx) {
     if (ctx.oC_Query()) {
         return transformQuery(*ctx.oC_Query());
-    } else if (ctx.kU_DDL()) {
-        return transformDDL(*ctx.kU_DDL());
+    } else if (ctx.kU_CreateNodeTable()) {
+        return transformCreateNodeTable(*ctx.kU_CreateNodeTable());
+    } else if (ctx.kU_CreateRelTable()) {
+        return transformCreateRelTable(*ctx.kU_CreateRelTable());
+    } else if (ctx.kU_CreateRelTableGroup()) {
+        return transformCreateRelTableGroup(*ctx.kU_CreateRelTableGroup());
+    } else if (ctx.kU_CreateRdfGraph()) {
+        return transformCreateRdfGraphClause(*ctx.kU_CreateRdfGraph());
+    } else if (ctx.kU_CreateSequence()) {
+        return transformCreateSequence(*ctx.kU_CreateSequence());
+    } else if (ctx.kU_CreateType()) {
+        return transformCreateType(*ctx.kU_CreateType());
+    } else if (ctx.kU_Drop()) {
+        return transformDrop(*ctx.kU_Drop());
+    } else if (ctx.kU_AlterTable()) {
+        return transformAlterTable(*ctx.kU_AlterTable());
     } else if (ctx.kU_CopyFromByColumn()) {
         return transformCopyFromByColumn(*ctx.kU_CopyFromByColumn());
     } else if (ctx.kU_CopyFrom()) {
@@ -56,6 +70,8 @@ std::unique_ptr<Statement> Transformer::transformStatement(CypherParser::OC_Stat
         return transformAttachDatabase(*ctx.kU_AttachDatabase());
     } else if (ctx.kU_DetachDatabase()) {
         return transformDetachDatabase(*ctx.kU_DetachDatabase());
+    } else if (ctx.kU_UseDatabase()) {
+        return transformUseDatabase(*ctx.kU_UseDatabase());
     } else {
         KU_UNREACHABLE;
     }

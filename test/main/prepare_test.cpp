@@ -151,7 +151,8 @@ TEST_F(ApiTest, PrepareDefaultListParam) {
     result = conn->execute(preparedStatement.get(), std::make_pair(std::string("1"), "as"));
     ASSERT_FALSE(result->isSuccess());
     ASSERT_STREQ(result->getErrorMessage().c_str(),
-        "Binder exception: Cannot bind LIST_CREATION with parameter type INT64 and STRING.");
+        "Binder exception: Expression $1 has data type STRING but expected INT64. Implicit cast is "
+        "not supported.");
     preparedStatement = conn->prepare("RETURN [$1]");
     result = conn->execute(preparedStatement.get(), std::make_pair(std::string("1"), "as"));
     ASSERT_TRUE(result->hasNext());
@@ -229,7 +230,7 @@ TEST_F(ApiTest, MultipleExecutionOfPreparedStatement) {
 TEST_F(ApiTest, issueTest4) {
     auto preparedStatement = conn->prepare("RETURN CAST($1, 'STRING')");
     auto result = conn->execute(preparedStatement.get(),
-        std::make_pair(std::string("1"), int128_t(-123456789)));
+        std::make_pair(std::string("1"), int128_t((int32_t)-123456789)));
     ASSERT_TRUE(result->hasNext());
     checkTuple(result->getNext().get(), "-123456789\n");
     ASSERT_FALSE(result->hasNext());

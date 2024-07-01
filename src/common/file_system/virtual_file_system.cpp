@@ -11,6 +11,8 @@ VirtualFileSystem::VirtualFileSystem() {
     defaultFS = std::make_unique<LocalFileSystem>();
 }
 
+VirtualFileSystem::~VirtualFileSystem() = default;
+
 void VirtualFileSystem::registerFileSystem(std::unique_ptr<FileSystem> fileSystem) {
     subSystems.push_back(std::move(fileSystem));
 }
@@ -25,7 +27,7 @@ std::vector<std::string> VirtualFileSystem::glob(main::ClientContext* context,
     return findFileSystem(path)->glob(context, path);
 }
 
-void VirtualFileSystem::overwriteFile(const std::string& from, const std::string& to) const {
+void VirtualFileSystem::overwriteFile(const std::string& from, const std::string& to) {
     findFileSystem(from)->overwriteFile(from, to);
 }
 
@@ -33,12 +35,12 @@ void VirtualFileSystem::createDir(const std::string& dir) const {
     findFileSystem(dir)->createDir(dir);
 }
 
-void VirtualFileSystem::removeFileIfExists(const std::string& path) const {
+void VirtualFileSystem::removeFileIfExists(const std::string& path) {
     findFileSystem(path)->removeFileIfExists(path);
 }
 
-bool VirtualFileSystem::fileOrPathExists(const std::string& path) const {
-    return findFileSystem(path)->fileOrPathExists(path);
+bool VirtualFileSystem::fileOrPathExists(const std::string& path, main::ClientContext* context) {
+    return findFileSystem(path)->fileOrPathExists(path, context);
 }
 
 std::string VirtualFileSystem::expandPath(main::ClientContext* context,
@@ -46,29 +48,40 @@ std::string VirtualFileSystem::expandPath(main::ClientContext* context,
     return findFileSystem(path)->expandPath(context, path);
 }
 
-void VirtualFileSystem::readFromFile(FileInfo* /*fileInfo*/, void* /*buffer*/,
+void VirtualFileSystem::readFromFile(FileInfo& /*fileInfo*/, void* /*buffer*/,
     uint64_t /*numBytes*/, uint64_t /*position*/) const {
     KU_UNREACHABLE;
 }
 
-int64_t VirtualFileSystem::readFile(FileInfo* /*fileInfo*/, void* /*buf*/, size_t /*nbyte*/) const {
+int64_t VirtualFileSystem::readFile(FileInfo& /*fileInfo*/, void* /*buf*/, size_t /*nbyte*/) const {
     KU_UNREACHABLE;
 }
 
-void VirtualFileSystem::writeFile(FileInfo* /*fileInfo*/, const uint8_t* /*buffer*/,
+void VirtualFileSystem::writeFile(FileInfo& /*fileInfo*/, const uint8_t* /*buffer*/,
     uint64_t /*numBytes*/, uint64_t /*offset*/) const {
     KU_UNREACHABLE;
 }
 
-int64_t VirtualFileSystem::seek(FileInfo* /*fileInfo*/, uint64_t /*offset*/, int /*whence*/) const {
+void VirtualFileSystem::syncFile(const FileInfo& fileInfo) const {
+    findFileSystem(fileInfo.path)->syncFile(fileInfo);
+}
+
+void VirtualFileSystem::cleanUP(main::ClientContext* context) {
+    for (auto& subSystem : subSystems) {
+        subSystem->cleanUP(context);
+    }
+    defaultFS->cleanUP(context);
+}
+
+int64_t VirtualFileSystem::seek(FileInfo& /*fileInfo*/, uint64_t /*offset*/, int /*whence*/) const {
     KU_UNREACHABLE;
 }
 
-void VirtualFileSystem::truncate(FileInfo* /*fileInfo*/, uint64_t /*size*/) const {
+void VirtualFileSystem::truncate(FileInfo& /*fileInfo*/, uint64_t /*size*/) const {
     KU_UNREACHABLE;
 }
 
-uint64_t VirtualFileSystem::getFileSize(kuzu::common::FileInfo* /*fileInfo*/) const {
+uint64_t VirtualFileSystem::getFileSize(const FileInfo& /*fileInfo*/) const {
     KU_UNREACHABLE;
 }
 

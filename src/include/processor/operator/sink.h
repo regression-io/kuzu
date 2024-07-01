@@ -10,20 +10,20 @@ namespace processor {
 class Sink : public PhysicalOperator {
 public:
     Sink(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
-        PhysicalOperatorType operatorType, uint32_t id, const std::string& paramsString)
-        : PhysicalOperator{operatorType, id, paramsString},
+        PhysicalOperatorType operatorType, uint32_t id, std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{operatorType, id, std::move(printInfo)},
           resultSetDescriptor{std::move(resultSetDescriptor)} {}
     Sink(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
         PhysicalOperatorType operatorType, std::unique_ptr<PhysicalOperator> child, uint32_t id,
-        const std::string& paramsString)
-        : PhysicalOperator{operatorType, std::move(child), id, paramsString},
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{operatorType, std::move(child), id, std::move(printInfo)},
           resultSetDescriptor{std::move(resultSetDescriptor)} {}
 
-    inline bool isSink() const override { return true; }
+    bool isSink() const override { return true; }
 
     ResultSetDescriptor* getResultSetDescriptor() { return resultSetDescriptor.get(); }
 
-    inline void execute(ResultSet* resultSet, ExecutionContext* context) {
+    void execute(ResultSet* resultSet, ExecutionContext* context) {
         initLocalState(resultSet, context);
         metrics->executionTime.start();
         executeInternal(context);

@@ -14,8 +14,17 @@ void StatementVisitor::visit(const Statement& statement) {
     case StatementType::QUERY: {
         visitQuery(statement);
     } break;
+    case StatementType::CREATE_SEQUENCE: {
+        visitCreateSequence(statement);
+    } break;
+    case StatementType::DROP_SEQUENCE: {
+        visitDropSequence(statement);
+    } break;
     case StatementType::CREATE_TABLE: {
         visitCreateTable(statement);
+    } break;
+    case StatementType::CREATE_TYPE: {
+        visitCreateType(statement);
     } break;
     case StatementType::DROP_TABLE: {
         visitDropTable(statement);
@@ -38,9 +47,6 @@ void StatementVisitor::visit(const Statement& statement) {
     case StatementType::CREATE_MACRO: {
         visitCreateMacro(statement);
     } break;
-    case StatementType::COMMENT_ON: {
-        visitCommentOn(statement);
-    } break;
     case StatementType::TRANSACTION: {
         visitTransaction(statement);
     } break;
@@ -58,6 +64,9 @@ void StatementVisitor::visit(const Statement& statement) {
     } break;
     case StatementType::DETACH_DATABASE: {
         visitDetachDatabase(statement);
+    } break;
+    case StatementType::USE_DATABASE: {
+        visitUseDatabase(statement);
     } break;
     default:
         KU_UNREACHABLE;

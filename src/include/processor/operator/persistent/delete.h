@@ -7,13 +7,16 @@ namespace kuzu {
 namespace processor {
 
 class DeleteNode : public PhysicalOperator {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::DELETE_;
+
 public:
     DeleteNode(std::vector<std::unique_ptr<NodeDeleteExecutor>> executors,
-        std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-        : PhysicalOperator{PhysicalOperatorType::DELETE_NODE, std::move(child), id, paramsString},
+        std::unique_ptr<PhysicalOperator> child, uint32_t id,
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{type_, std::move(child), id, std::move(printInfo)},
           executors{std::move(executors)} {}
 
-    inline bool canParallel() const final { return false; }
+    bool isParallel() const final { return false; }
 
     void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) final;
 
@@ -26,13 +29,16 @@ private:
 };
 
 class DeleteRel : public PhysicalOperator {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::DELETE_;
+
 public:
     DeleteRel(std::vector<std::unique_ptr<RelDeleteExecutor>> executors,
-        std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-        : PhysicalOperator{PhysicalOperatorType::DELETE_REL, std::move(child), id, paramsString},
+        std::unique_ptr<PhysicalOperator> child, uint32_t id,
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{type_, std::move(child), id, std::move(printInfo)},
           executors{std::move(executors)} {}
 
-    inline bool canParallel() const final { return false; }
+    bool isParallel() const final { return false; }
 
     void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) final;
 

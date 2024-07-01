@@ -4,7 +4,7 @@
 #include "planner/operator/logical_partitioner.h"
 #include "planner/operator/persistent/logical_copy_from.h"
 #include "planner/operator/persistent/logical_copy_to.h"
-#include "planner/operator/scan/logical_index_scan.h"
+#include "planner/operator/scan/logical_index_look_up.h"
 #include "planner/planner.h"
 
 using namespace kuzu::binder;
@@ -18,37 +18,25 @@ namespace planner {
 
 static void appendIndexScan(std::vector<IndexLookupInfo> infos, LogicalPlan& plan) {
     auto indexScan =
-        std::make_shared<LogicalIndexScanNode>(std::move(infos), plan.getLastOperator());
+        std::make_shared<LogicalPrimaryKeyLookup>(std::move(infos), plan.getLastOperator());
     indexScan->computeFactorizedSchema();
     plan.setLastOperator(std::move(indexScan));
 }
 
 static void appendPartitioner(const BoundCopyFromInfo& copyFromInfo, LogicalPlan& plan) {
-    auto extraInfo = ku_dynamic_cast<ExtraBoundCopyFromInfo*, ExtraBoundCopyRelInfo*>(
-        copyFromInfo.extraInfo.get());
-    expression_vector payloads;
-    for (auto& column : extraInfo->propertyColumns) {
-        payloads.push_back(column);
-    }
-    payloads.push_back(copyFromInfo.offset);
-    for (auto& lookupInfo : extraInfo->infos) {
-        payloads.push_back(lookupInfo.offset);
-    }
     std::vector<std::unique_ptr<LogicalPartitionerInfo>> infos;
-    // Partitioner for FWD direction rel data.
     auto relTableEntry =
         ku_dynamic_cast<TableCatalogEntry*, RelTableCatalogEntry*>(copyFromInfo.tableEntry);
-    infos.push_back(std::make_unique<LogicalPartitionerInfo>(extraInfo->fromOffset, payloads,
+    // Partitioner for FWD direction rel data.
+    infos.push_back(std::make_unique<LogicalPartitionerInfo>(RelKeyIdx::FWD /* keyIdx */,
         relTableEntry->isSingleMultiplicity(RelDataDirection::FWD) ? ColumnDataFormat::REGULAR :
-                                                                     ColumnDataFormat::CSR,
-        relTableEntry));
+                                                                     ColumnDataFormat::CSR));
     // Partitioner for BWD direction rel data.
-    infos.push_back(std::make_unique<LogicalPartitionerInfo>(extraInfo->toOffset, payloads,
+    infos.push_back(std::make_unique<LogicalPartitionerInfo>(RelKeyIdx::BWD /* keyIdx */,
         relTableEntry->isSingleMultiplicity(RelDataDirection::BWD) ? ColumnDataFormat::REGULAR :
-                                                                     ColumnDataFormat::CSR,
-        relTableEntry));
-    auto partitioner =
-        std::make_shared<LogicalPartitioner>(std::move(infos), plan.getLastOperator());
+                                                                     ColumnDataFormat::CSR));
+    auto partitioner = std::make_shared<LogicalPartitioner>(std::move(infos), copyFromInfo.copy(),
+        plan.getLastOperator());
     partitioner->computeFactorizedSchema();
     plan.setLastOperator(std::move(partitioner));
 }
@@ -95,7 +83,7 @@ std::unique_ptr<LogicalPlan> Planner::planCopyNodeFrom(const BoundCopyFromInfo* 
             ku_dynamic_cast<BoundBaseScanSource*, BoundQueryScanSource*>(info->source.get());
         plan = getBestPlan(planQuery(*querySource->statement));
         appendAccumulate(AccumulateType::REGULAR, plan->getSchema()->getExpressionsInScope(),
-            info->offset, *plan);
+            info->offset, nullptr /* mark */, *plan);
     } break;
     default:
         KU_UNREACHABLE;
@@ -130,7 +118,7 @@ std::unique_ptr<LogicalPlan> Planner::planCopyRelFrom(const BoundCopyFromInfo* i
             ku_dynamic_cast<BoundBaseScanSource*, BoundQueryScanSource*>(info->source.get());
         plan = getBestPlan(planQuery(*querySource->statement));
         appendAccumulate(AccumulateType::REGULAR, plan->getSchema()->getExpressionsInScope(),
-            info->offset, *plan);
+            info->offset, nullptr /* mark */, *plan);
     } break;
     default:
         KU_UNREACHABLE;
@@ -168,18 +156,16 @@ std::unique_ptr<LogicalPlan> Planner::planCopyRdfFrom(const BoundCopyFromInfo* i
 }
 
 std::unique_ptr<LogicalPlan> Planner::planCopyTo(const BoundStatement& statement) {
-    auto& boundCopy = ku_dynamic_cast<const BoundStatement&, const BoundCopyTo&>(statement);
-    auto regularQuery = boundCopy.getRegularQuery();
+    auto& boundCopyTo = statement.constCast<BoundCopyTo>();
+    auto regularQuery = boundCopyTo.getRegularQuery();
     std::vector<std::string> columnNames;
-    std::vector<LogicalType> columnTypes;
     for (auto& column : regularQuery->getStatementResult()->getColumns()) {
         columnNames.push_back(column->toString());
-        columnTypes.push_back(column->dataType);
     }
     KU_ASSERT(regularQuery->getStatementType() == StatementType::QUERY);
     auto plan = getBestPlan(*regularQuery);
-    auto copyTo = make_shared<LogicalCopyTo>(boundCopy.getFilePath(), boundCopy.getFileType(),
-        columnNames, columnTypes, boundCopy.getCopyOption()->copy(), plan->getLastOperator());
+    auto copyTo = make_shared<LogicalCopyTo>(boundCopyTo.getBindData()->copy(),
+        boundCopyTo.getExportFunc(), plan->getLastOperator());
     plan->setLastOperator(std::move(copyTo));
     return plan;
 }

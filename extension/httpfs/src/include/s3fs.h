@@ -45,17 +45,18 @@ struct S3FileInfo final : public HTTPFileInfo {
     static constexpr uint64_t AWS_MINIMUM_PART_SIZE = 5242880;
 
     S3FileInfo(std::string path, common::FileSystem* fileSystem, int flags,
-        const S3AuthParams& authParams, const S3UploadParams& uploadParams);
+        main::ClientContext* context, const S3AuthParams& authParams,
+        const S3UploadParams& uploadParams);
 
     ~S3FileInfo() override;
 
-    void initialize() override;
+    void initialize(main::ClientContext* context) override;
 
     void initializeClient() override;
 
     std::shared_ptr<S3WriteBuffer> getBuffer(uint16_t writeBufferIdx);
 
-    void rethrowIOError();
+    void rethrowIOError() const;
 
     S3AuthParams authParams;
     S3UploadParams uploadParams;
@@ -125,7 +126,7 @@ public:
 
     std::string initializeMultiPartUpload(S3FileInfo* fileInfo) const;
 
-    void writeFile(common::FileInfo* fileInfo, const uint8_t* buffer, uint64_t numBytes,
+    void writeFile(common::FileInfo& fileInfo, const uint8_t* buffer, uint64_t numBytes,
         uint64_t offset) const override;
 
     std::shared_ptr<S3WriteBuffer> allocateWriteBuffer(uint16_t writeBufferIdx, uint64_t partSize,

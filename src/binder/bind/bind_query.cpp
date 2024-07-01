@@ -1,4 +1,5 @@
 #include "binder/binder.h"
+#include "binder/expression/expression_util.h"
 #include "binder/query/return_with_clause/bound_return_clause.h"
 #include "binder/query/return_with_clause/bound_with_clause.h"
 #include "common/exception/binder.h"
@@ -23,8 +24,7 @@ void validateUnionColumnsOfTheSameType(
         // Check whether the dataTypes in union expressions are exactly the same in each single
         // query.
         for (auto j = 0u; j < columns.size(); j++) {
-            ExpressionBinder::validateExpectedDataType(*otherColumns[j],
-                columns[j]->dataType.getLogicalTypeID());
+            ExpressionUtil::validateDataType(*otherColumns[j], columns[j]->getDataType());
         }
     }
 }
@@ -41,6 +41,12 @@ void validateIsAllUnionOrUnionAll(const BoundRegularQuery& regularQuery) {
 }
 
 std::unique_ptr<BoundRegularQuery> Binder::bindQuery(const RegularQuery& regularQuery) {
+    if (regularQuery.hasProjectGraph()) {
+        auto projectGraph = regularQuery.getProjectGraph();
+        KU_ASSERT(!graphEntrySet.hasGraph(projectGraph->getGraphName()));
+        auto entry = bindProjectGraph(*projectGraph);
+        graphEntrySet.addGraph(projectGraph->getGraphName(), entry);
+    }
     std::vector<NormalizedSingleQuery> normalizedSingleQueries;
     for (auto i = 0u; i < regularQuery.getNumSingleQueries(); i++) {
         // Don't clear scope within bindSingleQuery() yet because it is also used for subquery

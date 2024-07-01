@@ -1,12 +1,6 @@
--GROUP EmptyDBBinderErrorTest
 -DATASET CSV empty
 
 --
-
--CASE MissingQueryNode
--STATEMENT MATCH () WITH NULL AS a RETURN a;
----- error
-Binder exception: No node table exists in database.
 
 -CASE DuplicateMacro
 -STATEMENT CREATE MACRO inc(x) AS x + 1
@@ -62,4 +56,4 @@ Binder exception: Expected literal input as the second argument for PROPERTIES()
 Binder exception: Invalid property name: abc.
 -STATEMENT MATCH path = (p:person)-[:follows* SHORTEST]-(q:person) RETURN properties([], "abc")
 ---- error
-Binder exception: Cannot extract properties from STRING[].
+Binder exception: Cannot extract properties from INT64[].

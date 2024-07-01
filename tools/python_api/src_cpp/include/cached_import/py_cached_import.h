@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <vector>
 
 #include "py_cached_modules.h"
@@ -18,15 +19,19 @@ public:
 
     DateTimeCachedItem datetime;
     DecimalCachedItem decimal;
+    ImportLibCachedItem importlib;
     InspectCachedItem inspect;
     NumpyMaCachedItem numpyma;
     PandasCachedItem pandas;
+    PolarsCachedItem polars;
     PyarrowCachedItem pyarrow;
     UUIDCachedItem uuid;
 
 private:
     std::vector<py::object> allObjects;
 };
+
+bool doesPyModuleExist(std::string moduleName);
 
 extern std::shared_ptr<PythonCachedImport> importCache;
 

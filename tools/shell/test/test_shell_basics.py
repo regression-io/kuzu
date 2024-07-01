@@ -72,7 +72,7 @@ def test_multi_queries_one_line(temp_db) -> None:
     result.check_stdout("databases rule")
     result.check_stdout(
         [
-            "Error: Parser exception: mismatched input '<EOF>' expecting {ATTACH, CALL, COMMENT_, COPY, EXPORT, IMPORT, DROP, ALTER, BEGIN, COMMIT, COMMIT_SKIP_CHECKPOINT, ROLLBACK, ROLLBACK_SKIP_CHECKPOINT, INSTALL, LOAD, OPTIONAL, MATCH, UNWIND, CREATE, MERGE, SET, DETACH, DELETE, WITH, RETURN} (line: 1, offset: 6)",
+            "Error: Parser exception: mismatched input '<EOF>' expecting {ALTER, ATTACH, BEGIN, CALL, COMMENT, COMMIT, COMMIT_SKIP_CHECKPOINT, COPY, CREATE, DELETE, DETACH, DROP, EXPORT, IMPORT, INSTALL, LOAD, MATCH, MERGE, OPTIONAL, PROJECT, RETURN, ROLLBACK, ROLLBACK_SKIP_CHECKPOINT, SET, UNWIND, USE, WITH} (line: 1, offset: 6)",
             '"      "',
         ],
     )
@@ -85,7 +85,7 @@ def test_multi_queries_one_line(temp_db) -> None:
             "Error: Parser exception: Invalid input < S>: expected rule ku_Statements (line: 1, offset: 24)",
             '"RETURN "databases rule" S a"',
             "                         ^",
-            "Error: Parser exception: mismatched input '<EOF>' expecting {ATTACH, CALL, COMMENT_, COPY, EXPORT, IMPORT, DROP, ALTER, BEGIN, COMMIT, COMMIT_SKIP_CHECKPOINT, ROLLBACK, ROLLBACK_SKIP_CHECKPOINT, INSTALL, LOAD, OPTIONAL, MATCH, UNWIND, CREATE, MERGE, SET, DETACH, DELETE, WITH, RETURN} (line: 1, offset: 6)",
+            "Error: Parser exception: mismatched input '<EOF>' expecting {ALTER, ATTACH, BEGIN, CALL, COMMENT, COMMIT, COMMIT_SKIP_CHECKPOINT, COPY, CREATE, DELETE, DETACH, DROP, EXPORT, IMPORT, INSTALL, LOAD, MATCH, MERGE, OPTIONAL, PROJECT, RETURN, ROLLBACK, ROLLBACK_SKIP_CHECKPOINT, SET, UNWIND, USE, WITH} (line: 1, offset: 6)",
             '"      "',
         ],
     )
@@ -106,6 +106,15 @@ def test_column_truncation(temp_db, csv_path) -> None:
     result.check_not_stdout("-" * 81)
     result.check_stdout("| ... |")
     result.check_stdout("(13 columns, 4 shown)")
+
+    # test column name truncation
+    long_name = "a" * 100
+    test = ShellTest().add_argument(temp_db).statement(f'RETURN "databases rule" AS {long_name};')
+    result = test.run()
+    result.check_stdout("-" * 80)
+    result.check_not_stdout("-" * 81)
+    result.check_stdout(f"| {long_name[:73]}... |")
+    result.check_stdout("| databases rule")
 
 
 def long_messages(temp_db) -> None:

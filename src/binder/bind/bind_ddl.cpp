@@ -1,7 +1,11 @@
 #include "binder/binder.h"
 #include "binder/ddl/bound_alter.h"
+#include "binder/ddl/bound_create_sequence.h"
 #include "binder/ddl/bound_create_table.h"
+#include "binder/ddl/bound_create_type.h"
+#include "binder/ddl/bound_drop_sequence.h"
 #include "binder/ddl/bound_drop_table.h"
+#include "binder/expression/expression_util.h"
 #include "catalog/catalog.h"
 #include "catalog/catalog_entry/node_table_catalog_entry.h"
 #include "catalog/catalog_entry/rdf_graph_catalog_entry.h"
@@ -11,11 +15,17 @@
 #include "common/exception/message.h"
 #include "common/string_format.h"
 #include "common/types/types.h"
+#include "function/cast/functions/cast_from_string_functions.h"
+#include "function/sequence/sequence_functions.h"
 #include "main/client_context.h"
 #include "parser/ddl/alter.h"
+#include "parser/ddl/create_sequence.h"
 #include "parser/ddl/create_table.h"
 #include "parser/ddl/create_table_info.h"
+#include "parser/ddl/create_type.h"
 #include "parser/ddl/drop.h"
+#include "parser/expression/parsed_function_expression.h"
+#include "parser/expression/parsed_literal_expression.h"
 
 using namespace kuzu::common;
 using namespace kuzu::parser;
@@ -35,17 +45,37 @@ static void validateUniquePropertyName(const std::vector<PropertyInfo>& infos) {
     }
 }
 
+static void validateSerialNoDefault(const Expression& expr) {
+    if (!ExpressionUtil::isNullLiteral(expr)) {
+        throw BinderException("No DEFAULT value should be set for SERIAL columns");
+    }
+}
+
+static std::unique_ptr<parser::ParsedFunctionExpression> createSerialDefaultExpr(std::string name) {
+    auto param = std::make_unique<parser::ParsedLiteralExpression>(Value(name), "");
+    return std::make_unique<parser::ParsedFunctionExpression>(function::NextValFunction::name,
+        std::move(param), "");
+}
+
 std::vector<PropertyInfo> Binder::bindPropertyInfo(
-    const std::vector<std::pair<std::string, std::string>>& propertyNameDataTypes) {
+    const std::vector<PropertyDefinitionDDL>& propertyDefinitions, const std::string& tableName) {
     std::vector<PropertyInfo> propertyInfos;
-    propertyInfos.reserve(propertyNameDataTypes.size());
-    for (auto& propertyNameDataType : propertyNameDataTypes) {
-        propertyInfos.emplace_back(propertyNameDataType.first,
-            *bindDataType(propertyNameDataType.second));
+    propertyInfos.reserve(propertyDefinitions.size());
+    for (auto& propertyDef : propertyDefinitions) {
+        auto type = clientContext->getCatalog()->getType(clientContext->getTx(), propertyDef.type);
+        auto expr = propertyDef.expr->copy();
+        // This will check the type correctness of the default value expression
+        auto boundExpr = expressionBinder.implicitCastIfNecessary(
+            expressionBinder.bindExpression(*propertyDef.expr), type);
+        if (type.getLogicalTypeID() == LogicalTypeID::SERIAL) {
+            validateSerialNoDefault(*boundExpr);
+            expr = createSerialDefaultExpr(Catalog::genSerialName(tableName, propertyDef.name));
+        }
+        propertyInfos.emplace_back(propertyDef.name, std::move(type), std::move(expr));
     }
     validateUniquePropertyName(propertyInfos);
     for (auto& info : propertyInfos) {
-        if (isReservedPropertyName(info.name)) {
+        if (reservedInColumnName(info.name)) {
             throw BinderException(stringFormat("{} is a reserved property name.", info.name));
         }
     }
@@ -64,7 +94,7 @@ static uint32_t bindPrimaryKey(const std::string& pkColName,
         throw BinderException(
             "Primary key " + pkColName + " does not match any of the predefined node properties.");
     }
-    auto pkType = infos[primaryKeyIdx].type;
+    const auto& pkType = infos[primaryKeyIdx].type;
     switch (pkType.getPhysicalType()) {
     case PhysicalTypeID::UINT8:
     case PhysicalTypeID::UINT16:
@@ -106,30 +136,20 @@ BoundCreateTableInfo Binder::bindCreateTableInfo(const parser::CreateTableInfo* 
 }
 
 BoundCreateTableInfo Binder::bindCreateNodeTableInfo(const CreateTableInfo* info) {
-    auto propertyInfos = bindPropertyInfo(info->propertyNameDataTypes);
-    auto extraInfo = ku_dynamic_cast<const ExtraCreateTableInfo*, const ExtraCreateNodeTableInfo*>(
-        info->extraInfo.get());
-    auto primaryKeyIdx = bindPrimaryKey(extraInfo->pKName, propertyInfos);
-    for (auto i = 0u; i < propertyInfos.size(); ++i) {
-        if (propertyInfos[i].type == *LogicalType::SERIAL() && primaryKeyIdx != i) {
-            throw BinderException("Serial property in node table must be the primary key.");
-        }
-    }
+    auto propertyInfos = bindPropertyInfo(info->propertyDefinitions, info->tableName);
+    auto& extraInfo = info->extraInfo->constCast<ExtraCreateNodeTableInfo>();
+    auto primaryKeyIdx = bindPrimaryKey(extraInfo.pKName, propertyInfos);
     auto boundExtraInfo =
         std::make_unique<BoundExtraCreateNodeTableInfo>(primaryKeyIdx, std::move(propertyInfos));
-    return BoundCreateTableInfo(TableType::NODE, info->tableName, std::move(boundExtraInfo));
+    return BoundCreateTableInfo(TableType::NODE, info->tableName, info->onConflict,
+        std::move(boundExtraInfo));
 }
 
 BoundCreateTableInfo Binder::bindCreateRelTableInfo(const CreateTableInfo* info) {
     std::vector<PropertyInfo> propertyInfos;
-    propertyInfos.emplace_back(InternalKeyword::ID, *LogicalType::INTERNAL_ID());
-    for (auto& propertyInfo : bindPropertyInfo(info->propertyNameDataTypes)) {
+    propertyInfos.emplace_back(InternalKeyword::ID, LogicalType::INTERNAL_ID());
+    for (auto& propertyInfo : bindPropertyInfo(info->propertyDefinitions, info->tableName)) {
         propertyInfos.push_back(propertyInfo.copy());
-    }
-    for (auto& propertyInfo : propertyInfos) {
-        if (propertyInfo.type.getLogicalTypeID() == LogicalTypeID::SERIAL) {
-            throw BinderException("SERIAL properties are not supported in rel tables.");
-        }
     }
     auto extraInfo = (ExtraCreateRelTableInfo*)info->extraInfo.get();
     auto srcMultiplicity = RelMultiplicityUtils::getFwd(extraInfo->relMultiplicity);
@@ -140,7 +160,8 @@ BoundCreateTableInfo Binder::bindCreateRelTableInfo(const CreateTableInfo* info)
     validateTableType(dstTableID, TableType::NODE);
     auto boundExtraInfo = std::make_unique<BoundExtraCreateRelTableInfo>(srcMultiplicity,
         dstMultiplicity, srcTableID, dstTableID, std::move(propertyInfos));
-    return BoundCreateTableInfo(TableType::REL, info->tableName, std::move(boundExtraInfo));
+    return BoundCreateTableInfo(TableType::REL, info->tableName, info->onConflict,
+        std::move(boundExtraInfo));
 }
 
 BoundCreateTableInfo Binder::bindCreateRelTableGroupInfo(const CreateTableInfo* info) {
@@ -148,36 +169,119 @@ BoundCreateTableInfo Binder::bindCreateRelTableGroupInfo(const CreateTableInfo* 
     auto extraInfo = (ExtraCreateRelTableGroupInfo*)info->extraInfo.get();
     auto relMultiplicity = extraInfo->relMultiplicity;
     std::vector<BoundCreateTableInfo> boundCreateRelTableInfos;
+    auto relCreateInfo = std::make_unique<CreateTableInfo>(TableType::REL, "", info->onConflict);
+    for (auto& propertyDef : info->propertyDefinitions) {
+        relCreateInfo->propertyDefinitions.emplace_back(propertyDef.name, propertyDef.type,
+            propertyDef.expr->copy());
+    }
     for (auto& [srcTableName, dstTableName] : extraInfo->srcDstTablePairs) {
-        auto relTableName = std::string(relGroupName)
-                                .append("_")
-                                .append(srcTableName)
-                                .append("_")
-                                .append(dstTableName);
-        auto relCreateInfo = std::make_unique<CreateTableInfo>(TableType::REL, relTableName);
-        relCreateInfo->propertyNameDataTypes = info->propertyNameDataTypes;
+        relCreateInfo->tableName = std::string(relGroupName)
+                                       .append("_")
+                                       .append(srcTableName)
+                                       .append("_")
+                                       .append(dstTableName);
         relCreateInfo->extraInfo =
             std::make_unique<ExtraCreateRelTableInfo>(relMultiplicity, srcTableName, dstTableName);
         boundCreateRelTableInfos.push_back(bindCreateRelTableInfo(relCreateInfo.get()));
     }
     auto boundExtraInfo =
         std::make_unique<BoundExtraCreateRelTableGroupInfo>(std::move(boundCreateRelTableInfos));
-    return BoundCreateTableInfo(TableType::REL_GROUP, info->tableName, std::move(boundExtraInfo));
+    return BoundCreateTableInfo(TableType::REL_GROUP, info->tableName, info->onConflict,
+        std::move(boundExtraInfo));
 }
 
 std::unique_ptr<BoundStatement> Binder::bindCreateTable(const Statement& statement) {
-    auto& createTable = ku_dynamic_cast<const Statement&, const CreateTable&>(statement);
-    auto tableName = createTable.getInfo()->tableName;
-    if (clientContext->getCatalog()->containsTable(clientContext->getTx(), tableName)) {
-        throw BinderException(tableName + " already exists in catalog.");
+    auto createTable = statement.constPtrCast<CreateTable>();
+    auto tableName = createTable->getInfo()->tableName;
+    switch (createTable->getInfo()->onConflict) {
+    case common::ConflictAction::ON_CONFLICT_THROW: {
+        if (clientContext->getCatalog()->containsTable(clientContext->getTx(), tableName)) {
+            throw BinderException(tableName + " already exists in catalog.");
+        }
+    } break;
+    default:
+        break;
     }
-    auto boundCreateInfo = bindCreateTableInfo(createTable.getInfo());
+    auto boundCreateInfo = bindCreateTableInfo(createTable->getInfo());
     return std::make_unique<BoundCreateTable>(std::move(boundCreateInfo));
 }
 
+std::unique_ptr<BoundStatement> Binder::bindCreateType(const Statement& statement) {
+    auto createType = statement.constPtrCast<CreateType>();
+    auto name = createType->getName();
+    auto type = LogicalType::fromString(createType->getDataType());
+    if (clientContext->getCatalog()->containsType(clientContext->getTx(), name)) {
+        throw BinderException{common::stringFormat("Duplicated type name: {}.", name)};
+    }
+    return std::make_unique<BoundCreateType>(std::move(name), std::move(type));
+}
+
+std::unique_ptr<BoundStatement> Binder::bindCreateSequence(const Statement& statement) {
+    auto& createSequence = statement.constCast<CreateSequence>();
+    auto info = createSequence.getInfo();
+    auto sequenceName = info.sequenceName;
+    int64_t startWith;
+    int64_t increment;
+    int64_t minValue;
+    int64_t maxValue;
+    ku_string_t literal;
+    switch (info.onConflict) {
+    case common::ConflictAction::ON_CONFLICT_THROW: {
+        if (clientContext->getCatalog()->containsSequence(clientContext->getTx(), sequenceName)) {
+            throw BinderException(sequenceName + " already exists in catalog.");
+        }
+    } break;
+    default:
+        break;
+    }
+    literal = ku_string_t{info.increment.c_str(), info.increment.length()};
+    if (!function::CastString::tryCast(literal, increment)) {
+        throw BinderException("Out of bounds: SEQUENCE accepts integers within INT64.");
+    }
+    if (increment == 0) {
+        throw BinderException("INCREMENT must be non-zero.");
+    }
+
+    if (info.minValue == "") {
+        minValue = increment > 0 ? 1 : std::numeric_limits<int64_t>::min();
+    } else {
+        literal = ku_string_t{info.minValue.c_str(), info.minValue.length()};
+        if (!function::CastString::tryCast(literal, minValue)) {
+            throw BinderException("Out of bounds: SEQUENCE accepts integers within INT64.");
+        }
+    }
+    if (info.maxValue == "") {
+        maxValue = increment > 0 ? std::numeric_limits<int64_t>::max() : -1;
+    } else {
+        literal = ku_string_t{info.maxValue.c_str(), info.maxValue.length()};
+        if (!function::CastString::tryCast(literal, maxValue)) {
+            throw BinderException("Out of bounds: SEQUENCE accepts integers within INT64.");
+        }
+    }
+    if (info.startWith == "") {
+        startWith = increment > 0 ? minValue : maxValue;
+    } else {
+        literal = ku_string_t{info.startWith.c_str(), info.startWith.length()};
+        if (!function::CastString::tryCast(literal, startWith)) {
+            throw BinderException("Out of bounds: SEQUENCE accepts integers within INT64.");
+        }
+    }
+
+    if (maxValue < minValue) {
+        throw BinderException("SEQUENCE MAXVALUE should be greater than or equal to MINVALUE.");
+    }
+    if (startWith < minValue || startWith > maxValue) {
+        throw BinderException("SEQUENCE START value should be between MINVALUE and MAXVALUE.");
+    }
+
+    auto boundInfo = BoundCreateSequenceInfo(sequenceName, startWith, increment, minValue, maxValue,
+        info.cycle, info.onConflict);
+    return std::make_unique<BoundCreateSequence>(std::move(boundInfo));
+}
+
 std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement) {
-    auto& dropTable = ku_dynamic_cast<const Statement&, const Drop&>(statement);
-    auto tableName = dropTable.getTableName();
+    auto& dropTable = statement.constCast<Drop>();
+    auto tableName = dropTable.getName();
     validateTableExist(tableName);
     auto catalog = clientContext->getCatalog();
     auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
@@ -220,14 +324,14 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
         }
     } break;
     case TableType::RDF: {
-        auto rdfGraphEntry = ku_dynamic_cast<TableCatalogEntry*, RDFGraphCatalogEntry*>(tableEntry);
+        auto& rdfGraphEntry = tableEntry->constCast<RDFGraphCatalogEntry>();
         // Check resource table is not referenced by rel table other than its triple table.
         for (auto& relTableEntry : catalog->getRelTableEntries(clientContext->getTx())) {
-            if (relTableEntry->getTableID() == rdfGraphEntry->getResourceTripleTableID() ||
-                relTableEntry->getTableID() == rdfGraphEntry->getLiteralTripleTableID()) {
+            if (relTableEntry->getTableID() == rdfGraphEntry.getResourceTripleTableID() ||
+                relTableEntry->getTableID() == rdfGraphEntry.getLiteralTripleTableID()) {
                 continue;
             }
-            if (relTableEntry->isParent(rdfGraphEntry->getResourceTableID())) {
+            if (relTableEntry->isParent(rdfGraphEntry.getResourceTableID())) {
                 throw BinderException(stringFormat("Cannot delete rdfGraph {} because its resource "
                                                    "table is referenced by relationship table {}.",
                     tableEntry->getName(), relTableEntry->getName()));
@@ -235,10 +339,10 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
         }
         // Check literal table is not referenced by rel table other than its triple table.
         for (auto& relTableEntry : catalog->getRelTableEntries(clientContext->getTx())) {
-            if (relTableEntry->getTableID() == rdfGraphEntry->getLiteralTripleTableID()) {
+            if (relTableEntry->getTableID() == rdfGraphEntry.getLiteralTripleTableID()) {
                 continue;
             }
-            if (relTableEntry->isParent(rdfGraphEntry->getLiteralTableID())) {
+            if (relTableEntry->isParent(rdfGraphEntry.getLiteralTableID())) {
                 throw BinderException(stringFormat("Cannot delete rdfGraph {} because its literal "
                                                    "table is referenced by relationship table {}.",
                     tableEntry->getName(), relTableEntry->getName()));
@@ -251,15 +355,29 @@ std::unique_ptr<BoundStatement> Binder::bindDropTable(const Statement& statement
     return make_unique<BoundDropTable>(tableID, tableName);
 }
 
+std::unique_ptr<BoundStatement> Binder::bindDropSequence(const Statement& statement) {
+    auto& dropSequence = statement.constCast<Drop>();
+    auto sequenceName = dropSequence.getName();
+    if (!clientContext->getCatalog()->containsSequence(clientContext->getTx(), sequenceName)) {
+        throw BinderException("Sequence " + sequenceName + " does not exist.");
+    }
+    auto catalog = clientContext->getCatalog();
+    auto sequenceID = catalog->getSequenceID(clientContext->getTx(), sequenceName);
+    // TODO: Later check if sequence used/referenced by table
+    return make_unique<BoundDropSequence>(sequenceID, sequenceName);
+}
+
 std::unique_ptr<BoundStatement> Binder::bindAlter(const Statement& statement) {
-    auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
+    auto& alter = statement.constCast<Alter>();
     auto catalog = clientContext->getCatalog();
     auto tableID = catalog->getTableID(clientContext->getTx(), alter.getInfo()->tableName);
-    for (auto& schema : catalog->getRdfGraphEntries(clientContext->getTx())) {
-        if (schema->isParent(tableID)) {
-            throw BinderException(
-                stringFormat("Cannot alter table {} because it is referenced by rdfGraph {}.",
-                    alter.getInfo()->tableName, schema->getName()));
+    if (alter.getInfo()->type != AlterType::COMMENT) {
+        for (auto& schema : catalog->getRdfGraphEntries(clientContext->getTx())) {
+            if (schema->isParent(tableID)) {
+                throw BinderException(
+                    stringFormat("Cannot alter table {} because it is referenced by rdfGraph {}.",
+                        alter.getInfo()->tableName, schema->getName()));
+            }
         }
     }
     switch (alter.getInfo()->type) {
@@ -275,6 +393,9 @@ std::unique_ptr<BoundStatement> Binder::bindAlter(const Statement& statement) {
     case AlterType::RENAME_PROPERTY: {
         return bindRenameProperty(statement);
     }
+    case AlterType::COMMENT: {
+        return bindCommentOn(statement);
+    }
     default: {
         KU_UNREACHABLE;
     }
@@ -282,7 +403,7 @@ std::unique_ptr<BoundStatement> Binder::bindAlter(const Statement& statement) {
 }
 
 std::unique_ptr<BoundStatement> Binder::bindRenameTable(const Statement& statement) {
-    auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
+    auto& alter = statement.constCast<Alter>();
     auto info = alter.getInfo();
     auto extraInfo = ku_dynamic_cast<ExtraAlterInfo*, ExtraRenameTableInfo*>(info->extraInfo.get());
     auto tableName = info->tableName;
@@ -302,7 +423,7 @@ std::unique_ptr<BoundStatement> Binder::bindRenameTable(const Statement& stateme
 static void validatePropertyExist(TableCatalogEntry* tableEntry, const std::string& propertyName) {
     if (!tableEntry->containProperty(propertyName)) {
         throw BinderException(
-            tableEntry->getName() + " table doesn't have property " + propertyName + ".");
+            tableEntry->getName() + " table does not have property " + propertyName + ".");
     }
 }
 
@@ -329,11 +450,16 @@ static void validatePropertyDDLOnTable(TableCatalogEntry* tableEntry,
 }
 
 std::unique_ptr<BoundStatement> Binder::bindAddProperty(const Statement& statement) {
-    auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
+    auto& alter = statement.constCast<Alter>();
     auto info = alter.getInfo();
     auto extraInfo = ku_dynamic_cast<ExtraAlterInfo*, ExtraAddPropertyInfo*>(info->extraInfo.get());
     auto tableName = info->tableName;
-    auto dataType = bindDataType(extraInfo->dataType);
+    auto dataType =
+        clientContext->getCatalog()->getType(clientContext->getTx(), extraInfo->dataType);
+    if (extraInfo->defaultValue == nullptr) {
+        extraInfo->defaultValue =
+            std::make_unique<ParsedLiteralExpression>(Value::createNullValue(dataType), "NULL");
+    }
     auto propertyName = extraInfo->propertyName;
     validateTableExist(tableName);
     auto catalog = clientContext->getCatalog();
@@ -341,20 +467,31 @@ std::unique_ptr<BoundStatement> Binder::bindAddProperty(const Statement& stateme
     auto tableSchema = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     validatePropertyDDLOnTable(tableSchema, "add");
     validatePropertyNotExist(tableSchema, propertyName);
-    if (dataType->getLogicalTypeID() == LogicalTypeID::SERIAL) {
-        throw BinderException("Serial property in node table must be the primary key.");
+    auto defaultValue = std::move(extraInfo->defaultValue);
+    auto boundDefault = expressionBinder.implicitCastIfNecessary(
+        expressionBinder.bindExpression(*defaultValue), dataType);
+    if (dataType.getLogicalTypeID() == LogicalTypeID::SERIAL) {
+        validateSerialNoDefault(*boundDefault);
+        defaultValue = createSerialDefaultExpr(Catalog::genSerialName(tableName, propertyName));
+        boundDefault = expressionBinder.implicitCastIfNecessary(
+            expressionBinder.bindExpression(*defaultValue), dataType);
     }
-    auto defaultVal = ExpressionBinder::implicitCastIfNecessary(
-        expressionBinder.bindExpression(*extraInfo->defaultValue), *dataType);
-    auto boundExtraInfo =
-        std::make_unique<BoundExtraAddPropertyInfo>(propertyName, *dataType, std::move(defaultVal));
+    // Eventually, we want to support non-constant default on rel tables, but it is non-trivial due
+    // to FWD/BWD storage
+    if (tableSchema->getType() == CatalogEntryType::REL_TABLE_ENTRY &&
+        boundDefault->expressionType != ExpressionType::LITERAL) {
+        throw BinderException(
+            "Cannot set a non-constant default value when adding columns on REL tables.");
+    }
+    auto boundExtraInfo = std::make_unique<BoundExtraAddPropertyInfo>(propertyName,
+        std::move(dataType), std::move(defaultValue), std::move(boundDefault));
     auto boundInfo =
         BoundAlterInfo(AlterType::ADD_PROPERTY, tableName, tableID, std::move(boundExtraInfo));
     return std::make_unique<BoundAlter>(std::move(boundInfo));
 }
 
 std::unique_ptr<BoundStatement> Binder::bindDropProperty(const Statement& statement) {
-    auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
+    auto& alter = statement.constCast<Alter>();
     auto info = alter.getInfo();
     auto extraInfo =
         ku_dynamic_cast<ExtraAlterInfo*, ExtraDropPropertyInfo*>(info->extraInfo.get());
@@ -372,14 +509,14 @@ std::unique_ptr<BoundStatement> Binder::bindDropProperty(const Statement& statem
                 ->getPrimaryKeyPID() == propertyID) {
         throw BinderException("Cannot drop primary key of a node table.");
     }
-    auto boundExtraInfo = std::make_unique<BoundExtraDropPropertyInfo>(propertyID);
+    auto boundExtraInfo = std::make_unique<BoundExtraDropPropertyInfo>(propertyID, propertyName);
     auto boundInfo =
         BoundAlterInfo(AlterType::DROP_PROPERTY, tableName, tableID, std::move(boundExtraInfo));
     return std::make_unique<BoundAlter>(std::move(boundInfo));
 }
 
 std::unique_ptr<BoundStatement> Binder::bindRenameProperty(const Statement& statement) {
-    auto& alter = ku_dynamic_cast<const Statement&, const Alter&>(statement);
+    auto& alter = statement.constCast<Alter>();
     auto info = alter.getInfo();
     auto extraInfo =
         ku_dynamic_cast<ExtraAlterInfo*, ExtraRenamePropertyInfo*>(info->extraInfo.get());
@@ -394,9 +531,25 @@ std::unique_ptr<BoundStatement> Binder::bindRenameProperty(const Statement& stat
     validatePropertyExist(tableSchema, propertyName);
     auto propertyID = tableSchema->getPropertyID(propertyName);
     validatePropertyNotExist(tableSchema, newName);
-    auto boundExtraInfo = std::make_unique<BoundExtraRenamePropertyInfo>(propertyID, newName);
+    auto boundExtraInfo =
+        std::make_unique<BoundExtraRenamePropertyInfo>(propertyID, newName, propertyName);
     auto boundInfo =
         BoundAlterInfo(AlterType::RENAME_PROPERTY, tableName, tableID, std::move(boundExtraInfo));
+    return std::make_unique<BoundAlter>(std::move(boundInfo));
+}
+
+std::unique_ptr<BoundStatement> Binder::bindCommentOn(const parser::Statement& statement) {
+    auto& alter = statement.constCast<Alter>();
+    auto info = alter.getInfo();
+    auto extraInfo = info->extraInfo->constPtrCast<ExtraCommentInfo>();
+    auto tableName = info->tableName;
+    auto comment = extraInfo->comment;
+    validateTableExist(tableName);
+    auto catalog = clientContext->getCatalog();
+    auto tableID = catalog->getTableID(clientContext->getTx(), tableName);
+    auto boundExtraInfo = std::make_unique<BoundExtraCommentInfo>(comment);
+    auto boundInfo =
+        BoundAlterInfo(AlterType::COMMENT, tableName, tableID, std::move(boundExtraInfo));
     return std::make_unique<BoundAlter>(std::move(boundInfo));
 }
 

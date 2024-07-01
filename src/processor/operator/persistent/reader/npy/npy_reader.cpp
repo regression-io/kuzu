@@ -192,12 +192,12 @@ void NpyReader::validate(const LogicalType& type_, offset_t numRows) {
         }
         return;
     } else if (type_.getLogicalTypeID() == LogicalTypeID::ARRAY) {
-        if (this->type != ArrayType::getChildType(&type_)->getLogicalTypeID()) {
+        if (this->type != ArrayType::getChildType(type_).getLogicalTypeID()) {
             throw CopyException(stringFormat("The type of npy file {} does not "
                                              "match the expected type.",
                 filePath));
         }
-        if (getNumElementsPerRow() != ArrayType::getNumElements(&type_)) {
+        if (getNumElementsPerRow() != ArrayType::getNumElements(type_)) {
             throw CopyException(
                 stringFormat("The shape of {} does not match {}.", filePath, type_.toString()));
         }
@@ -213,13 +213,13 @@ void NpyReader::readBlock(block_idx_t blockIdx, common::ValueVector* vectorToRea
     uint64_t rowNumber = DEFAULT_VECTOR_CAPACITY * blockIdx;
     auto numRows = getNumRows();
     if (rowNumber >= numRows) {
-        vectorToRead->state->selVector->selectedSize = 0;
+        vectorToRead->state->getSelVectorUnsafe().setSelSize(0);
     } else {
         auto rowPointer = getPointerToRow(rowNumber);
         auto numRowsToRead = std::min(DEFAULT_VECTOR_CAPACITY, getNumRows() - rowNumber);
-        auto rowType = vectorToRead->dataType;
+        const auto& rowType = vectorToRead->dataType;
         if (rowType.getLogicalTypeID() == LogicalTypeID::ARRAY) {
-            auto numValuesPerRow = ArrayType::getNumElements(&rowType);
+            auto numValuesPerRow = ArrayType::getNumElements(rowType);
             for (auto i = 0u; i < numRowsToRead; i++) {
                 auto listEntry = ListVector::addList(vectorToRead, numValuesPerRow);
                 vectorToRead->setValue(i, listEntry);
@@ -227,11 +227,11 @@ void NpyReader::readBlock(block_idx_t blockIdx, common::ValueVector* vectorToRea
             auto dataVector = ListVector::getDataVector(vectorToRead);
             memcpy(dataVector->getData(), rowPointer,
                 numRowsToRead * numValuesPerRow * dataVector->getNumBytesPerValue());
-            vectorToRead->state->selVector->selectedSize = numRowsToRead;
+            vectorToRead->state->getSelVectorUnsafe().setSelSize(numRowsToRead);
         } else {
             memcpy(vectorToRead->getData(), rowPointer,
                 numRowsToRead * vectorToRead->getNumBytesPerValue());
-            vectorToRead->state->selVector->selectedSize = numRowsToRead;
+            vectorToRead->state->getSelVectorUnsafe().setSelSize(numRowsToRead);
         }
     }
 }
@@ -257,17 +257,16 @@ static common::offset_t tableFunc(TableFuncInput& input, TableFuncOutput& output
     auto sharedState = reinterpret_cast<NpyScanSharedState*>(input.sharedState);
     auto [_, blockIdx] = sharedState->getNext();
     sharedState->npyMultiFileReader->readBlock(blockIdx, output.dataChunk);
-    return output.dataChunk.state->selVector->selectedSize;
+    return output.dataChunk.state->getSelVector().getSelSize();
 }
 
-static std::unique_ptr<LogicalType> bindColumnType(const NpyReader& reader) {
+static LogicalType bindColumnType(const NpyReader& reader) {
     if (reader.getShape().size() == 1) {
-        return std::make_unique<LogicalType>(reader.getType());
+        return LogicalType(reader.getType());
     }
     // For columns whose type is a multi-dimension array of size n*m,
     // we flatten the row data into an 1-d array with size 1*k where k = n*m
-    return LogicalType::ARRAY(std::make_unique<LogicalType>(reader.getType()),
-        reader.getNumElementsPerRow());
+    return LogicalType::ARRAY(LogicalType(reader.getType()), reader.getNumElementsPerRow());
 }
 
 static void bindColumns(const common::ReaderConfig& readerConfig, uint32_t fileIdx,
@@ -276,7 +275,7 @@ static void bindColumns(const common::ReaderConfig& readerConfig, uint32_t fileI
     auto columnName = std::string("column" + std::to_string(fileIdx));
     auto columnType = bindColumnType(reader);
     columnNames.push_back(columnName);
-    columnTypes.push_back(*columnType);
+    columnTypes.push_back(std::move(columnType));
 }
 
 static void bindColumns(const common::ReaderConfig& readerConfig,
@@ -289,13 +288,14 @@ static void bindColumns(const common::ReaderConfig& readerConfig,
         bindColumns(readerConfig, i, tmpColumnNames, tmpColumnTypes);
         ReaderBindUtils::validateNumColumns(1, tmpColumnTypes.size());
         columnNames.push_back(tmpColumnNames[0]);
-        columnTypes.push_back(tmpColumnTypes[0]);
+        columnTypes.push_back(std::move(tmpColumnTypes[0]));
     }
 }
 
 static std::unique_ptr<function::TableFuncBindData> bindFunc(main::ClientContext* /*context*/,
     function::TableFuncBindInput* input) {
-    auto scanInput = reinterpret_cast<function::ScanTableFuncBindInput*>(input);
+    auto scanInput = input->constPtrCast<function::ScanTableFuncBindInput>();
+    KU_ASSERT(scanInput->config.options.empty());
     std::vector<std::string> detectedColumnNames;
     std::vector<common::LogicalType> detectedColumnTypes;
     bindColumns(scanInput->config, detectedColumnNames, detectedColumnTypes);
@@ -305,7 +305,7 @@ static std::unique_ptr<function::TableFuncBindData> bindFunc(main::ClientContext
         resultColumnNames, scanInput->expectedColumnTypes, detectedColumnTypes, resultColumnTypes);
     auto config = scanInput->config.copy();
     KU_ASSERT(!config.filePaths.empty() && config.getNumFiles() == resultColumnNames.size());
-    row_idx_t numRows;
+    row_idx_t numRows = 0;
     for (auto i = 0u; i < config.getNumFiles(); i++) {
         auto reader = make_unique<NpyReader>(config.filePaths[i]);
         if (i == 0) {
@@ -319,7 +319,7 @@ static std::unique_ptr<function::TableFuncBindData> bindFunc(main::ClientContext
 
 static std::unique_ptr<function::TableFuncSharedState> initSharedState(
     function::TableFunctionInitInput& input) {
-    auto bindData = reinterpret_cast<function::ScanBindData*>(input.bindData);
+    auto bindData = input.bindData->constPtrCast<ScanBindData>();
     auto reader = make_unique<NpyReader>(bindData->config.filePaths[0]);
     return std::make_unique<NpyScanSharedState>(bindData->config.copy(), reader->getNumRows());
 }

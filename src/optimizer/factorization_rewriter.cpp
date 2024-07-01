@@ -159,36 +159,18 @@ void FactorizationRewriter::visitFilter(planner::LogicalOperator* op) {
     filter->setChild(0, appendFlattens(filter->getChild(0), groupsPosToFlatten));
 }
 
-void FactorizationRewriter::visitSetNodeProperty(planner::LogicalOperator* op) {
-    auto setNodeProperty = (LogicalSetNodeProperty*)op;
-    for (auto i = 0u; i < setNodeProperty->getInfosRef().size(); ++i) {
-        auto groupsPosToFlatten = setNodeProperty->getGroupsPosToFlatten(i);
-        setNodeProperty->setChild(0,
-            appendFlattens(setNodeProperty->getChild(0), groupsPosToFlatten));
+void FactorizationRewriter::visitSetProperty(planner::LogicalOperator* op) {
+    auto set = op->ptrCast<LogicalSetProperty>();
+    for (auto i = 0u; i < set->getInfos().size(); ++i) {
+        auto groupsPos = set->getGroupsPosToFlatten(i);
+        set->setChild(0, appendFlattens(set->getChild(0), groupsPos));
     }
 }
 
-void FactorizationRewriter::visitSetRelProperty(planner::LogicalOperator* op) {
-    auto setRelProperty = (LogicalSetRelProperty*)op;
-    for (auto i = 0u; i < setRelProperty->getInfosRef().size(); ++i) {
-        auto groupsPosToFlatten = setRelProperty->getGroupsPosToFlatten(i);
-        setRelProperty->setChild(0,
-            appendFlattens(setRelProperty->getChild(0), groupsPosToFlatten));
-    }
-}
-
-void FactorizationRewriter::visitDeleteNode(planner::LogicalOperator* op) {
-    auto deleteNode = (LogicalDeleteNode*)op;
+void FactorizationRewriter::visitDelete(planner::LogicalOperator* op) {
+    auto deleteNode = op->ptrCast<LogicalDelete>();
     auto groupsPosToFlatten = deleteNode->getGroupsPosToFlatten();
     deleteNode->setChild(0, appendFlattens(deleteNode->getChild(0), groupsPosToFlatten));
-}
-
-void FactorizationRewriter::visitDeleteRel(planner::LogicalOperator* op) {
-    auto deleteRel = (LogicalDeleteRel*)op;
-    for (auto i = 0u; i < deleteRel->getRelsRef().size(); ++i) {
-        auto groupsPosToFlatten = deleteRel->getGroupsPosToFlatten(i);
-        deleteRel->setChild(0, appendFlattens(deleteRel->getChild(0), groupsPosToFlatten));
-    }
 }
 
 void FactorizationRewriter::visitInsert(planner::LogicalOperator* op) {

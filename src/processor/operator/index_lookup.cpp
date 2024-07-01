@@ -5,7 +5,6 @@
 #include "common/types/ku_string.h"
 #include "common/types/types.h"
 #include "common/vector/value_vector.h"
-#include "processor/operator/persistent/node_batch_insert.h"
 #include "storage/index/hash_index.h"
 #include "transaction/transaction.h"
 
@@ -33,7 +32,7 @@ std::unique_ptr<PhysicalOperator> IndexLookup::clone() {
         copiedInfos.push_back(info->copy());
     }
     return make_unique<IndexLookup>(std::move(copiedInfos), children[0]->clone(), getOperatorID(),
-        paramsString);
+        printInfo->copy());
 }
 
 void IndexLookup::setBatchInsertSharedState(std::shared_ptr<BatchInsertSharedState> sharedState) {
@@ -55,8 +54,8 @@ void IndexLookup::checkNullKeys(ValueVector* keyVector) {
     if (keyVector->hasNoNullsGuarantee()) {
         return;
     }
-    for (auto i = 0u; i < keyVector->state->selVector->selectedSize; i++) {
-        auto pos = keyVector->state->selVector->selectedPositions[i];
+    for (auto i = 0u; i < keyVector->state->getSelVector().getSelSize(); i++) {
+        auto pos = keyVector->state->getSelVector()[i];
         if (keyVector->isNull(pos)) {
             throw RuntimeException(ExceptionMessage::nullPKException());
         }
@@ -65,25 +64,11 @@ void IndexLookup::checkNullKeys(ValueVector* keyVector) {
 
 void stringPKFillOffsetArraysFromVector(transaction::Transaction* transaction,
     const IndexLookupInfo& info, ValueVector* keyVector, offset_t* offsets) {
-    auto numKeys = keyVector->state->selVector->selectedSize;
-    if (info.batchInsertSharedState == nullptr) {
-        for (auto i = 0u; i < numKeys; i++) {
-            auto key =
-                keyVector->getValue<ku_string_t>(keyVector->state->selVector->selectedPositions[i]);
-            if (!info.index->lookup(transaction, key.getAsStringView(), offsets[i])) {
-                throw RuntimeException(ExceptionMessage::nonExistentPKException(key.getAsString()));
-            }
-        }
-    } else {
-        auto nodeBatchInsertSharedState =
-            ku_dynamic_cast<BatchInsertSharedState*, NodeBatchInsertSharedState*>(
-                info.batchInsertSharedState.get());
-        for (auto i = 0u; i < numKeys; i++) {
-            auto key =
-                keyVector->getValue<ku_string_t>(keyVector->state->selVector->selectedPositions[i]);
-            if (!nodeBatchInsertSharedState->pkIndex->lookup(key.getAsStringView(), offsets[i])) {
-                throw RuntimeException(ExceptionMessage::nonExistentPKException(key.getAsString()));
-            }
+    auto numKeys = keyVector->state->getSelVector().getSelSize();
+    for (auto i = 0u; i < numKeys; i++) {
+        auto key = keyVector->getValue<ku_string_t>(keyVector->state->getSelVector()[i]);
+        if (!info.index->lookup(transaction, key.getAsStringView(), offsets[i])) {
+            throw RuntimeException(ExceptionMessage::nonExistentPKException(key.getAsString()));
         }
     }
 }
@@ -91,27 +76,13 @@ void stringPKFillOffsetArraysFromVector(transaction::Transaction* transaction,
 template<HashablePrimitive T>
 void primitivePKFillOffsetArraysFromVector(transaction::Transaction* transaction,
     const IndexLookupInfo& info, ValueVector* keyVector, offset_t* offsets) {
-    auto numKeys = keyVector->state->selVector->selectedSize;
-    if (info.batchInsertSharedState == nullptr) {
-        for (auto i = 0u; i < numKeys; i++) {
-            auto pos = keyVector->state->selVector->selectedPositions[i];
-            auto key = keyVector->getValue<T>(pos);
-            if (!info.index->lookup(transaction, key, offsets[i])) {
-                throw RuntimeException(
-                    ExceptionMessage::nonExistentPKException(TypeUtils::toString(key)));
-            }
-        }
-    } else {
-        auto nodeBatchInsertSharedState =
-            ku_dynamic_cast<BatchInsertSharedState*, NodeBatchInsertSharedState*>(
-                info.batchInsertSharedState.get());
-        for (auto i = 0u; i < numKeys; i++) {
-            auto pos = keyVector->state->selVector->selectedPositions[i];
-            auto key = keyVector->getValue<T>(pos);
-            if (!nodeBatchInsertSharedState->pkIndex->lookup(key, offsets[i])) {
-                throw RuntimeException(
-                    ExceptionMessage::nonExistentPKException(TypeUtils::toString(key)));
-            }
+    auto numKeys = keyVector->state->getSelVector().getSelSize();
+    for (auto i = 0u; i < numKeys; i++) {
+        auto pos = keyVector->state->getSelVector()[i];
+        auto key = keyVector->getValue<T>(pos);
+        if (!info.index->lookup(transaction, key, offsets[i])) {
+            throw RuntimeException(
+                ExceptionMessage::nonExistentPKException(TypeUtils::toString(key)));
         }
     }
 }
@@ -122,21 +93,12 @@ void IndexLookup::fillOffsetArraysFromVector(transaction::Transaction* transacti
     KU_ASSERT(resultVector->dataType.getPhysicalType() == PhysicalTypeID::INT64);
     auto offsets = (offset_t*)resultVector->getData();
     TypeUtils::visit(
-        info.pkDataType->getPhysicalType(),
+        keyVector->dataType.getPhysicalType(),
         [&](ku_string_t) {
             stringPKFillOffsetArraysFromVector(transaction, info, keyVector, offsets);
         },
-        [&]<HashablePrimitive T>(T) {
-            if (info.pkDataType->getLogicalTypeID() == LogicalTypeID::SERIAL) {
-                auto numKeys = keyVector->state->selVector->selectedSize;
-                for (auto i = 0u; i < numKeys; i++) {
-                    auto pos = keyVector->state->selVector->selectedPositions[i];
-                    offsets[i] = keyVector->getValue<int64_t>(pos);
-                }
-            } else {
-                primitivePKFillOffsetArraysFromVector<T>(transaction, info, keyVector, offsets);
-            }
-        },
+        [&]<HashablePrimitive T>(
+            T) { primitivePKFillOffsetArraysFromVector<T>(transaction, info, keyVector, offsets); },
         [&](auto) { KU_UNREACHABLE; });
 }
 

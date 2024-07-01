@@ -1,17 +1,14 @@
 #pragma once
 
 #include <atomic>
-#include <cstdint>
 #include <memory>
 #include <mutex>
 
-#include "client_config.h"
 #include "common/task_system/progress_bar.h"
 #include "common/timer.h"
 #include "common/types/value/value.h"
-#include "function/function.h"
 #include "function/table/scan_replacement.h"
-#include "main/kuzu_fwd.h"
+#include "main/client_config.h"
 #include "parser/statement.h"
 #include "prepared_statement.h"
 #include "query_result.h"
@@ -26,14 +23,18 @@ class ExpressionBinder;
 
 namespace common {
 class RandomEngine;
-}
+class TaskScheduler;
+} // namespace common
 
 namespace extension {
 struct ExtensionOptions;
 }
 
 namespace main {
+class DBConfig;
 class Database;
+class DatabaseManager;
+class AttachedKuzuDatabase;
 
 struct ActiveQuery {
     explicit ActiveQuery();
@@ -47,22 +48,26 @@ struct ActiveQuery {
  * @brief Contain client side configuration. We make profiler associated per query, so profiler is
  * not maintained in client context.
  */
-class ClientContext {
+class KUZU_API ClientContext {
     friend class Connection;
     friend class binder::Binder;
     friend class binder::ExpressionBinder;
 
 public:
     explicit ClientContext(Database* database);
+    ~ClientContext();
 
     // Client config
-    const ClientConfig* getClientConfig() const { return &config; }
-    ClientConfig* getClientConfigUnsafe() { return &config; }
-    KUZU_API common::Value getCurrentSetting(const std::string& optionName);
+    const ClientConfig* getClientConfig() const { return &clientConfig; }
+    ClientConfig* getClientConfigUnsafe() { return &clientConfig; }
+    const DBConfig* getDBConfig() const { return &dbConfig; }
+    DBConfig* getDBConfigUnsafe() { return &dbConfig; }
+    common::Value getCurrentSetting(const std::string& optionName);
+    bool isOptionSet(const std::string& name) const;
     // Timer and timeout
     void interrupt() { activeQuery.interrupted = true; }
     bool interrupted() const { return activeQuery.interrupted; }
-    bool hasTimeout() const { return config.timeoutInMS != 0; }
+    bool hasTimeout() const { return clientConfig.timeoutInMS != 0; }
     void setQueryTimeOut(uint64_t timeoutInMS);
     uint64_t getQueryTimeOut() const;
     void startTimer();
@@ -75,7 +80,7 @@ public:
 
     // Transaction.
     transaction::Transaction* getTx() const;
-    KUZU_API transaction::TransactionContext* getTransactionContext() const;
+    transaction::TransactionContext* getTransactionContext() const;
 
     // Progress bar
     common::ProgressBar* getProgressBar() const;
@@ -84,26 +89,32 @@ public:
     void addScanReplace(function::ScanReplacement scanReplacement);
     std::unique_ptr<function::ScanReplacementData> tryReplace(const std::string& objectName) const;
     // Extension
-    KUZU_API void setExtensionOption(std::string name, common::Value value);
+    void setExtensionOption(std::string name, common::Value value);
     extension::ExtensionOptions* getExtensionOptions() const;
     std::string getExtensionDir() const;
 
     // Environment.
-    KUZU_API std::string getEnvVariable(const std::string& name);
+    std::string getEnvVariable(const std::string& name);
 
     // Database component getters.
-    KUZU_API Database* getDatabase() const { return database; }
+    std::string getDatabasePath() const;
+    Database* getDatabase() const { return localDatabase; }
+    common::TaskScheduler* getTaskScheduler() const;
+    DatabaseManager* getDatabaseManager() const;
     storage::StorageManager* getStorageManager() const;
-    KUZU_API storage::MemoryManager* getMemoryManager();
+    storage::MemoryManager* getMemoryManager();
     catalog::Catalog* getCatalog() const;
+    transaction::TransactionManager* getTransactionManagerUnsafe() const;
     common::VirtualFileSystem* getVFSUnsafe() const;
     common::RandomEngine* getRandomEngine();
 
     // Query.
     std::unique_ptr<PreparedStatement> prepare(std::string_view query);
-    KUZU_API std::unique_ptr<QueryResult> executeWithParams(PreparedStatement* preparedStatement,
-        std::unordered_map<std::string, std::unique_ptr<common::Value>> inputParams);
-    std::unique_ptr<QueryResult> query(std::string_view queryStatement);
+    std::unique_ptr<QueryResult> executeWithParams(PreparedStatement* preparedStatement,
+        std::unordered_map<std::string, std::unique_ptr<common::Value>> inputParams,
+        std::optional<uint64_t> queryID = std::nullopt);
+    std::unique_ptr<QueryResult> query(std::string_view queryStatement,
+        std::optional<uint64_t> queryID = std::nullopt);
     void runQuery(std::string query);
 
     // TODO(Jiamin): should remove after supporting ddl in manual tx
@@ -111,9 +122,14 @@ public:
     // only use for test framework
     std::vector<std::shared_ptr<parser::Statement>> parseQuery(std::string_view query);
 
+    void setDefaultDatabase(AttachedKuzuDatabase* defaultDatabase_);
+    bool hasDefaultDatabase();
+
+    void cleanUP();
+
 private:
     std::unique_ptr<QueryResult> query(std::string_view query, std::string_view encodedJoin,
-        bool enumerateAllPlans = true);
+        bool enumerateAllPlans = true, std::optional<uint64_t> queryID = std::nullopt);
 
     std::unique_ptr<QueryResult> queryResultWithError(std::string_view errMsg);
 
@@ -143,16 +159,19 @@ private:
         const std::unordered_map<std::string, std::unique_ptr<common::Value>>& inputParams);
 
     std::unique_ptr<QueryResult> executeAndAutoCommitIfNecessaryNoLock(
-        PreparedStatement* preparedStatement, uint32_t planIdx = 0u, bool requiredNexTx = true);
+        PreparedStatement* preparedStatement, uint32_t planIdx = 0u, bool requiredNexTx = true,
+        std::optional<uint64_t> queryID = std::nullopt);
 
+    void runFuncInTransaction(const std::function<void(void)>& fun);
     void addScalarFunction(std::string name, function::function_set definitions);
+    void removeScalarFunction(std::string name);
 
-    bool startUDFAutoTrx(transaction::TransactionContext* trx);
-
-    void commitUDFTrx(bool isAutoCommitTrx);
+    bool canExecuteWriteQuery();
 
     // Client side configurable settings.
-    ClientConfig config;
+    ClientConfig clientConfig;
+    // Database configurable settings.
+    DBConfig& dbConfig;
     // Current query.
     ActiveQuery activeQuery;
     // Transaction context.
@@ -163,9 +182,11 @@ private:
     std::unordered_map<std::string, common::Value> extensionOptionValues;
     // Random generator for UUID.
     std::unique_ptr<common::RandomEngine> randomEngine;
-    // Attached database.
-    Database* database;
-    // Progress bar for queries
+    // Local database.
+    Database* localDatabase;
+    // Remote database.
+    AttachedKuzuDatabase* remoteDatabase;
+    // Progress bar.
     std::unique_ptr<common::ProgressBar> progressBar;
     std::mutex mtx;
 };

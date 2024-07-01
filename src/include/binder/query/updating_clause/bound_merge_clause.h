@@ -10,12 +10,16 @@ namespace binder {
 
 class BoundMergeClause : public BoundUpdatingClause {
 public:
-    BoundMergeClause(QueryGraphCollection queryGraphCollection,
-        std::shared_ptr<Expression> predicate, std::vector<BoundInsertInfo> insertInfos,
-        std::shared_ptr<Expression> distinctMark)
-        : BoundUpdatingClause{common::ClauseType::MERGE},
+    BoundMergeClause(std::shared_ptr<Expression> existenceMark,
+        std::shared_ptr<Expression> distinctMark, QueryGraphCollection queryGraphCollection,
+        std::shared_ptr<Expression> predicate, std::vector<BoundInsertInfo> insertInfos)
+        : BoundUpdatingClause{common::ClauseType::MERGE}, existenceMark{std::move(existenceMark)},
+          distinctMark{std::move(distinctMark)},
           queryGraphCollection{std::move(queryGraphCollection)}, predicate{std::move(predicate)},
-          insertInfos{std::move(insertInfos)}, distinctMark{std::move(distinctMark)} {}
+          insertInfos{std::move(insertInfos)} {}
+
+    std::shared_ptr<Expression> getExistenceMark() const { return existenceMark; }
+    std::shared_ptr<Expression> getDistinctMark() const { return distinctMark; }
 
     const QueryGraphCollection* getQueryGraphCollection() const { return &queryGraphCollection; }
     bool hasPredicate() const { return predicate != nullptr; }
@@ -48,43 +52,43 @@ public:
 
     bool hasOnMatchSetNodeInfo() const {
         return hasOnMatchSetInfo([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::NODE;
+            return info.tableType == common::TableType::NODE;
         });
     }
-    std::vector<const BoundSetPropertyInfo*> getOnMatchSetNodeInfos() const {
+    std::vector<BoundSetPropertyInfo> getOnMatchSetNodeInfos() const {
         return getOnMatchSetInfos([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::NODE;
+            return info.tableType == common::TableType::NODE;
         });
     }
     bool hasOnMatchSetRelInfo() const {
         return hasOnMatchSetInfo([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::REL;
+            return info.tableType == common::TableType::REL;
         });
     }
-    std::vector<const BoundSetPropertyInfo*> getOnMatchSetRelInfos() const {
+    std::vector<BoundSetPropertyInfo> getOnMatchSetRelInfos() const {
         return getOnMatchSetInfos([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::REL;
+            return info.tableType == common::TableType::REL;
         });
     }
 
     bool hasOnCreateSetNodeInfo() const {
         return hasOnCreateSetInfo([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::NODE;
+            return info.tableType == common::TableType::NODE;
         });
     }
-    std::vector<const BoundSetPropertyInfo*> getOnCreateSetNodeInfos() const {
+    std::vector<BoundSetPropertyInfo> getOnCreateSetNodeInfos() const {
         return getOnCreateSetInfos([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::NODE;
+            return info.tableType == common::TableType::NODE;
         });
     }
     bool hasOnCreateSetRelInfo() const {
         return hasOnCreateSetInfo([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::REL;
+            return info.tableType == common::TableType::REL;
         });
     }
-    std::vector<const BoundSetPropertyInfo*> getOnCreateSetRelInfos() const {
+    std::vector<BoundSetPropertyInfo> getOnCreateSetRelInfos() const {
         return getOnCreateSetInfos([](const BoundSetPropertyInfo& info) {
-            return info.updateTableType == UpdateTableType::REL;
+            return info.tableType == common::TableType::REL;
         });
     }
 
@@ -95,8 +99,6 @@ public:
         onCreateSetPropertyInfos.push_back(std::move(setPropertyInfo));
     }
 
-    std::shared_ptr<Expression> getDistinctMark() const { return distinctMark; }
-
 private:
     bool hasInsertInfo(const std::function<bool(const BoundInsertInfo& info)>& check) const;
     std::vector<const BoundInsertInfo*> getInsertInfos(
@@ -104,15 +106,17 @@ private:
 
     bool hasOnMatchSetInfo(
         const std::function<bool(const BoundSetPropertyInfo& info)>& check) const;
-    std::vector<const BoundSetPropertyInfo*> getOnMatchSetInfos(
+    std::vector<BoundSetPropertyInfo> getOnMatchSetInfos(
         const std::function<bool(const BoundSetPropertyInfo& info)>& check) const;
 
     bool hasOnCreateSetInfo(
         const std::function<bool(const BoundSetPropertyInfo& info)>& check) const;
-    std::vector<const BoundSetPropertyInfo*> getOnCreateSetInfos(
+    std::vector<BoundSetPropertyInfo> getOnCreateSetInfos(
         const std::function<bool(const BoundSetPropertyInfo& info)>& check) const;
 
 private:
+    std::shared_ptr<Expression> existenceMark;
+    std::shared_ptr<Expression> distinctMark;
     // Pattern to match.
     QueryGraphCollection queryGraphCollection;
     std::shared_ptr<Expression> predicate;
@@ -122,7 +126,6 @@ private:
     std::vector<BoundSetPropertyInfo> onMatchSetPropertyInfos;
     // Update on create
     std::vector<BoundSetPropertyInfo> onCreateSetPropertyInfos;
-    std::shared_ptr<Expression> distinctMark;
 };
 
 } // namespace binder

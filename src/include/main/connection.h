@@ -18,6 +18,8 @@ class Connection {
     friend class kuzu::testing::TestRunner;
     friend class kuzu::benchmark::Benchmark;
     friend class kuzu::testing::TinySnbDDLTest;
+    friend class ConnectionExecuteAsyncWorker;
+    friend class ConnectionQueryAsyncWorker;
 
 public:
     /**
@@ -40,16 +42,13 @@ public:
      */
     KUZU_API uint64_t getMaxNumThreadForExec();
 
-    void setProgressBarPrinting(bool enable) {
-        clientContext->progressBar->toggleProgressBarPrinting(enable);
-    }
-
     /**
      * @brief Executes the given query and returns the result.
      * @param query The query to execute.
      * @return the result of the query.
      */
     KUZU_API std::unique_ptr<QueryResult> query(std::string_view query);
+
     /**
      * @brief Prepares the given query and returns the prepared statement.
      * @param query The query to prepare.
@@ -89,50 +88,37 @@ public:
      */
     KUZU_API void setQueryTimeOut(uint64_t timeoutInMS);
 
-    /**
-     * @brief gets the query timeout value of the current connection. A value of zero (the default)
-     * disables the timeout.
-     */
-    KUZU_API uint64_t getQueryTimeOut();
-
+    // Note: this function throws exception if creating scalar function fails.
     template<typename TR, typename... Args>
     void createScalarFunction(std::string name, TR (*udfFunc)(Args...)) {
-        auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
-        auto nameCopy = std::string(name);
-        addScalarFunction(std::move(nameCopy),
-            function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc));
-        commitUDFTrx(autoTrx);
+        addScalarFunction(name, function::UDF::getFunction<TR, Args...>(name, udfFunc));
     }
 
+    // Note: this function throws exception if creating scalar function fails.
     template<typename TR, typename... Args>
     void createScalarFunction(std::string name, std::vector<common::LogicalTypeID> parameterTypes,
         common::LogicalTypeID returnType, TR (*udfFunc)(Args...)) {
-        auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
-        auto nameCopy = std::string(name);
-        addScalarFunction(std::move(nameCopy),
-            function::UDF::getFunction<TR, Args...>(std::move(name), udfFunc,
-                std::move(parameterTypes), returnType));
-        commitUDFTrx(autoTrx);
+        addScalarFunction(name, function::UDF::getFunction<TR, Args...>(name, udfFunc,
+                                    std::move(parameterTypes), returnType));
     }
+
+    void addUDFFunctionSet(std::string name, function::function_set func) {
+        addScalarFunction(name, std::move(func));
+    }
+
+    void removeUDFFunction(std::string name) { removeScalarFunction(name); }
 
     template<typename TR, typename... Args>
     void createVectorizedFunction(std::string name, function::scalar_func_exec_t scalarFunc) {
-        auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
-        auto nameCopy = std::string(name);
-        addScalarFunction(std::move(nameCopy), function::UDF::getVectorizedFunction<TR, Args...>(
-                                                   std::move(name), std::move(scalarFunc)));
-        commitUDFTrx(autoTrx);
+        addScalarFunction(name,
+            function::UDF::getVectorizedFunction<TR, Args...>(name, std::move(scalarFunc)));
     }
 
     void createVectorizedFunction(std::string name,
         std::vector<common::LogicalTypeID> parameterTypes, common::LogicalTypeID returnType,
         function::scalar_func_exec_t scalarFunc) {
-        auto autoTrx = startUDFAutoTrx(clientContext->getTransactionContext());
-        auto nameCopy = std::string(name);
-        addScalarFunction(std::move(nameCopy),
-            function::UDF::getVectorizedFunction(std::move(name), std::move(scalarFunc),
-                std::move(parameterTypes), returnType));
-        commitUDFTrx(autoTrx);
+        addScalarFunction(name, function::UDF::getVectorizedFunction(name, std::move(scalarFunc),
+                                    std::move(parameterTypes), returnType));
     }
 
     ClientContext* getClientContext() { return clientContext.get(); };
@@ -163,9 +149,13 @@ private:
         PreparedStatement* preparedStatement, uint32_t planIdx = 0u);
 
     KUZU_API void addScalarFunction(std::string name, function::function_set definitions);
+    KUZU_API void removeScalarFunction(std::string name);
 
-    KUZU_API bool startUDFAutoTrx(transaction::TransactionContext* trx);
-    KUZU_API void commitUDFTrx(bool isAutoCommitTrx);
+    std::unique_ptr<QueryResult> queryWithID(std::string_view query, uint64_t queryID);
+
+    std::unique_ptr<QueryResult> executeWithParamsWithID(PreparedStatement* preparedStatement,
+        std::unordered_map<std::string, std::unique_ptr<common::Value>> inputParams,
+        uint64_t queryID);
 
 private:
     Database* database;

@@ -13,8 +13,6 @@ struct ExceptionMessage {
     static std::string nonExistentPKException(const std::string& pkString);
     static std::string invalidPKType(const std::string& type);
     static std::string nullPKException();
-    // Bulk insertion.
-    static std::string notAllowCopyOnNonEmptyTableException();
     // Long string.
     static std::string overLargeStringPKValueException(uint64_t length);
     static std::string overLargeStringValueException(uint64_t length);
@@ -25,6 +23,8 @@ struct ExceptionMessage {
         const std::string& offset, const std::string& direction);
     // Binding exception
     static std::string variableNotInScope(const std::string& varName);
+    static std::string listFunctionIncompatibleChildrenType(const std::string& functionName,
+        const std::string& leftType, const std::string& rightType);
 };
 
 } // namespace common

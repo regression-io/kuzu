@@ -12,14 +12,12 @@ constexpr uint64_t DEFAULT_VECTOR_CAPACITY_LOG_2 = 11;
 constexpr uint64_t DEFAULT_VECTOR_CAPACITY = (uint64_t)1 << DEFAULT_VECTOR_CAPACITY_LOG_2;
 
 constexpr double DEFAULT_HT_LOAD_FACTOR = 1.5;
-constexpr uint32_t DEFAULT_VAR_LENGTH_EXTEND_MAX_DEPTH = 30;
-constexpr bool DEFAULT_ENABLE_SEMI_MASK = true;
 
 // This is the default thread sleep time we use when a thread,
 // e.g., a worker thread is in TaskScheduler, needs to block.
 constexpr uint64_t THREAD_SLEEP_TIME_WHEN_WAITING_IN_MICROS = 500;
 
-constexpr uint64_t DEFAULT_CHECKPOINT_WAIT_TIMEOUT_FOR_TRANSACTIONS_TO_LEAVE_IN_MICROS = 5000000;
+constexpr uint64_t DEFAULT_CHECKPOINT_WAIT_TIMEOUT_IN_MICROS = 5000000;
 
 // Note that some places use std::bit_ceil to calculate resizes,
 // which won't work for values other than 2. If this is changed, those will need to be updated
@@ -31,6 +29,7 @@ struct InternalKeyword {
     static constexpr char LABEL[] = "_LABEL";
     static constexpr char SRC[] = "_SRC";
     static constexpr char DST[] = "_DST";
+    static constexpr char DIRECTION[] = "_DIRECTION";
     static constexpr char LENGTH[] = "_LENGTH";
     static constexpr char NODES[] = "_NODES";
     static constexpr char RELS[] = "_RELS";
@@ -84,6 +83,7 @@ struct BufferPoolConstants {
 struct StorageConstants {
     static constexpr char OVERFLOW_FILE_SUFFIX[] = ".ovf";
     static constexpr char WAL_FILE_SUFFIX[] = ".wal";
+    static constexpr char SHADOWING_SUFFIX[] = ".shadow";
     static constexpr char INDEX_FILE_SUFFIX[] = ".hindex";
     static constexpr char NODES_STATISTICS_AND_DELETED_IDS_FILE_NAME[] =
         "nodes.statistics_and_deleted.ids";
@@ -104,6 +104,8 @@ struct StorageConstants {
 
     static constexpr uint64_t NODE_GROUP_SIZE_LOG2 = 17; // 64 * 2048 nodes per group
     static constexpr uint64_t NODE_GROUP_SIZE = (uint64_t)1 << NODE_GROUP_SIZE_LOG2;
+    static constexpr uint64_t NUM_VECTORS_PER_NODE_GROUP =
+        NODE_GROUP_SIZE / DEFAULT_VECTOR_CAPACITY;
 
     static constexpr double PACKED_CSR_DENSITY = 0.8;
     static constexpr double LEAF_LOW_CSR_DENSITY = 0.1;
@@ -111,8 +113,6 @@ struct StorageConstants {
     // The number of CSR lists in a segment.
     static constexpr uint64_t CSR_SEGMENT_SIZE_LOG2 = 10;
     static constexpr uint64_t CSR_SEGMENT_SIZE = (uint64_t)1 << CSR_SEGMENT_SIZE_LOG2;
-
-    static constexpr bool TRUNCATE_OVER_LARGE_STRINGS = true;
 };
 
 // Hash Index Configurations
@@ -135,7 +135,7 @@ struct CopyConstants {
 
     // Default configuration for csv file parsing
     static constexpr const char* STRING_CSV_PARSING_OPTIONS[] = {"ESCAPE", "DELIM", "QUOTE"};
-    static constexpr char DEFAULT_CSV_ESCAPE_CHAR = '\\';
+    static constexpr char DEFAULT_CSV_ESCAPE_CHAR = '"';
     static constexpr char DEFAULT_CSV_DELIMITER = ',';
     static constexpr char DEFAULT_CSV_QUOTE_CHAR = '"';
     static constexpr char DEFAULT_CSV_LIST_BEGIN_CHAR = '[';
@@ -148,20 +148,6 @@ struct CopyConstants {
 struct RdfConstants {
     static constexpr const char IN_MEMORY_OPTION[] = "IN_MEMORY";
     static constexpr const char STRICT_OPTION[] = "STRICT";
-};
-
-struct LoggerConstants {
-    enum class LoggerEnum : uint8_t {
-        DATABASE = 0,
-        CSV_READER = 1,
-        LOADER = 2,
-        PROCESSOR = 3,
-        BUFFER_MANAGER = 4,
-        CATALOG = 5,
-        STORAGE = 6,
-        TRANSACTION_MANAGER = 7,
-        WAL = 8,
-    };
 };
 
 struct PlannerKnobs {
@@ -196,7 +182,7 @@ struct ParquetConstants {
     static constexpr uint64_t PARQUET_INTERVAL_SIZE = 12;
 };
 
-struct CopyToCSVConstants {
+struct ExportCSVConstants {
     static constexpr const char* DEFAULT_CSV_NEWLINE = "\n";
     static constexpr const char* DEFAULT_NULL_STR = "";
     static constexpr const bool DEFAULT_FORCE_QUOTE = false;
@@ -206,8 +192,13 @@ struct CopyToCSVConstants {
 struct ImportDBConstants {
     static constexpr char SCHEMA_NAME[] = "schema.cypher";
     static constexpr char COPY_NAME[] = "copy.cypher";
-    static constexpr char MACRO_NAME[] = "macro.cypher";
 };
+
+static constexpr char ATTACHED_KUZU_DB_TYPE[] = "KUZU";
+
+static constexpr char LOCAL_DB_NAME[] = "local(kuzu)";
+
+constexpr auto DECIMAL_PRECISION_LIMIT = 38;
 
 } // namespace common
 } // namespace kuzu

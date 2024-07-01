@@ -8,15 +8,15 @@ using namespace common;
 namespace binder {
 
 void ParameterExpression::cast(const LogicalType& type) {
-    if (dataType.getLogicalTypeID() != LogicalTypeID::ANY) {
+    if (!dataType.containsAny()) {
         // LCOV_EXCL_START
         throw BinderException(
             stringFormat("Cannot change parameter expression data type from {} to {}.",
                 dataType.toString(), type.toString()));
         // LCOV_EXCL_STOP
     }
-    dataType = type;
-    value->setDataType(type);
+    dataType = type.copy();
+    value.setDataType(type);
 }
 
 } // namespace binder

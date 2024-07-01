@@ -1,36 +1,42 @@
 #pragma once
 
+#include "common/cast.h"
 #include "planner/operator/schema.h"
 
 namespace kuzu {
 namespace planner {
 
+// This ENUM is sorted by alphabetical order.
 enum class LogicalOperatorType : uint8_t {
     ACCUMULATE,
     AGGREGATE,
     ALTER,
     ATTACH_DATABASE,
-    DETACH_DATABASE,
-    COMMENT_ON,
     COPY_FROM,
     COPY_TO,
     CREATE_MACRO,
+    CREATE_SEQUENCE,
     CREATE_TABLE,
+    CREATE_TYPE,
     CROSS_PRODUCT,
-    DELETE_NODE,
-    DELETE_REL,
+    DELETE,
+    DETACH_DATABASE,
     DISTINCT,
+    DROP_SEQUENCE,
     DROP_TABLE,
     DUMMY_SCAN,
     EMPTY_RESULT,
     EXPLAIN,
     EXPRESSIONS_SCAN,
     EXTEND,
+    EXTENSION,
+    EXPORT_DATABASE,
     FILTER,
     FLATTEN,
+    GDS_CALL,
     HASH_JOIN,
-    IN_QUERY_CALL,
-    INDEX_SCAN_NODE,
+    IMPORT_DATABASE,
+    INDEX_LOOK_UP,
     INTERSECT,
     INSERT,
     LIMIT,
@@ -44,28 +50,25 @@ enum class LogicalOperatorType : uint8_t {
     PROJECTION,
     RECURSIVE_EXTEND,
     SCAN_FILE,
-    SCAN_FRONTIER,
-    SCAN_INTERNAL_ID,
-    SCAN_NODE_PROPERTY,
+    SCAN_NODE_TABLE,
     SEMI_MASKER,
-    SET_NODE_PROPERTY,
-    SET_REL_PROPERTY,
+    SET_PROPERTY,
     STANDALONE_CALL,
+    TABLE_FUNCTION_CALL,
     TRANSACTION,
     UNION_ALL,
     UNWIND,
-    EXTENSION,
-    EXPORT_DATABASE,
-    IMPORT_DATABASE,
-};
-
-struct LogicalOperatorUtils {
-    static std::string logicalOperatorTypeToString(LogicalOperatorType type);
-    static bool isUpdate(LogicalOperatorType type);
+    USE_DATABASE,
 };
 
 class LogicalOperator;
 using logical_op_vector_t = std::vector<std::shared_ptr<LogicalOperator>>;
+
+struct LogicalOperatorUtils {
+    static std::string logicalOperatorTypeToString(LogicalOperatorType type);
+    static bool isUpdate(LogicalOperatorType type);
+    static bool isAccHashJoin(const LogicalOperator& op);
+};
 
 class LogicalOperator {
 public:
@@ -102,6 +105,23 @@ public:
     // TODO: remove this function once planner do not share operator across plans
     virtual std::unique_ptr<LogicalOperator> copy() = 0;
     static logical_op_vector_t copy(const logical_op_vector_t& ops);
+
+    template<class TARGET>
+    const TARGET& constCast() const {
+        return common::ku_dynamic_cast<const LogicalOperator&, const TARGET&>(*this);
+    }
+    template<class TARGET>
+    TARGET& cast() {
+        return common::ku_dynamic_cast<LogicalOperator&, TARGET&>(*this);
+    }
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const LogicalOperator*, const TARGET*>(this);
+    }
+    template<class TARGET>
+    TARGET* ptrCast() {
+        return common::ku_dynamic_cast<LogicalOperator*, TARGET*>(this);
+    }
 
 protected:
     void createEmptySchema() { schema = std::make_unique<Schema>(); }

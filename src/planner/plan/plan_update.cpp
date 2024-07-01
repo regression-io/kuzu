@@ -2,7 +2,6 @@
 #include "binder/query/updating_clause/bound_insert_clause.h"
 #include "binder/query/updating_clause/bound_merge_clause.h"
 #include "binder/query/updating_clause/bound_set_clause.h"
-#include "common/enums/join_type.h"
 #include "planner/operator/persistent/logical_merge.h"
 #include "planner/planner.h"
 
@@ -48,7 +47,7 @@ void Planner::planInsertClause(const BoundUpdatingClause* updatingClause, Logica
     if (plan.isEmpty()) { // E.g. CREATE (a:Person {age:20})
         appendDummyScan(plan);
     } else {
-        appendAccumulate(AccumulateType::REGULAR, plan);
+        appendAccumulate(plan);
     }
     if (insertClause->hasNodeInfo()) {
         appendInsertNode(insertClause->getNodeInfos(), plan);
@@ -72,69 +71,45 @@ void Planner::planMergeClause(const BoundUpdatingClause* updatingClause, Logical
         corrExprs = getCorrelatedExprs(*mergeClause->getQueryGraphCollection(), predicates,
             plan.getSchema());
         if (corrExprs.size() == 0) {
-            throw RuntimeException{"Constant key in merge clause is not supported yet."};
+            throw RuntimeException{"Empty key in merge clause is not supported yet."};
         }
         appendMarkAccumulate(corrExprs, distinctMark, plan);
     }
-    planOptionalMatch(*mergeClause->getQueryGraphCollection(), predicates, corrExprs, plan);
-    std::vector<LogicalInsertInfo> logicalInsertNodeInfos;
+    auto existenceMark = mergeClause->getExistenceMark();
+    planOptionalMatch(*mergeClause->getQueryGraphCollection(), predicates, corrExprs, existenceMark,
+        plan);
+    auto merge =
+        std::make_shared<LogicalMerge>(existenceMark, distinctMark, plan.getLastOperator());
     if (mergeClause->hasInsertNodeInfo()) {
-        auto boundInsertNodeInfos = mergeClause->getInsertNodeInfos();
-        for (auto& info : boundInsertNodeInfos) {
-            logicalInsertNodeInfos.push_back(createLogicalInsertInfo(info)->copy());
+        for (auto& info : mergeClause->getInsertNodeInfos()) {
+            merge->addInsertNodeInfo(createLogicalInsertInfo(info)->copy());
         }
     }
-    std::vector<LogicalInsertInfo> logicalInsertRelInfos;
     if (mergeClause->hasInsertRelInfo()) {
         for (auto& info : mergeClause->getInsertRelInfos()) {
-            logicalInsertRelInfos.push_back(createLogicalInsertInfo(info)->copy());
+            merge->addInsertRelInfo(createLogicalInsertInfo(info)->copy());
         }
     }
-    std::vector<std::unique_ptr<LogicalSetPropertyInfo>> logicalOnCreateSetNodeInfos;
     if (mergeClause->hasOnCreateSetNodeInfo()) {
         for (auto& info : mergeClause->getOnCreateSetNodeInfos()) {
-            logicalOnCreateSetNodeInfos.push_back(createLogicalSetPropertyInfo(info));
+            merge->addOnCreateSetNodeInfo(info.copy());
         }
     }
-    std::vector<std::unique_ptr<LogicalSetPropertyInfo>> logicalOnCreateSetRelInfos;
     if (mergeClause->hasOnCreateSetRelInfo()) {
         for (auto& info : mergeClause->getOnCreateSetRelInfos()) {
-            logicalOnCreateSetRelInfos.push_back(createLogicalSetPropertyInfo(info));
+            merge->addOnCreateSetRelInfo(info.copy());
         }
     }
-    std::vector<std::unique_ptr<LogicalSetPropertyInfo>> logicalOnMatchSetNodeInfos;
     if (mergeClause->hasOnMatchSetNodeInfo()) {
         for (auto& info : mergeClause->getOnMatchSetNodeInfos()) {
-            logicalOnMatchSetNodeInfos.push_back(createLogicalSetPropertyInfo(info));
+            merge->addOnMatchSetNodeInfo(info.copy());
         }
     }
-    std::vector<std::unique_ptr<LogicalSetPropertyInfo>> logicalOnMatchSetRelInfos;
     if (mergeClause->hasOnMatchSetRelInfo()) {
         for (auto& info : mergeClause->getOnMatchSetRelInfos()) {
-            logicalOnMatchSetRelInfos.push_back(createLogicalSetPropertyInfo(info));
+            merge->addOnMatchSetRelInfo(info.copy());
         }
     }
-    std::shared_ptr<Expression> existenceMark;
-    auto& createInfos = mergeClause->getInsertInfosRef();
-    KU_ASSERT(!createInfos.empty());
-    auto& createInfo = createInfos[0];
-    switch (createInfo.tableType) {
-    case TableType::NODE: {
-        auto node = (NodeExpression*)createInfo.pattern.get();
-        existenceMark = node->getInternalID();
-    } break;
-    case TableType::REL: {
-        auto rel = (RelExpression*)createInfo.pattern.get();
-        existenceMark = rel->getInternalIDProperty();
-    } break;
-    default:
-        KU_UNREACHABLE;
-    }
-    auto merge = std::make_shared<LogicalMerge>(existenceMark, distinctMark,
-        std::move(logicalInsertNodeInfos), std::move(logicalInsertRelInfos),
-        std::move(logicalOnCreateSetNodeInfos), std::move(logicalOnCreateSetRelInfos),
-        std::move(logicalOnMatchSetNodeInfos), std::move(logicalOnMatchSetRelInfos),
-        plan.getLastOperator());
     appendFlattens(merge->getGroupsPosToFlatten(), plan);
     merge->setChild(0, plan.getLastOperator());
     merge->computeFactorizedSchema();
@@ -142,26 +117,24 @@ void Planner::planMergeClause(const BoundUpdatingClause* updatingClause, Logical
 }
 
 void Planner::planSetClause(const BoundUpdatingClause* updatingClause, LogicalPlan& plan) {
-    appendAccumulate(AccumulateType::REGULAR, plan);
-    auto setClause =
-        ku_dynamic_cast<const BoundUpdatingClause*, const BoundSetClause*>(updatingClause);
-    if (setClause->hasNodeInfo()) {
-        appendSetNodeProperty(setClause->getNodeInfos(), plan);
+    appendAccumulate(plan);
+    auto& setClause = updatingClause->constCast<BoundSetClause>();
+    if (setClause.hasNodeInfo()) {
+        appendSetProperty(setClause.getNodeInfos(), plan);
     }
-    if (setClause->hasRelInfo()) {
-        appendSetRelProperty(setClause->getRelInfos(), plan);
+    if (setClause.hasRelInfo()) {
+        appendSetProperty(setClause.getRelInfos(), plan);
     }
 }
 
 void Planner::planDeleteClause(const BoundUpdatingClause* updatingClause, LogicalPlan& plan) {
-    appendAccumulate(AccumulateType::REGULAR, plan);
-    auto deleteClause =
-        ku_dynamic_cast<const BoundUpdatingClause*, const BoundDeleteClause*>(updatingClause);
-    if (deleteClause->hasRelInfo()) {
-        appendDeleteRel(deleteClause->getRelInfos(), plan);
+    appendAccumulate(plan);
+    auto& deleteClause = updatingClause->constCast<BoundDeleteClause>();
+    if (deleteClause.hasRelInfo()) {
+        appendDelete(deleteClause.getRelInfos(), plan);
     }
-    if (deleteClause->hasNodeInfo()) {
-        appendDeleteNode(deleteClause->getNodeInfos(), plan);
+    if (deleteClause.hasNodeInfo()) {
+        appendDelete(deleteClause.getNodeInfos(), plan);
     }
 }
 

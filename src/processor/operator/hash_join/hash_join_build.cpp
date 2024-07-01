@@ -15,7 +15,7 @@ void HashJoinBuild::initLocalStateInternal(ResultSet* resultSet, ExecutionContex
     std::vector<LogicalType> keyTypes;
     for (auto i = 0u; i < info->keysPos.size(); ++i) {
         auto vector = resultSet->getValueVector(info->keysPos[i]).get();
-        keyTypes.push_back(*vector->dataType.copy());
+        keyTypes.push_back(vector->dataType.copy());
         if (info->fStateTypes[i] == common::FStateType::UNFLAT) {
             setKeyState(vector->state.get());
         }
@@ -28,7 +28,7 @@ void HashJoinBuild::initLocalStateInternal(ResultSet* resultSet, ExecutionContex
         payloadVectors.push_back(resultSet->getValueVector(pos).get());
     }
     hashTable = std::make_unique<JoinHashTable>(*context->clientContext->getMemoryManager(),
-        std::move(keyTypes), info->tableSchema->copy());
+        std::move(keyTypes), info->tableSchema.copy());
 }
 
 void HashJoinBuild::setKeyState(common::DataChunkState* state) {

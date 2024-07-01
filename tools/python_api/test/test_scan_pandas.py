@@ -5,6 +5,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from uuid import UUID
 
 try:
     from zoneinfo import ZoneInfo
@@ -40,6 +41,7 @@ def validate_scan_pandas_results(results: kuzu.QueryResult) -> None:
         ["Alice", None],
         datetime.date(1996, 2, 15),
         "12331",
+        UUID('d5a8ed71-6fc4-4cb3-acbc-2f5b73fd14bc'),
     ]
     assert results.get_next() == [
         False,
@@ -66,6 +68,7 @@ def validate_scan_pandas_results(results: kuzu.QueryResult) -> None:
         [],
         datetime.date(2013, 2, 22),
         "test string",
+        UUID('9a2fc988-5c5d-4217-af9e-220aef5ce7b8'),
     ]
     assert results.get_next() == [
         None,
@@ -92,6 +95,7 @@ def validate_scan_pandas_results(results: kuzu.QueryResult) -> None:
         None,
         datetime.date(2055, 1, 14),
         "5.623",
+        UUID('166055ee-a481-4e67-a4fc-98682d3a3e20'),
     ]
     assert results.get_next() == [
         False,
@@ -118,6 +122,7 @@ def validate_scan_pandas_results(results: kuzu.QueryResult) -> None:
         ["Dan, Ella", "George"],
         datetime.date(2018, 3, 17),
         None,
+        UUID('d5a8ed71-6fc4-4cb3-acbc-2f5b73fd14bc'),
     ]
 
 
@@ -189,13 +194,15 @@ def test_scan_pandas(tmp_path: Path) -> None:
             dtype=object,
         ),
         "mixed_type": np.array([12331, "test string", 5.623, None], dtype="object"),
+        "uuid_type": [UUID('d5a8ed71-6fc4-4cb3-acbc-2f5b73fd14bc'),
+            UUID('9a2fc988-5c5d-4217-af9e-220aef5ce7b8'),
+            UUID('166055ee-a481-4e67-a4fc-98682d3a3e20'),
+            UUID('d5a8ed71-6fc4-4cb3-acbc-2f5b73fd14bc')]
     }
     df = pd.DataFrame(data)
     df["datetime_microseconds_tz"] = df["datetime_microseconds_tz"].dt.tz_localize("US/Eastern")
-    results = conn.execute("CALL READ_PANDAS(df) RETURN *")
+    results = conn.execute("LOAD FROM df RETURN *")
     validate_scan_pandas_results(results)
-    results2 = conn.execute("LOAD FROM df RETURN *")
-    validate_scan_pandas_results(results2)
 
 
 def test_scan_pandas_timestamp(tmp_path: Path) -> None:
@@ -213,7 +220,7 @@ def test_scan_pandas_timestamp(tmp_path: Path) -> None:
     df = pd.DataFrame({"timestamp": ts})
     # Pandas automatically converts the column from object to timestamp, so we need to manually cast back to object.
     df = df.astype({"timestamp": "object"}, copy=False)
-    results = conn.execute("CALL READ_PANDAS(df) RETURN *")
+    results = conn.execute("LOAD FROM df RETURN *")
     assert results.get_next() == [datetime.datetime(1996, 2, 15, hour=12, minute=22, second=54)]
     assert results.get_next() == [datetime.datetime(2011, 3, 11, minute=11, hour=5)]
     assert results.get_next() == [None]
@@ -262,7 +269,7 @@ def test_scan_pandas_with_filter(tmp_path: Path) -> None:
     df = pd.DataFrame(data)
     # Dummy query to ensure the READ_PANDAS function is persistent after a write transaction.
     conn.execute("CREATE NODE TABLE PERSON1(ID INT64, PRIMARY KEY(ID))")
-    results = conn.execute("CALL READ_PANDAS(df) WHERE id > 20 RETURN id + 5, weight, name")
+    results = conn.execute("LOAD FROM df WHERE id > 20 RETURN id + 5, weight, name")
     assert results.get_next() == [27, 23.2, "ñ"]
     assert results.get_next() == [105, 42.9, "😊"]
 
@@ -277,7 +284,7 @@ def test_large_pd(tmp_path: Path) -> None:
         "odd": np.array(odd_numbers, dtype=np.int64),
         "even": np.array(even_numbers, dtype=np.int64),
     })
-    result = conn.execute("CALL READ_PANDAS(df) RETURN *").get_as_df()
+    result = conn.execute("LOAD FROM df RETURN *").get_as_df()
     assert result["odd"].to_list() == odd_numbers
     assert result["even"].to_list() == even_numbers
 
@@ -299,7 +306,7 @@ def test_pandas_scan_demo(tmp_path: Path) -> None:
     person = pd.DataFrame({"id": id, "age": age, "height": height_in_cm, "is_student": is_student})
 
     result = conn.execute(
-        "CALL READ_PANDAS(person) with avg(height / 2.54) as height_in_inch MATCH (s:student) WHERE s.height > "
+        "LOAD FROM person with avg(height / 2.54) as height_in_inch MATCH (s:student) WHERE s.height > "
         "height_in_inch RETURN s"
     ).get_as_df()
     assert len(result) == 2
@@ -307,9 +314,7 @@ def test_pandas_scan_demo(tmp_path: Path) -> None:
     assert result["s"][1] == {"ID": 4, "_id": {"offset": 2, "table": 0}, "_label": "student", "height": 67}
 
     conn.execute("CREATE NODE TABLE person(ID INT64, age UINT16, height UINT32, is_student BOOLean, PRIMARY KEY(ID))")
-    conn.execute(
-        "CALL READ_PANDAS(person) CREATE (p:person {ID: id, age: age, height: height, is_student: is_student})"
-    )
+    conn.execute("LOAD FROM person CREATE (p:person {ID: id, age: age, height: height, is_student: is_student})")
     result = conn.execute("MATCH (p:person) return p.*").get_as_df()
     assert np.all(result["p.ID"].to_list() == id)
     assert np.all(result["p.age"].to_list() == age)
@@ -334,7 +339,41 @@ def test_scan_all_null(tmp_path: Path) -> None:
     conn = kuzu.Connection(db)
     data = {"id": np.array([None, None, None], dtype=object)}
     df = pd.DataFrame(data)
-    result = conn.execute("CALL READ_PANDAS(df) RETURN *")
+    result = conn.execute("LOAD FROM df RETURN *")
     assert result.get_next() == [None]
     assert result.get_next() == [None]
     assert result.get_next() == [None]
+
+
+def test_copy_from_scan_pandas_result(tmp_path: Path) -> None:
+    db = kuzu.Database(tmp_path)
+    conn = kuzu.Connection(db)
+    df = pd.DataFrame({"name": ["Adam", "Karissa", "Zhang", "Noura"], "age": [30, 40, 50, 25]})
+    conn.execute("CREATE NODE TABLE Person(name STRING, age INT64, PRIMARY KEY (name));")
+    conn.execute("COPY Person FROM (LOAD FROM df WHERE age < 30 RETURN *);")
+    result = conn.execute("match (p:Person) return p.*")
+    assert result.get_next() == ["Noura", 25]
+    assert result.has_next() is False
+
+
+def test_scan_from_py_arrow_pandas(tmp_path: Path) -> None:
+    db = kuzu.Database(tmp_path)
+    conn = kuzu.Connection(db)
+    df = pd.DataFrame({"name": ["Adam", "Karissa", "Zhang", "Noura"], "age": [30, 40, 50, 25]}).convert_dtypes(
+        dtype_backend="pyarrow"
+    )
+    result = conn.execute("LOAD FROM df RETURN *;")
+    assert result.get_next() == ["Adam", 30]
+    assert result.get_next() == ["Karissa", 40]
+    assert result.get_next() == ["Zhang", 50]
+    assert result.get_next() == ["Noura", 25]
+    assert result.has_next() is False
+
+
+def test_scan_long_utf8_string(tmp_path: Path) -> None:
+    db = kuzu.Database(tmp_path)
+    conn = kuzu.Connection(db)
+    data = {"name": ["很长的一段中文", "短", "非常长的中文"]}
+    df = pd.DataFrame(data)
+    result = conn.execute("LOAD FROM df WHERE name = '非常长的中文' RETURN count(*);")
+    assert result.get_next() == [1]

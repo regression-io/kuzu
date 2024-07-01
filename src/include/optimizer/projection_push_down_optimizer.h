@@ -4,6 +4,12 @@
 #include "planner/operator/logical_plan.h"
 
 namespace kuzu {
+namespace main {
+class ClientContext;
+}
+namespace binder {
+struct BoundSetPropertyInfo;
+}
 namespace planner {
 struct LogicalInsertInfo;
 }
@@ -31,14 +37,14 @@ private:
     void visitProjection(planner::LogicalOperator* op) override;
     void visitOrderBy(planner::LogicalOperator* op) override;
     void visitUnwind(planner::LogicalOperator* op) override;
-    void visitSetNodeProperty(planner::LogicalOperator* op) override;
-    void visitSetRelProperty(planner::LogicalOperator* op) override;
+    void visitSetProperty(planner::LogicalOperator* op) override;
     void visitInsert(planner::LogicalOperator* op) override;
-    void visitInsertInfo(const planner::LogicalInsertInfo* info);
-    void visitDeleteNode(planner::LogicalOperator* op) override;
-    void visitDeleteRel(planner::LogicalOperator* op) override;
+    void visitDelete(planner::LogicalOperator* op) override;
     void visitMerge(planner::LogicalOperator* op) override;
     void visitCopyFrom(planner::LogicalOperator* op) override;
+
+    void visitSetInfo(const binder::BoundSetPropertyInfo& info);
+    void visitInsertInfo(const planner::LogicalInsertInfo& info);
 
     void collectExpressionsInUse(std::shared_ptr<binder::Expression> expression);
 

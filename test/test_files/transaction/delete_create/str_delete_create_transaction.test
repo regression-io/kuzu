@@ -1,4 +1,3 @@
--GROUP CreateDeleteStringNodeTrxTest
 -DATASET CSV node-insertion-deletion-tests/string-pk
 --
 
@@ -44,6 +43,9 @@
 -STATEMENT [conn_read] Match (a:person) WHERE a.ID='1000000000001' RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -88,6 +90,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID='1000000000001' RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -131,6 +136,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID='1000000000001' RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE IndexScanAfterDeletionRollbackRecovery
 -LOG Index Scan After Deletion Rollback Recovery
@@ -176,6 +184,9 @@
 -STATEMENT [conn_write] Match (a:person) WHERE a.ID='1000000000001' RETURN COUNT(*);
 ---- 1
 1
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesCommitNormalExecution
 -CREATE_CONNECTION conn_read
@@ -197,6 +208,9 @@
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesCommitRecovery
 -CREATE_CONNECTION conn_read
@@ -219,6 +233,9 @@
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 0
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesRollbackNormalExecution
 -CREATE_CONNECTION conn_read
@@ -240,6 +257,9 @@
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok
+
 
 -CASE DeleteAllNodesRollbackRecovery
 -CREATE_CONNECTION conn_read
@@ -262,3 +282,5 @@
 -STATEMENT [conn_write] Match (a:person) RETURN COUNT(*);
 ---- 1
 10000
+-STATEMENT [conn_write] COMMIT
+---- ok

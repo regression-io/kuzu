@@ -1,10 +1,14 @@
-#include "binder/copy/bound_export_database.h"
-#include "binder/copy/bound_import_database.h"
+#include "binder/bound_export_database.h"
+#include "binder/bound_import_database.h"
+#include "catalog/catalog.h"
 #include "common/string_utils.h"
+#include "function/built_in_function_utils.h"
+#include "main/client_context.h"
 #include "planner/operator/persistent/logical_copy_to.h"
-#include "planner/operator/persistent/logical_export_db.h"
-#include "planner/operator/persistent/logical_import_db.h"
+#include "planner/operator/simple/logical_export_db.h"
+#include "planner/operator/simple/logical_import_db.h"
 #include "planner/planner.h"
+
 using namespace kuzu::binder;
 using namespace kuzu::storage;
 using namespace kuzu::catalog;
@@ -25,18 +29,26 @@ std::unique_ptr<LogicalPlan> Planner::planExportDatabase(const BoundStatement& s
     auto fileTypeStr = FileTypeUtils::toString(fileType);
     StringUtils::toLower(fileTypeStr);
     auto copyToSuffix = "." + fileTypeStr;
+    auto functions = clientContext->getCatalog()->getFunctions(clientContext->getTx());
+    std::string name = common::stringFormat("COPY_{}", FileTypeUtils::toString(fileType));
+    auto func =
+        function::BuiltInFunctionsUtils::matchFunction(clientContext->getTx(), name, functions);
+    KU_ASSERT(func != nullptr);
+    auto exportFunc = *func->constPtrCast<function::ExportFunction>();
     for (auto& exportTableData : *exportData) {
         auto regularQuery = exportTableData.getRegularQuery();
         KU_ASSERT(regularQuery->getStatementType() == StatementType::QUERY);
         auto tablePlan = getBestPlan(*regularQuery);
-        auto copyTo = std::make_shared<LogicalCopyTo>(filePath + "/" + exportTableData.tableName +
-                                                          copyToSuffix,
-            fileType, exportTableData.columnNames, exportTableData.getColumnTypesRef(),
-            boundExportDatabase.getCopyOption(), tablePlan->getLastOperator());
+        auto path = filePath + "/" + exportTableData.tableName + copyToSuffix;
+        function::ExportFuncBindInput bindInput{exportTableData.columnNames, std::move(path),
+            boundExportDatabase.getExportOptions()};
+        auto copyTo = std::make_shared<LogicalCopyTo>(exportFunc.bind(bindInput), exportFunc,
+            tablePlan->getLastOperator());
         logicalOperators.push_back(std::move(copyTo));
     }
-    auto exportDatabase = make_shared<LogicalExportDatabase>(
-        boundExportDatabase.getBoundFileInfo()->copy(), std::move(logicalOperators));
+    auto exportDatabase =
+        make_shared<LogicalExportDatabase>(boundExportDatabase.getBoundFileInfo()->copy(),
+            statement.getStatementResult()->getSingleColumnExpr(), std::move(logicalOperators));
     plan->setLastOperator(std::move(exportDatabase));
     return plan;
 }
@@ -44,10 +56,10 @@ std::unique_ptr<LogicalPlan> Planner::planExportDatabase(const BoundStatement& s
 std::unique_ptr<LogicalPlan> Planner::planImportDatabase(const BoundStatement& statement) {
     auto& boundImportDatabase =
         ku_dynamic_cast<const BoundStatement&, const BoundImportDatabase&>(statement);
-    auto filePath = boundImportDatabase.getFilePath();
     auto query = boundImportDatabase.getQuery();
     auto plan = std::make_unique<LogicalPlan>();
-    auto importDatabase = make_shared<LogicalImportDatabase>(query);
+    auto importDatabase = make_shared<LogicalImportDatabase>(query,
+        statement.getStatementResult()->getSingleColumnExpr());
     plan->setLastOperator(std::move(importDatabase));
     return plan;
 }

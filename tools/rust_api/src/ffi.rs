@@ -72,7 +72,7 @@ pub(crate) mod ffi {
         TIMESTAMP_NS = 38,
         TIMESTAMP_TZ = 39,
         INTERVAL = 40,
-
+        DECIMAL = 41,
         INTERNAL_ID = 42,
 
         // variable size types
@@ -128,7 +128,6 @@ pub(crate) mod ffi {
             maxDBSize: u64,
         ) -> Result<UniquePtr<Database>>;
 
-        fn database_set_logging_level(database: Pin<&mut Database>, level: &CxxString);
     }
 
     #[namespace = "kuzu::main"]
@@ -223,8 +222,8 @@ pub(crate) mod ffi {
             valueType: UniquePtr<LogicalType>,
         ) -> UniquePtr<LogicalType>;
 
-        fn logical_type_get_list_child_type(value: &LogicalType) -> &LogicalType;
-        fn logical_type_get_array_child_type(value: &LogicalType) -> &LogicalType;
+        fn logical_type_get_list_child_type(value: &LogicalType) -> UniquePtr<LogicalType>;
+        fn logical_type_get_array_child_type(value: &LogicalType) -> UniquePtr<LogicalType>;
         fn logical_type_get_array_num_elements(value: &LogicalType) -> u64;
         fn logical_type_get_struct_field_names(value: &LogicalType) -> Vec<String>;
         fn logical_type_get_struct_field_types(

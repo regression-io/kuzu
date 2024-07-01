@@ -1,27 +1,22 @@
 #pragma once
 
+#include "common/types/value/value.h"
 #include "expression_evaluator.h"
 
 namespace kuzu {
-namespace main {
-class ClientContext;
-}
-
 namespace evaluator {
 
 class LiteralExpressionEvaluator : public ExpressionEvaluator {
 public:
-    explicit LiteralExpressionEvaluator(std::shared_ptr<common::Value> value)
+    explicit LiteralExpressionEvaluator(common::Value value)
         : ExpressionEvaluator{true /* isResultFlat */}, value{std::move(value)} {}
 
-    ~LiteralExpressionEvaluator() override = default;
+    void evaluate() override;
 
-    inline void evaluate(main::ClientContext* /* clientContext */) override {}
+    bool select(common::SelectionVector& selVector) override;
 
-    bool select(common::SelectionVector& selVector, main::ClientContext* clientContext) override;
-
-    inline std::unique_ptr<ExpressionEvaluator> clone() override {
-        return make_unique<LiteralExpressionEvaluator>(value);
+    std::unique_ptr<ExpressionEvaluator> clone() override {
+        return std::make_unique<LiteralExpressionEvaluator>(value);
     }
 
 protected:
@@ -29,7 +24,8 @@ protected:
         storage::MemoryManager* memoryManager) override;
 
 private:
-    std::shared_ptr<common::Value> value;
+    common::Value value;
+    std::shared_ptr<common::DataChunkState> unflatState;
 };
 
 } // namespace evaluator

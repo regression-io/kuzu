@@ -3,6 +3,7 @@
 #include <fcntl.h>
 
 #include "common/data_chunk/data_chunk.h"
+#include "common/exception/runtime.h"
 #include "common/file_system/virtual_file_system.h"
 #include "main/client_context.h"
 #include "thrift/protocol/TCompactProtocol.h"
@@ -13,9 +14,9 @@ namespace processor {
 using namespace kuzu_parquet::format;
 using namespace kuzu::common;
 
-ParquetWriter::ParquetWriter(std::string fileName,
-    std::vector<std::unique_ptr<common::LogicalType>> types, std::vector<std::string> columnNames,
-    kuzu_parquet::format::CompressionCodec::type codec, main::ClientContext* context)
+ParquetWriter::ParquetWriter(std::string fileName, std::vector<common::LogicalType> types,
+    std::vector<std::string> columnNames, kuzu_parquet::format::CompressionCodec::type codec,
+    main::ClientContext* context)
     : fileName{std::move(fileName)}, types{std::move(types)}, columnNames{std::move(columnNames)},
       codec{codec}, fileOffset{0}, mm{context->getMemoryManager()} {
     fileInfo =
@@ -46,12 +47,12 @@ ParquetWriter::ParquetWriter(std::string fileName,
     std::vector<std::string> schemaPath;
     for (auto i = 0u; i < this->types.size(); i++) {
         columnWriters.push_back(ColumnWriter::createWriterRecursive(fileMetaData.schema, *this,
-            this->types[i].get(), this->columnNames[i], schemaPath, mm));
+            this->types[i], this->columnNames[i], schemaPath, mm));
     }
 }
 
-Type::type ParquetWriter::convertToParquetType(LogicalType* type) {
-    switch (type->getLogicalTypeID()) {
+Type::type ParquetWriter::convertToParquetType(const LogicalType& type) {
+    switch (type.getLogicalTypeID()) {
     case LogicalTypeID::BOOL:
         return Type::BOOLEAN;
     case LogicalTypeID::INT8:
@@ -64,6 +65,7 @@ Type::type ParquetWriter::convertToParquetType(LogicalType* type) {
         return Type::INT32;
     case LogicalTypeID::UINT64:
     case LogicalTypeID::INT64:
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::TIMESTAMP_TZ:
     case LogicalTypeID::TIMESTAMP_NS:
     case LogicalTypeID::TIMESTAMP_MS:
@@ -83,12 +85,12 @@ Type::type ParquetWriter::convertToParquetType(LogicalType* type) {
     default:
         throw RuntimeException{
             stringFormat("Writing a column with type: {} to parquet is not supported.",
-                LogicalTypeUtils::toString(type->getLogicalTypeID()))};
+                LogicalTypeUtils::toString(type.getLogicalTypeID()))};
     }
 }
 
-void ParquetWriter::setSchemaProperties(LogicalType* type, SchemaElement& schemaElement) {
-    switch (type->getLogicalTypeID()) {
+void ParquetWriter::setSchemaProperties(const LogicalType& type, SchemaElement& schemaElement) {
+    switch (type.getLogicalTypeID()) {
     case LogicalTypeID::INT8: {
         schemaElement.converted_type = ConvertedType::INT_8;
         schemaElement.__isset.converted_type = true;
@@ -144,7 +146,7 @@ void ParquetWriter::setSchemaProperties(LogicalType* type, SchemaElement& schema
         schemaElement.__isset.logicalType = true;
         schemaElement.logicalType.__isset.TIMESTAMP = true;
         schemaElement.logicalType.TIMESTAMP.isAdjustedToUTC =
-            (type->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
+            (type.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
         schemaElement.logicalType.TIMESTAMP.unit.__isset.MICROS = true;
     } break;
     case LogicalTypeID::TIMESTAMP_MS: {
@@ -154,6 +156,10 @@ void ParquetWriter::setSchemaProperties(LogicalType* type, SchemaElement& schema
         schemaElement.logicalType.__isset.TIMESTAMP = true;
         schemaElement.logicalType.TIMESTAMP.isAdjustedToUTC = false;
         schemaElement.logicalType.TIMESTAMP.unit.__isset.MILLIS = true;
+    } break;
+    case LogicalTypeID::SERIAL: {
+        schemaElement.converted_type = ConvertedType::SERIAL;
+        schemaElement.__isset.converted_type = true;
     } break;
     default:
         break;
@@ -183,7 +189,7 @@ void ParquetWriter::prepareRowGroup(FactorizedTable& ft, PreparedRowGroup& resul
     KU_ASSERT(ft.getTableSchema()->getNumColumns() == columnWriters.size());
     std::vector<std::unique_ptr<ColumnWriterState>> writerStates;
     std::unique_ptr<DataChunk> unflatDataChunkToRead =
-        std::make_unique<DataChunk>(ft.getTableSchema()->getNumUnflatColumns());
+        std::make_unique<DataChunk>(ft.getTableSchema()->getNumUnFlatColumns());
     std::unique_ptr<DataChunk> flatDataChunkToRead = std::make_unique<DataChunk>(
         ft.getTableSchema()->getNumFlatColumns(), DataChunkState::getSingleValueDataChunkState());
     std::vector<ValueVector*> vectorsToRead;
@@ -191,7 +197,7 @@ void ParquetWriter::prepareRowGroup(FactorizedTable& ft, PreparedRowGroup& resul
     auto numFlatVectors = 0;
     for (auto i = 0u; i < columnWriters.size(); i++) {
         writerStates.emplace_back(columnWriters[i]->initializeWriteState(row_group));
-        auto vector = std::make_unique<ValueVector>(*types[i]->copy(), mm);
+        auto vector = std::make_unique<ValueVector>(types[i].copy(), mm);
         vectorsToRead.push_back(vector.get());
         if (ft.getTableSchema()->getColumn(i)->isFlat()) {
             flatDataChunkToRead->insert(numFlatVectors, std::move(vector));
@@ -265,7 +271,7 @@ void ParquetWriter::flushRowGroup(PreparedRowGroup& rowGroup) {
 void ParquetWriter::readFromFT(FactorizedTable& ft, std::vector<ValueVector*> vectorsToRead,
     uint64_t& numTuplesRead) {
     auto numTuplesToRead =
-        ft.getTableSchema()->getNumUnflatColumns() != 0 ?
+        ft.getTableSchema()->getNumUnFlatColumns() != 0 ?
             1 :
             std::min<uint64_t>(ft.getNumTuples() - numTuplesRead, DEFAULT_VECTOR_CAPACITY);
     ft.scan(vectorsToRead, numTuplesRead, numTuplesToRead);

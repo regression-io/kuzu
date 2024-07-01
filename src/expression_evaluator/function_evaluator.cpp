@@ -1,7 +1,7 @@
 #include "expression_evaluator/function_evaluator.h"
 
 #include "binder/expression/function_expression.h"
-#include "function/cast/vector_cast_functions.h"
+#include "main/client_context.h"
 
 using namespace kuzu::common;
 using namespace kuzu::processor;
@@ -11,33 +11,32 @@ using namespace kuzu::main;
 namespace kuzu {
 namespace evaluator {
 
-void FunctionExpressionEvaluator::init(const ResultSet& resultSet, MemoryManager* memoryManager) {
-    ExpressionEvaluator::init(resultSet, memoryManager);
+void FunctionExpressionEvaluator::init(const ResultSet& resultSet,
+    main::ClientContext* clientContext) {
+    ExpressionEvaluator::init(resultSet, clientContext);
     execFunc = ((binder::ScalarFunctionExpression&)*expression).execFunc;
     if (expression->dataType.getLogicalTypeID() == LogicalTypeID::BOOL) {
         selectFunc = ((binder::ScalarFunctionExpression&)*expression).selectFunc;
     }
+    bindData = expression->constPtrCast<binder::ScalarFunctionExpression>()->getBindData()->copy();
 }
 
-void FunctionExpressionEvaluator::evaluate(ClientContext* clientContext) {
+void FunctionExpressionEvaluator::evaluate() {
+    auto cnt = localState.count;
+    auto ctx = localState.clientContext;
     for (auto& child : children) {
-        child->evaluate(clientContext);
-    }
-    auto expr =
-        ku_dynamic_cast<binder::Expression*, binder::ScalarFunctionExpression*>(expression.get());
-    if (expr->getFunctionName() == function::CastAnyFunction::name) {
-        execFunc(parameters, *resultVector, expr->getBindData());
-        return;
+        child->evaluate();
     }
     if (execFunc != nullptr) {
-        execFunc(parameters, *resultVector, clientContext);
+        bindData->clientContext = ctx;
+        bindData->count = cnt;
+        execFunc(parameters, *resultVector, bindData.get());
     }
 }
 
-bool FunctionExpressionEvaluator::select(SelectionVector& selVector,
-    ClientContext* /*ClientContext*/) {
+bool FunctionExpressionEvaluator::select(SelectionVector& selVector) {
     for (auto& child : children) {
-        child->evaluate(nullptr);
+        child->evaluate();
     }
     // Temporary code path for function whose return type is BOOL but select interface is not
     // implemented (e.g. list_contains). We should remove this if statement eventually.
@@ -45,13 +44,13 @@ bool FunctionExpressionEvaluator::select(SelectionVector& selVector,
         KU_ASSERT(resultVector->dataType.getLogicalTypeID() == LogicalTypeID::BOOL);
         execFunc(parameters, *resultVector, nullptr);
         auto numSelectedValues = 0u;
-        for (auto i = 0u; i < resultVector->state->selVector->selectedSize; ++i) {
-            auto pos = resultVector->state->selVector->selectedPositions[i];
+        for (auto i = 0u; i < resultVector->state->getSelVector().getSelSize(); ++i) {
+            auto pos = resultVector->state->getSelVector()[i];
             auto selectedPosBuffer = selVector.getMultableBuffer();
             selectedPosBuffer[numSelectedValues] = pos;
-            numSelectedValues += resultVector->getValue<bool>(pos);
+            numSelectedValues += resultVector->isNull(pos) ? 0 : resultVector->getValue<bool>(pos);
         }
-        selVector.selectedSize = numSelectedValues;
+        selVector.setSelSize(numSelectedValues);
         return numSelectedValues > 0;
     }
     return selectFunc(parameters, selVector);
@@ -68,7 +67,7 @@ std::unique_ptr<ExpressionEvaluator> FunctionExpressionEvaluator::clone() {
 
 void FunctionExpressionEvaluator::resolveResultVector(const ResultSet& /*resultSet*/,
     MemoryManager* memoryManager) {
-    resultVector = std::make_shared<ValueVector>(expression->dataType, memoryManager);
+    resultVector = std::make_shared<ValueVector>(expression->dataType.copy(), memoryManager);
     std::vector<ExpressionEvaluator*> inputEvaluators;
     inputEvaluators.reserve(children.size());
     for (auto& child : children) {

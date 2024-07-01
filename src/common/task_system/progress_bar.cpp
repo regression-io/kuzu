@@ -1,21 +1,39 @@
 #include "common/task_system/progress_bar.h"
 
+#include "common/task_system/terminal_progress_bar_display.h"
+
 namespace kuzu {
 namespace common {
 
-void ProgressBar::startProgress() {
+ProgressBar::ProgressBar() {
+    display = DefaultProgressBarDisplay();
+    numPipelines = 0;
+    numPipelinesFinished = 0;
+    queryTimer = std::make_unique<TimeMetric>(true);
+    showProgressAfter = 1000;
+    trackProgress = false;
+}
+
+std::shared_ptr<ProgressBarDisplay> ProgressBar::DefaultProgressBarDisplay() {
+    return std::make_shared<TerminalProgressBarDisplay>();
+}
+
+void ProgressBar::setDisplay(std::shared_ptr<ProgressBarDisplay> progressBarDipslay) {
+    display = progressBarDipslay;
+}
+
+void ProgressBar::startProgress(uint64_t queryID) {
     if (!trackProgress) {
         return;
     }
     std::lock_guard<std::mutex> lock(progressBarLock);
     queryTimer->start();
-    printProgressBar(0.0);
+    updateDisplay(queryID, 0.0);
 }
 
-void ProgressBar::endProgress() {
+void ProgressBar::endProgress(uint64_t queryID) {
     std::lock_guard<std::mutex> lock(progressBarLock);
-    resetProgressBar();
-    queryTimer = std::make_unique<TimeMetric>(true);
+    resetProgressBar(queryID);
 }
 
 void ProgressBar::addPipeline() {
@@ -23,74 +41,47 @@ void ProgressBar::addPipeline() {
         return;
     }
     numPipelines++;
+    display->setNumPipelines(numPipelines);
 }
 
-void ProgressBar::finishPipeline() {
+void ProgressBar::finishPipeline(uint64_t queryID) {
     if (!trackProgress) {
         return;
     }
     numPipelinesFinished++;
-    if (printing) {
-        std::cout << "\033[1A\033[2K\033[1B";
-    }
-    // This ensures that the progress bar is updated back to 0% after a pipeline is finished.
-    prevCurPipelineProgress = -0.01;
-    updateProgress(0.0);
+    updateProgress(queryID, 0.0);
 }
 
-void ProgressBar::updateProgress(double curPipelineProgress) {
+void ProgressBar::updateProgress(uint64_t queryID, double curPipelineProgress) {
     if (!trackProgress) {
         return;
     }
     std::lock_guard<std::mutex> lock(progressBarLock);
-    // Only update the progress bar if the progress has changed by at least 1%.
-    if (curPipelineProgress - prevCurPipelineProgress < 0.01) {
-        return;
-    }
-    prevCurPipelineProgress = curPipelineProgress;
-    if (printing) {
-        std::cout << "\033[2A";
-    }
-    printProgressBar(curPipelineProgress);
+    updateDisplay(queryID, curPipelineProgress);
 }
 
-void ProgressBar::printProgressBar(double curPipelineProgress) {
-    if (!shouldPrintProgress()) {
-        return;
-    }
-    printing = true;
-    float pipelineProgress = 0.0;
-    if (numPipelines > 0) {
-        pipelineProgress = (float)numPipelinesFinished / (float)numPipelines;
-    }
-    setGreenFont();
-    std::cout << "Pipelines Finished: " << int(pipelineProgress * 100.0) << "%" << "\n";
-    std::cout << "Current Pipeline Progress: " << int(curPipelineProgress * 100.0) << "%" << "\n";
-    std::cout.flush();
-    setDefaultFont();
-}
-
-void ProgressBar::resetProgressBar() {
-    if (printing) {
-        std::cout << "\033[2A\033[2K\033[1B\033[2K\033[1A";
-        std::cout.flush();
-    }
+void ProgressBar::resetProgressBar(uint64_t queryID) {
     numPipelines = 0;
     numPipelinesFinished = 0;
-    prevCurPipelineProgress = 0.0;
-    printing = false;
     if (queryTimer->isStarted) {
         queryTimer->stop();
     }
+    display->finishProgress(queryID);
 }
 
-bool ProgressBar::shouldPrintProgress() const {
+bool ProgressBar::shouldUpdateProgress() const {
     if (queryTimer->isStarted) {
         queryTimer->stop();
     }
-    bool shouldPrint = queryTimer->getElapsedTimeMS() > showProgressAfter;
+    bool shouldUpdate = queryTimer->getElapsedTimeMS() > showProgressAfter;
     queryTimer->start();
-    return shouldPrint;
+    return shouldUpdate;
+}
+
+void ProgressBar::updateDisplay(uint64_t queryID, double curPipelineProgress) {
+    if (shouldUpdateProgress()) {
+        display->updateProgress(queryID, curPipelineProgress, numPipelinesFinished);
+    }
 }
 
 void ProgressBar::toggleProgressBarPrinting(bool enable) {

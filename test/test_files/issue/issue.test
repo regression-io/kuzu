@@ -1,7 +1,24 @@
--GROUP IssueTest
 -DATASET CSV empty
 
 --
+
+-CASE 3653
+-STATEMENT CREATE NODE TABLE V (id INT64, PRIMARY KEY(id));
+---- ok
+-STATEMENT CREATE REL TABLE E (FROM V TO V, p STRING);
+---- ok
+-STATEMENT CREATE (v1:V {id: 1}), (v2:V {id: 2}), (v3:V {id: 3}), (v4:V {id: 4}), (v1)-[:E {p: "foo"}]->(v2), (v3)-[:E]->(v4);
+---- ok
+-STATEMENT MATCH (v1:V)-[e:E]->(v2:V) WHERE e.p in ["foo","bar"] RETURN e.p;
+---- 1
+foo
+
+-CASE 3652
+-STATEMENT CREATE NODE TABLE V (id INT64, PRIMARY KEY(id));
+---- ok
+-STATEMENT CREATE REL TABLE E (FROM V TO V, iri STRING);
+---- error
+Binder exception: iri is a reserved property name.
 
 -CASE 2158
 -STATEMENT CREATE NODE TABLE N1(name STRING, PRIMARY KEY(name));
@@ -28,7 +45,7 @@
 ---- 1
 {_ID: 0:0, _LABEL: Test, id: 0, content: mycontent}
 
--CASE Kind-Of-Fruit
+-CASE KindOfFruit
 -STATEMENT CREATE NODE TABLE T(name STRING, PRIMARY KEY(name));
 ---- ok
 -STATEMENT CREATE NODE TABLE Fruit(name STRING, PRIMARY KEY(name));
@@ -71,8 +88,7 @@
 -STATEMENT CREATE REL TABLE KIND_OF3(FROM T TO T, myprops MAP(STRING,STRING));
 ---- ok
 -STATEMENT CREATE REL TABLE KIND_OF4(FROM T TO T, myprops SERIAL);
----- error
-Binder exception: SERIAL properties are not supported in rel tables.
+---- ok
 -STATEMENT CREATE (:T {name: "Foo"});
 ---- ok
 -STATEMENT CREATE (:T {name: "Bar"});
@@ -261,7 +277,7 @@ ge38f9dc-f751-4174-8b8b-ec9a1b6gab83|
 ---- ok
 -STATEMENT CALL SHOW_TABLES() WHERE true RETURN *;
 ---- 1
-T|NODE|
+T|NODE|local(kuzu)|
 -STATEMENT CALL SHOW_TABLES() WHERE false RETURN *;
 ---- 0
 
@@ -405,3 +421,60 @@ v3|v2
 -STATEMENT MATCH (n:MyTask) RETURN n.*;
 ---- 1
 myid|[{input1=value1}]
+
+-CASE 2890
+-STATEMENT create node table SpotTableNode(model_key STRING, technical_name STRING, name STRING, row_count INT64, PRIMARY KEY (model_key))
+---- ok
+-STATEMENT create node table SpotColumnNode(model_key STRING, technical_name STRING, name STRING, p_unique DOUBLE, p_distinct DOUBLE, p_missing DOUBLE, common_values STRING[], PRIMARY KEY (model_key))
+---- ok
+-STATEMENT CREATE REL TABLE SpotTableToCol(FROM SpotTableNode TO SpotColumnNode)
+---- ok
+-STATEMENT BEGIN TRANSACTION
+---- ok
+-STATEMENT CREATE(t:SpotTableNode { model_key : 'tableSchema::tpcds_1.tpcds.store_returns',technical_name : 'tpcds.store_returns',name : 'Store Returns',row_count : 288279 })
+---- ok
+-STATEMENT CREATE(t:SpotColumnNode { model_key : 'columnSchema::tpcds_1.tpcds.store_returns.sr_return_time_sk',technical_name : 'sr_return_time_sk',name : 'Return Time',p_unique : 0.055061,p_distinct : 0.318826,p_missing : 0.000000,common_values : ['33413', '31810', '54900', '54638', '45302'] })
+---- ok
+-STATEMENT MATCH (l:SpotTableNode), (r:SpotColumnNode)
+                         WHERE l.model_key = 'tableSchema::tpcds_1.tpcds.store_returns' and
+                               r.model_key = 'columnSchema::tpcds_1.tpcds.store_returns.sr_return_time_sk'
+           CREATE (l)-[:SpotTableToCol {  }]->(r)
+---- ok
+-STATEMENT COMMIT
+---- ok
+
+
+-CASE 3488
+-STATEMENT MATCH (n) RETURN COUNT(*);
+---- 1
+0
+-STATEMENT MATCH (n) RETURN n;
+---- 0
+-STATEMENT MATCH (n) RETURN n.id;
+---- error
+Binder exception: Cannot find property id for n.
+-STATEMENT MATCH (n) RETURN id(n);
+---- 0
+-STATEMENT MATCH (a)-[e]->(b) RETURN a, e, b;
+---- 0
+-STATEMENT CREATE NODE TABLE label1 (id SERIAL, PRIMARY KEY(id));
+---- ok
+-STATEMENT CREATE NODE TABLE label2 (id SERIAL, PRIMARY KEY(id));
+---- ok
+-STATEMENT CREATE (n:label1) RETURN n;
+---- ok
+-STATEMENT CREATE (n:label2) RETURN n;
+---- ok
+-STATEMENT MATCH (n:label1)-[r]->() WHERE n.id = 0 RETURN r;
+---- 0
+-STATEMENT MATCH (n:label1)-[r:rel2]->() WHERE n.id = 0 RETURN r;
+---- error
+Binder exception: Table rel2 does not exist.
+-STATEMENT MATCH (n:label1)-[r]->(k:label1) WHERE n.id = 0 RETURN r;
+---- 0
+-STATEMENT MATCH (n:label2)-[r]->() WHERE n.id = 0 RETURN r;
+---- 0
+-STATEMENT MATCH (n1) WHERE NOT (n1)-[]->() RETURN n1;
+---- 2
+{_ID: 0:0, _LABEL: label1, id: 0}
+{_ID: 1:0, _LABEL: label2, id: 0}

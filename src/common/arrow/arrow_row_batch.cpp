@@ -12,189 +12,216 @@
 namespace kuzu {
 namespace common {
 
-ArrowRowBatch::ArrowRowBatch(std::vector<std::unique_ptr<main::DataTypeInfo>> typesInfo,
-    std::int64_t capacity)
-    : typesInfo{std::move(typesInfo)}, numTuples{0} {
-    auto numVectors = this->typesInfo.size();
+static void resizeVector(ArrowVector* vector, const LogicalType& type, int64_t capacity);
+
+ArrowRowBatch::ArrowRowBatch(std::vector<LogicalType> types, std::int64_t capacity)
+    : types{std::move(types)}, numTuples{0} {
+    auto numVectors = this->types.size();
     vectors.resize(numVectors);
     for (auto i = 0u; i < numVectors; i++) {
-        vectors[i] = createVector(*this->typesInfo[i], capacity);
+        vectors[i] = std::make_unique<ArrowVector>();
+        resizeVector(vectors[i].get(), this->types[i], capacity);
     }
 }
 
-// TODO(Ziyi): use physical type instead of logical type here.
-template<LogicalTypeID DT>
-void ArrowRowBatch::templateInitializeVector(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    vector->data.reserve(storage::StorageUtils::getDataTypeSize(LogicalType{DT}) * capacity);
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::BOOL>(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    vector->data.reserve(getNumBytesForBits(capacity));
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::STRING>(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    // Initialize offsets and string values buffer.
-    vector->data.reserve((capacity + 1) * sizeof(std::uint32_t));
-    ((std::uint32_t*)vector->data.data())[0] = 0;
-    vector->overflow.reserve(capacity);
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::LIST>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    KU_ASSERT(typeInfo.childrenTypesInfo.size() == 1);
-    auto childTypeInfo = typeInfo.childrenTypesInfo[0].get();
-    // Initialize offsets and child buffer.
-    vector->data.reserve((capacity + 1) * sizeof(std::uint32_t));
-    ((std::uint32_t*)vector->data.data())[0] = 0;
-    auto childVector = createVector(*childTypeInfo, capacity);
-    vector->childData.push_back(std::move(childVector));
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::ARRAY>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    KU_ASSERT(typeInfo.childrenTypesInfo.size() == 1);
-    auto childTypeInfo = typeInfo.childrenTypesInfo[0].get();
-    auto childVector = createVector(*childTypeInfo, capacity);
-    vector->childData.push_back(std::move(childVector));
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::STRUCT>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeStructVector(vector, typeInfo, capacity);
-}
-
-void ArrowRowBatch::initializeStructVector(ArrowVector* vector, const main::DataTypeInfo& typeInfo,
-    std::int64_t capacity) {
-    initializeNullBits(vector->validity, capacity);
-    for (auto& childTypeInfo : typeInfo.childrenTypesInfo) {
-        auto childVector = createVector(*childTypeInfo, capacity);
-        vector->childData.push_back(std::move(childVector));
-    }
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::INTERNAL_ID>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeStructVector(vector, typeInfo, capacity);
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::NODE>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeStructVector(vector, typeInfo, capacity);
-}
-
-template<>
-void ArrowRowBatch::templateInitializeVector<LogicalTypeID::REL>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, std::int64_t capacity) {
-    initializeStructVector(vector, typeInfo, capacity);
-}
-
-std::unique_ptr<ArrowVector> ArrowRowBatch::createVector(const main::DataTypeInfo& typeInfo,
-    std::int64_t capacity) {
-    auto result = std::make_unique<ArrowVector>();
-    switch (typeInfo.typeID) {
-    case LogicalTypeID::BOOL: {
-        templateInitializeVector<LogicalTypeID::BOOL>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INT128: {
-        templateInitializeVector<LogicalTypeID::INT128>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INT64: {
-        templateInitializeVector<LogicalTypeID::INT64>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INT32: {
-        templateInitializeVector<LogicalTypeID::INT32>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INT16: {
-        templateInitializeVector<LogicalTypeID::INT16>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INT8: {
-        templateInitializeVector<LogicalTypeID::INT8>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::UINT64: {
-        templateInitializeVector<LogicalTypeID::UINT64>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::UINT32: {
-        templateInitializeVector<LogicalTypeID::UINT32>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::UINT16: {
-        templateInitializeVector<LogicalTypeID::UINT16>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::UINT8: {
-        templateInitializeVector<LogicalTypeID::UINT8>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::DOUBLE: {
-        templateInitializeVector<LogicalTypeID::DOUBLE>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::FLOAT: {
-        templateInitializeVector<LogicalTypeID::FLOAT>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::DATE: {
-        templateInitializeVector<LogicalTypeID::DATE>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::TIMESTAMP_MS: {
-        templateInitializeVector<LogicalTypeID::TIMESTAMP_MS>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::TIMESTAMP_NS: {
-        templateInitializeVector<LogicalTypeID::TIMESTAMP_NS>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::TIMESTAMP_SEC: {
-        templateInitializeVector<LogicalTypeID::TIMESTAMP_SEC>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::TIMESTAMP_TZ: {
-        templateInitializeVector<LogicalTypeID::TIMESTAMP_TZ>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::TIMESTAMP: {
-        templateInitializeVector<LogicalTypeID::TIMESTAMP>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INTERVAL: {
-        templateInitializeVector<LogicalTypeID::INTERVAL>(result.get(), typeInfo, capacity);
-    } break;
+static uint64_t getArrowMainBufferSize(const LogicalType& type, uint64_t capacity) {
+    switch (type.getLogicalTypeID()) {
+    case LogicalTypeID::BOOL:
+        return getNumBytesForBits(capacity);
+    case LogicalTypeID::SERIAL:
+    case LogicalTypeID::TIMESTAMP:
+    case LogicalTypeID::TIMESTAMP_SEC:
+    case LogicalTypeID::TIMESTAMP_MS:
+    case LogicalTypeID::TIMESTAMP_NS:
+    case LogicalTypeID::TIMESTAMP_TZ:
+    case LogicalTypeID::INTERVAL:
+    case LogicalTypeID::UINT64:
+    case LogicalTypeID::INT64:
+        return sizeof(int64_t) * capacity;
+    case LogicalTypeID::DATE:
+    case LogicalTypeID::UINT32:
+    case LogicalTypeID::INT32:
+        return sizeof(int32_t) * capacity;
+    case LogicalTypeID::UINT16:
+    case LogicalTypeID::INT16:
+        return sizeof(int16_t) * capacity;
+    case LogicalTypeID::UNION:
+    case LogicalTypeID::UINT8:
+    case LogicalTypeID::INT8:
+        return sizeof(int8_t) * capacity;
+    case LogicalTypeID::DECIMAL:
+    case LogicalTypeID::INT128:
+        return sizeof(int128_t) * capacity;
+    case LogicalTypeID::DOUBLE:
+        return sizeof(double) * capacity;
+    case LogicalTypeID::FLOAT:
+        return sizeof(float) * capacity;
     case LogicalTypeID::UUID:
-    case LogicalTypeID::STRING: {
-        templateInitializeVector<LogicalTypeID::STRING>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::LIST: {
-        templateInitializeVector<LogicalTypeID::LIST>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::ARRAY: {
-        templateInitializeVector<LogicalTypeID::ARRAY>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::STRUCT: {
-        templateInitializeVector<LogicalTypeID::STRUCT>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::INTERNAL_ID: {
-        templateInitializeVector<LogicalTypeID::INTERNAL_ID>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::NODE: {
-        templateInitializeVector<LogicalTypeID::NODE>(result.get(), typeInfo, capacity);
-    } break;
-    case LogicalTypeID::REL: {
-        templateInitializeVector<LogicalTypeID::REL>(result.get(), typeInfo, capacity);
-    } break;
+    case LogicalTypeID::STRING:
+    case LogicalTypeID::BLOB:
+    case LogicalTypeID::LIST:
+    case LogicalTypeID::MAP:
+        return sizeof(int32_t) * (capacity + 1);
+    case LogicalTypeID::ARRAY:
+    case LogicalTypeID::STRUCT:
+    case LogicalTypeID::INTERNAL_ID:
+    case LogicalTypeID::RECURSIVE_REL:
+    case LogicalTypeID::NODE:
+    case LogicalTypeID::REL:
+        return 0; // no main buffer
+    default:
+        KU_UNREACHABLE; // should enumerate all types.
+    }
+}
+
+static void resizeValidityBuffer(ArrowVector* vector, int64_t capacity) {
+    vector->validity.resize(getNumBytesForBits(capacity), 0xFF);
+}
+
+static void resizeMainBuffer(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    vector->data.resize(getArrowMainBufferSize(type, capacity));
+}
+
+static void resizeBLOBOverflow(ArrowVector* vector, int64_t capacity) {
+    vector->overflow.resize(capacity);
+}
+
+static void resizeUnionOverflow(ArrowVector* vector, int64_t capacity) {
+    vector->overflow.resize(capacity * sizeof(int32_t));
+}
+
+static void resizeChildVectors(ArrowVector* vector, const std::vector<LogicalType>& childTypes,
+    int64_t childCapacity) {
+    for (auto i = 0u; i < childTypes.size(); i++) {
+        if (i >= vector->childData.size()) {
+            vector->childData.push_back(std::make_unique<ArrowVector>());
+        }
+        resizeVector(vector->childData[i].get(), childTypes[i], childCapacity);
+    }
+}
+
+static void resizeGeneric(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    if (vector->capacity >= capacity) {
+        return;
+    }
+    while (vector->capacity < capacity) {
+        if (vector->capacity == 0) {
+            vector->capacity = 1;
+        } else {
+            vector->capacity *= 2;
+        }
+    }
+    resizeValidityBuffer(vector, vector->capacity);
+    resizeMainBuffer(vector, type, vector->capacity);
+}
+
+static void resizeBLOBVector(ArrowVector* vector, const LogicalType& type, int64_t capacity,
+    int64_t overflowCapacity) {
+    resizeGeneric(vector, type, capacity);
+    resizeBLOBOverflow(vector, overflowCapacity);
+}
+
+static void resizeFixedListVector(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    resizeGeneric(vector, type, capacity);
+    std::vector<LogicalType> typeVec;
+    typeVec.push_back(ArrayType::getChildType(type).copy());
+    resizeChildVectors(vector, typeVec, vector->capacity * ArrayType::getNumElements(type));
+}
+
+static void resizeListVector(ArrowVector* vector, const LogicalType& type, int64_t capacity,
+    int64_t childCapacity) {
+    resizeGeneric(vector, type, capacity);
+    std::vector<LogicalType> typeVec;
+    typeVec.push_back(ListType::getChildType(type).copy());
+    resizeChildVectors(vector, typeVec, childCapacity);
+}
+
+static void resizeStructVector(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    resizeGeneric(vector, type, capacity);
+    std::vector<LogicalType> typeVec;
+    for (auto i : StructType::getFieldTypes(type)) {
+        typeVec.push_back(i->copy());
+    }
+    resizeChildVectors(vector, typeVec, vector->capacity);
+}
+
+static void resizeUnionVector(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    if (vector->capacity < capacity) {
+        while (vector->capacity < capacity) {
+            if (vector->capacity == 0) {
+                vector->capacity = 1;
+            } else {
+                vector->capacity *= 2;
+            }
+        }
+        resizeMainBuffer(vector, type, vector->capacity);
+    }
+    resizeUnionOverflow(vector, vector->capacity);
+    std::vector<LogicalType> childTypes;
+    for (auto i = 0u; i < UnionType::getNumFields(type); i++) {
+        childTypes.push_back(UnionType::getFieldType(type, i).copy());
+    }
+    resizeChildVectors(vector, childTypes, vector->capacity);
+}
+
+static void resizeInternalIDVector(ArrowVector* vector, const LogicalType& type, int64_t capacity) {
+    resizeGeneric(vector, type, capacity);
+    std::vector<LogicalType> typeVec;
+    typeVec.push_back(LogicalType::INT64());
+    typeVec.push_back(LogicalType::INT64());
+    resizeChildVectors(vector, typeVec, vector->capacity);
+}
+
+static void resizeVector(ArrowVector* vector, const LogicalType& type, std::int64_t capacity) {
+    auto result = std::make_unique<ArrowVector>();
+    switch (type.getLogicalTypeID()) {
+    case LogicalTypeID::BOOL:
+    case LogicalTypeID::DECIMAL:
+    case LogicalTypeID::INT128:
+    case LogicalTypeID::SERIAL:
+    case LogicalTypeID::INT64:
+    case LogicalTypeID::INT32:
+    case LogicalTypeID::INT16:
+    case LogicalTypeID::INT8:
+    case LogicalTypeID::UINT64:
+    case LogicalTypeID::UINT32:
+    case LogicalTypeID::UINT16:
+    case LogicalTypeID::UINT8:
+    case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::FLOAT:
+    case LogicalTypeID::DATE:
+    case LogicalTypeID::TIMESTAMP_MS:
+    case LogicalTypeID::TIMESTAMP_NS:
+    case LogicalTypeID::TIMESTAMP_SEC:
+    case LogicalTypeID::TIMESTAMP_TZ:
+    case LogicalTypeID::TIMESTAMP:
+    case LogicalTypeID::INTERVAL:
+        return resizeGeneric(vector, type, capacity);
+    case LogicalTypeID::BLOB:
+    case LogicalTypeID::UUID:
+    case LogicalTypeID::STRING:
+        return resizeBLOBVector(vector, type, capacity, capacity);
+    case LogicalTypeID::LIST:
+    case LogicalTypeID::MAP:
+        return resizeListVector(vector, type, capacity, capacity);
+    case LogicalTypeID::ARRAY:
+        return resizeFixedListVector(vector, type, capacity);
+    case LogicalTypeID::RECURSIVE_REL:
+    case LogicalTypeID::NODE:
+    case LogicalTypeID::REL:
+    case LogicalTypeID::STRUCT:
+        return resizeStructVector(vector, type, capacity);
+    case LogicalTypeID::UNION:
+        return resizeUnionVector(vector, type, capacity);
+    case LogicalTypeID::INTERNAL_ID:
+        return resizeInternalIDVector(vector, type, capacity);
     default: {
         // LCOV_EXCL_START
         throw common::RuntimeException{
-            common::stringFormat("Unsupported type: {} for arrow conversion.",
-                LogicalTypeUtils::toString(typeInfo.typeID))};
+            common::stringFormat("Unsupported type: {} for arrow conversion.", type.toString())};
         // LCOV_EXCL_STOP
     }
     }
-    return result;
 }
 
 static void getBitPosition(std::int64_t pos, std::int64_t& bytePos, std::int64_t& bitOffset) {
@@ -214,26 +241,41 @@ static void setBitToOne(std::uint8_t* data, std::int64_t pos) {
     data[bytePos] |= ((std::uint64_t)1 << bitOffset);
 }
 
-void ArrowRowBatch::appendValue(ArrowVector* vector, const main::DataTypeInfo& typeInfo,
-    Value* value) {
+void ArrowRowBatch::appendValue(ArrowVector* vector, const LogicalType& type, Value* value) {
     if (value->isNull()) {
         copyNullValue(vector, value, vector->numValues);
     } else {
-        copyNonNullValue(vector, typeInfo, value, vector->numValues);
+        copyNonNullValue(vector, type, value, vector->numValues);
     }
     vector->numValues++;
 }
 
 template<LogicalTypeID DT>
-void ArrowRowBatch::templateCopyNonNullValue(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, Value* value, std::int64_t pos) {
+void ArrowRowBatch::templateCopyNonNullValue(ArrowVector* vector, const LogicalType& /*type*/,
+    Value* value, std::int64_t pos) {
     auto valSize = storage::StorageUtils::getDataTypeSize(LogicalType{DT});
     std::memcpy(vector->data.data() + pos * valSize, &value->val, valSize);
 }
 
 template<>
+void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::DECIMAL>(ArrowVector* vector,
+    const LogicalType& type, Value* value, std::int64_t pos) {
+    auto valSize = storage::StorageUtils::getDataTypeSize(type);
+    std::memcpy(vector->data.data() + pos * 16, &value->val, valSize);
+}
+
+template<>
+void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::INTERVAL>(ArrowVector* vector,
+    const LogicalType& /*type*/, Value* value, std::int64_t pos) {
+    auto destAddr = (int64_t*)(vector->data.data() + pos * sizeof(std::int64_t));
+    auto intervalVal = value->val.intervalVal;
+    *destAddr = intervalVal.micros + intervalVal.days * Interval::MICROS_PER_DAY +
+                intervalVal.months * Interval::MICROS_PER_MONTH;
+}
+
+template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::BOOL>(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, Value* value, std::int64_t pos) {
+    const LogicalType& /*type*/, Value* value, std::int64_t pos) {
     if (value->val.booleanVal) {
         setBitToOne(vector->data.data(), pos);
     } else {
@@ -243,20 +285,26 @@ void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::BOOL>(ArrowVector* v
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::STRING>(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, Value* value, std::int64_t pos) {
+    const LogicalType& /*type*/, Value* value, std::int64_t pos) {
     auto offsets = (std::uint32_t*)vector->data.data();
     auto strLength = value->strVal.length();
+    if (pos == 0) {
+        offsets[pos] = 0;
+    }
     offsets[pos + 1] = offsets[pos] + strLength;
-    vector->overflow.resize(offsets[pos + 1]);
+    vector->overflow.resize(offsets[pos + 1] + 1);
     std::memcpy(vector->overflow.data() + offsets[pos], value->strVal.data(), strLength);
 }
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::UUID>(ArrowVector* vector,
-    const main::DataTypeInfo& /*typeInfo*/, Value* value, std::int64_t pos) {
+    const LogicalType& /*type*/, Value* value, std::int64_t pos) {
     auto offsets = (std::uint32_t*)vector->data.data();
     auto str = UUID::toString(value->val.int128Val);
     auto strLength = str.length();
+    if (pos == 0) {
+        offsets[pos] = 0;
+    }
     offsets[pos + 1] = offsets[pos] + strLength;
     vector->overflow.resize(offsets[pos + 1]);
     std::memcpy(vector->overflow.data() + offsets[pos], str.data(), strLength);
@@ -264,95 +312,85 @@ void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::UUID>(ArrowVector* v
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::LIST>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t pos) {
-    vector->data.resize((pos + 2) * sizeof(std::uint32_t));
+    const LogicalType& type, Value* value, std::int64_t pos) {
     auto offsets = (std::uint32_t*)vector->data.data();
     auto numElements = value->childrenSize;
+    if (pos == 0) {
+        offsets[pos] = 0;
+    }
     offsets[pos + 1] = offsets[pos] + numElements;
-    auto numChildElements = offsets[pos + 1] + 1;
-    auto currentNumBytesForChildValidity = vector->childData[0]->validity.size();
-    auto numBytesForChildValidity = getNumBytesForBits(numChildElements);
-    vector->childData[0]->validity.resize(numBytesForChildValidity);
-    // Initialize validity mask which is used to mark each value is valid (non-null) or not (null).
-    for (auto i = currentNumBytesForChildValidity; i < numBytesForChildValidity; i++) {
-        vector->childData[0]->validity.data()[i] = 0xFF; // Init each value to be valid (as 1).
-    }
-    // If vector->childData[0] is a LIST, its data buffer will be resized when we add a new
-    // value into it
-    // If vector->childData[0] is an ARRAY, its data buffer is supposed to be empty,
-    // so we don't resize it here
-    if (typeInfo.childrenTypesInfo[0]->typeID != LogicalTypeID::LIST &&
-        typeInfo.childrenTypesInfo[0]->typeID != LogicalTypeID::ARRAY) {
-        vector->childData[0]->data.resize(
-            numChildElements * storage::StorageUtils::getDataTypeSize(
-                                   LogicalType{typeInfo.childrenTypesInfo[0]->typeID}));
-    }
+    std::vector<LogicalType> typeVec;
+    typeVec.push_back(ListType::getChildType(type).copy());
+    resizeChildVectors(vector, std::move(typeVec), offsets[pos + 1] + 1);
     for (auto i = 0u; i < numElements; i++) {
-        appendValue(vector->childData[0].get(), *typeInfo.childrenTypesInfo[0],
+        appendValue(vector->childData[0].get(), ListType::getChildType(type),
             value->children[i].get());
     }
 }
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::ARRAY>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t pos) {
+    const LogicalType& type, Value* value, std::int64_t /*pos*/) {
     auto numElements = value->childrenSize;
-    auto numChildElements = numElements * (pos + 1);
-    auto currentNumBytesForChildValidity = vector->childData[0]->validity.size();
-    auto numBytesForChildValidity = getNumBytesForBits(numChildElements);
-    vector->childData[0]->validity.resize(numBytesForChildValidity);
-    // Initialize validity mask which is used to mark each value is valid (non-null) or not (null).
-    for (auto i = currentNumBytesForChildValidity; i < numBytesForChildValidity; i++) {
-        vector->childData[0]->validity.data()[i] = 0xFF; // Init each value to be valid (as 1).
-    }
-    // If vector->childData[0] is a LIST, its data buffer will be resized when we add a new
-    // value into it
-    // If vector->childData[0] is an ARRAY, its data buffer is supposed to be empty,
-    // so we don't resize it here
-    if (typeInfo.childrenTypesInfo[0]->typeID != LogicalTypeID::LIST &&
-        typeInfo.childrenTypesInfo[0]->typeID != LogicalTypeID::ARRAY) {
-        vector->childData[0]->data.resize(
-            numChildElements * storage::StorageUtils::getDataTypeSize(
-                                   LogicalType{typeInfo.childrenTypesInfo[0]->typeID}));
-    }
     for (auto i = 0u; i < numElements; i++) {
-        appendValue(vector->childData[0].get(), *typeInfo.childrenTypesInfo[0],
+        appendValue(vector->childData[0].get(), ArrayType::getChildType(type),
             value->children[i].get());
     }
+}
+
+template<>
+void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::MAP>(ArrowVector* vector,
+    const LogicalType& type, Value* value, std::int64_t pos) {
+    return templateCopyNonNullValue<LogicalTypeID::LIST>(vector, type, value, pos);
 }
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::STRUCT>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t /*pos*/) {
+    const LogicalType& type, Value* value, std::int64_t /*pos*/) {
     for (auto i = 0u; i < value->childrenSize; i++) {
-        appendValue(vector->childData[i].get(), *typeInfo.childrenTypesInfo[i],
+        appendValue(vector->childData[i].get(), StructType::getFieldType(type, i),
             value->children[i].get());
     }
 }
 
 template<>
+void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::UNION>(ArrowVector* vector,
+    const LogicalType& type, Value* value, std::int64_t pos) {
+    auto typeBuffer = (std::uint8_t*)vector->data.data();
+    auto offsetsBuffer = (std::int32_t*)vector->overflow.data();
+    for (auto i = 0u; i < UnionType::getNumFields(type); i++) {
+        if (UnionType::getFieldType(type, i) == value->children[0]->dataType) {
+            typeBuffer[pos] = i;
+            offsetsBuffer[pos] = vector->childData[i]->numValues;
+            return appendValue(vector->childData[i].get(), UnionType::getFieldType(type, i),
+                value->children[0].get());
+        }
+    }
+    KU_UNREACHABLE; // We should always be able to find a matching type
+}
+
+template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::INTERNAL_ID>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t /*pos*/) {
+    const LogicalType& /*type*/, Value* value, std::int64_t /*pos*/) {
     auto nodeID = value->getValue<nodeID_t>();
     Value offsetVal((std::int64_t)nodeID.offset);
     Value tableIDVal((std::int64_t)nodeID.tableID);
-    appendValue(vector->childData[0].get(), *typeInfo.childrenTypesInfo[0], &offsetVal);
-    appendValue(vector->childData[1].get(), *typeInfo.childrenTypesInfo[1], &tableIDVal);
+    appendValue(vector->childData[0].get(), LogicalType::INT64(), &offsetVal);
+    appendValue(vector->childData[1].get(), LogicalType::INT64(), &tableIDVal);
 }
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::NODE>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t /*pos*/) {
-    appendValue(vector->childData[0].get(), *typeInfo.childrenTypesInfo[0],
+    const LogicalType& type, Value* value, std::int64_t /*pos*/) {
+    appendValue(vector->childData[0].get(), StructType::getFieldType(type, 0),
         NodeVal::getNodeIDVal(value));
-    appendValue(vector->childData[1].get(), *typeInfo.childrenTypesInfo[1],
+    appendValue(vector->childData[1].get(), StructType::getFieldType(type, 1),
         NodeVal::getLabelVal(value));
     std::int64_t propertyId = 2;
     auto numProperties = NodeVal::getNumProperties(value);
     for (auto i = 0u; i < numProperties; i++) {
-        auto name = NodeVal::getPropertyName(value, i);
         auto val = NodeVal::getPropertyVal(value, i);
-        appendValue(vector->childData[propertyId].get(), *typeInfo.childrenTypesInfo[propertyId],
+        appendValue(vector->childData[propertyId].get(), StructType::getFieldType(type, propertyId),
             val);
         propertyId++;
     }
@@ -360,105 +398,118 @@ void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::NODE>(ArrowVector* v
 
 template<>
 void ArrowRowBatch::templateCopyNonNullValue<LogicalTypeID::REL>(ArrowVector* vector,
-    const main::DataTypeInfo& typeInfo, Value* value, std::int64_t /*pos*/) {
-    appendValue(vector->childData[0].get(), *typeInfo.childrenTypesInfo[0],
+    const LogicalType& type, Value* value, std::int64_t /*pos*/) {
+    appendValue(vector->childData[0].get(), StructType::getFieldType(type, 0),
         RelVal::getSrcNodeIDVal(value));
-    appendValue(vector->childData[1].get(), *typeInfo.childrenTypesInfo[1],
+    appendValue(vector->childData[1].get(), StructType::getFieldType(type, 1),
         RelVal::getDstNodeIDVal(value));
-    std::int64_t propertyId = 2;
-    auto numProperties = NodeVal::getNumProperties(value);
+    appendValue(vector->childData[2].get(), StructType::getFieldType(type, 2),
+        RelVal::getLabelVal(value));
+    appendValue(vector->childData[3].get(), StructType::getFieldType(type, 3),
+        RelVal::getIDVal(value));
+    std::int64_t propertyId = 4;
+    auto numProperties = RelVal::getNumProperties(value);
     for (auto i = 0u; i < numProperties; i++) {
-        auto name = NodeVal::getPropertyName(value, i);
-        auto val = NodeVal::getPropertyVal(value, i);
-        appendValue(vector->childData[propertyId].get(), *typeInfo.childrenTypesInfo[propertyId],
+        auto val = RelVal::getPropertyVal(value, i);
+        appendValue(vector->childData[propertyId].get(), StructType::getFieldType(type, propertyId),
             val);
         propertyId++;
     }
 }
 
-void ArrowRowBatch::copyNonNullValue(ArrowVector* vector, const main::DataTypeInfo& typeInfo,
-    Value* value, std::int64_t pos) {
-    switch (typeInfo.typeID) {
+void ArrowRowBatch::copyNonNullValue(ArrowVector* vector, const LogicalType& type, Value* value,
+    std::int64_t pos) {
+    switch (type.getLogicalTypeID()) {
     case LogicalTypeID::BOOL: {
-        templateCopyNonNullValue<LogicalTypeID::BOOL>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::BOOL>(vector, type, value, pos);
     } break;
+    case LogicalTypeID::DECIMAL:
     case LogicalTypeID::INT128: {
-        templateCopyNonNullValue<LogicalTypeID::INT128>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INT128>(vector, type, value, pos);
     } break;
     case LogicalTypeID::UUID: {
-        templateCopyNonNullValue<LogicalTypeID::UUID>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::UUID>(vector, type, value, pos);
     } break;
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64: {
-        templateCopyNonNullValue<LogicalTypeID::INT64>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INT64>(vector, type, value, pos);
     } break;
     case LogicalTypeID::INT32: {
-        templateCopyNonNullValue<LogicalTypeID::INT32>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INT32>(vector, type, value, pos);
     } break;
     case LogicalTypeID::INT16: {
-        templateCopyNonNullValue<LogicalTypeID::INT16>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INT16>(vector, type, value, pos);
     } break;
     case LogicalTypeID::INT8: {
-        templateCopyNonNullValue<LogicalTypeID::INT8>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INT8>(vector, type, value, pos);
     } break;
     case LogicalTypeID::UINT64: {
-        templateCopyNonNullValue<LogicalTypeID::UINT64>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::UINT64>(vector, type, value, pos);
     } break;
     case LogicalTypeID::UINT32: {
-        templateCopyNonNullValue<LogicalTypeID::UINT32>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::UINT32>(vector, type, value, pos);
     } break;
     case LogicalTypeID::UINT16: {
-        templateCopyNonNullValue<LogicalTypeID::UINT16>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::UINT16>(vector, type, value, pos);
     } break;
     case LogicalTypeID::UINT8: {
-        templateCopyNonNullValue<LogicalTypeID::UINT8>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::UINT8>(vector, type, value, pos);
     } break;
     case LogicalTypeID::DOUBLE: {
-        templateCopyNonNullValue<LogicalTypeID::DOUBLE>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::DOUBLE>(vector, type, value, pos);
     } break;
     case LogicalTypeID::FLOAT: {
-        templateCopyNonNullValue<LogicalTypeID::FLOAT>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::FLOAT>(vector, type, value, pos);
     } break;
     case LogicalTypeID::DATE: {
-        templateCopyNonNullValue<LogicalTypeID::DATE>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::DATE>(vector, type, value, pos);
     } break;
     case LogicalTypeID::TIMESTAMP: {
-        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP>(vector, type, value, pos);
     } break;
     case LogicalTypeID::TIMESTAMP_TZ: {
-        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_TZ>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_TZ>(vector, type, value, pos);
     } break;
     case LogicalTypeID::TIMESTAMP_NS: {
-        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_NS>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_NS>(vector, type, value, pos);
     } break;
     case LogicalTypeID::TIMESTAMP_MS: {
-        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_MS>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_MS>(vector, type, value, pos);
     } break;
     case LogicalTypeID::TIMESTAMP_SEC: {
-        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_SEC>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::TIMESTAMP_SEC>(vector, type, value, pos);
     } break;
     case LogicalTypeID::INTERVAL: {
-        templateCopyNonNullValue<LogicalTypeID::INTERVAL>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INTERVAL>(vector, type, value, pos);
     } break;
+    case LogicalTypeID::BLOB:
     case LogicalTypeID::STRING: {
-        templateCopyNonNullValue<LogicalTypeID::STRING>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::STRING>(vector, type, value, pos);
     } break;
     case LogicalTypeID::LIST: {
-        templateCopyNonNullValue<LogicalTypeID::LIST>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::LIST>(vector, type, value, pos);
     } break;
     case LogicalTypeID::ARRAY: {
-        templateCopyNonNullValue<LogicalTypeID::ARRAY>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::ARRAY>(vector, type, value, pos);
     } break;
+    case LogicalTypeID::MAP: {
+        templateCopyNonNullValue<LogicalTypeID::MAP>(vector, type, value, pos);
+    } break;
+    case LogicalTypeID::RECURSIVE_REL:
     case LogicalTypeID::STRUCT: {
-        templateCopyNonNullValue<LogicalTypeID::STRUCT>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::STRUCT>(vector, type, value, pos);
+    } break;
+    case LogicalTypeID::UNION: {
+        templateCopyNonNullValue<LogicalTypeID::UNION>(vector, type, value, pos);
     } break;
     case LogicalTypeID::INTERNAL_ID: {
-        templateCopyNonNullValue<LogicalTypeID::INTERNAL_ID>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::INTERNAL_ID>(vector, type, value, pos);
     } break;
     case LogicalTypeID::NODE: {
-        templateCopyNonNullValue<LogicalTypeID::NODE>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::NODE>(vector, type, value, pos);
     } break;
     case LogicalTypeID::REL: {
-        templateCopyNonNullValue<LogicalTypeID::REL>(vector, typeInfo, value, pos);
+        templateCopyNonNullValue<LogicalTypeID::REL>(vector, type, value, pos);
     } break;
     default: {
         KU_UNREACHABLE;
@@ -477,6 +528,9 @@ template<>
 void ArrowRowBatch::templateCopyNullValue<LogicalTypeID::STRING>(ArrowVector* vector,
     std::int64_t pos) {
     auto offsets = (std::uint32_t*)vector->data.data();
+    if (pos == 0) {
+        offsets[pos] = 0;
+    }
     offsets[pos + 1] = offsets[pos];
     setBitToZero(vector->validity.data(), pos);
     vector->numNulls++;
@@ -486,6 +540,9 @@ template<>
 void ArrowRowBatch::templateCopyNullValue<LogicalTypeID::LIST>(ArrowVector* vector,
     std::int64_t pos) {
     auto offsets = (std::uint32_t*)vector->data.data();
+    if (pos == 0) {
+        offsets[pos] = 0;
+    }
     offsets[pos + 1] = offsets[pos];
     setBitToZero(vector->validity.data(), pos);
     vector->numNulls++;
@@ -499,20 +556,37 @@ void ArrowRowBatch::templateCopyNullValue<LogicalTypeID::ARRAY>(ArrowVector* vec
 }
 
 template<>
+void ArrowRowBatch::templateCopyNullValue<LogicalTypeID::MAP>(ArrowVector* vector,
+    std::int64_t pos) {
+    return templateCopyNullValue<LogicalTypeID::LIST>(vector, pos);
+}
+
+template<>
 void ArrowRowBatch::templateCopyNullValue<LogicalTypeID::STRUCT>(ArrowVector* vector,
     std::int64_t pos) {
     setBitToZero(vector->validity.data(), pos);
     vector->numNulls++;
 }
 
+void ArrowRowBatch::copyNullValueUnion(ArrowVector* vector, Value* value, std::int64_t pos) {
+    auto typeBuffer = (std::uint8_t*)vector->data.data();
+    auto offsetsBuffer = (std::int32_t*)vector->overflow.data();
+    typeBuffer[pos] = 0;
+    offsetsBuffer[pos] = vector->childData[0]->numValues;
+    copyNullValue(vector->childData[0].get(), value->children[0].get(), pos);
+    vector->numNulls++;
+}
+
 void ArrowRowBatch::copyNullValue(ArrowVector* vector, Value* value, std::int64_t pos) {
-    switch (value->dataType->getLogicalTypeID()) {
+    switch (value->dataType.getLogicalTypeID()) {
     case LogicalTypeID::BOOL: {
         templateCopyNullValue<LogicalTypeID::BOOL>(vector, pos);
     } break;
+    case LogicalTypeID::DECIMAL:
     case LogicalTypeID::INT128: {
         templateCopyNullValue<LogicalTypeID::INT128>(vector, pos);
     } break;
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64: {
         templateCopyNullValue<LogicalTypeID::INT64>(vector, pos);
     } break;
@@ -565,6 +639,7 @@ void ArrowRowBatch::copyNullValue(ArrowVector* vector, Value* value, std::int64_
         templateCopyNullValue<LogicalTypeID::INTERVAL>(vector, pos);
     } break;
     case LogicalTypeID::UUID:
+    case LogicalTypeID::BLOB:
     case LogicalTypeID::STRING: {
         templateCopyNullValue<LogicalTypeID::STRING>(vector, pos);
     } break;
@@ -574,11 +649,18 @@ void ArrowRowBatch::copyNullValue(ArrowVector* vector, Value* value, std::int64_
     case LogicalTypeID::ARRAY: {
         templateCopyNullValue<LogicalTypeID::ARRAY>(vector, pos);
     } break;
+    case LogicalTypeID::MAP: {
+        templateCopyNullValue<LogicalTypeID::MAP>(vector, pos);
+    } break;
     case LogicalTypeID::INTERNAL_ID: {
         templateCopyNullValue<LogicalTypeID::INTERNAL_ID>(vector, pos);
     } break;
+    case LogicalTypeID::RECURSIVE_REL:
     case LogicalTypeID::STRUCT: {
         templateCopyNullValue<LogicalTypeID::STRUCT>(vector, pos);
+    } break;
+    case LogicalTypeID::UNION: {
+        copyNullValueUnion(vector, value, pos);
     } break;
     case LogicalTypeID::NODE: {
         templateCopyNullValue<LogicalTypeID::NODE>(vector, pos);
@@ -621,8 +703,7 @@ static std::unique_ptr<ArrowArray> createArrayFromVector(ArrowVector& vector) {
 }
 
 template<LogicalTypeID DT>
-ArrowArray* ArrowRowBatch::templateCreateArray(ArrowVector& vector,
-    const main::DataTypeInfo& /*typeInfo*/) {
+ArrowArray* ArrowRowBatch::templateCreateArray(ArrowVector& vector, const LogicalType& /*type*/) {
     auto result = createArrayFromVector(vector);
     vector.array = std::move(result);
     return vector.array.get();
@@ -630,7 +711,7 @@ ArrowArray* ArrowRowBatch::templateCreateArray(ArrowVector& vector,
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::STRING>(ArrowVector& vector,
-    const main::DataTypeInfo& /*typeInfo*/) {
+    const LogicalType& /*type*/) {
     auto result = createArrayFromVector(vector);
     result->n_buffers = 3;
     result->buffers[2] = vector.overflow.data();
@@ -640,151 +721,208 @@ ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::STRING>(ArrowVecto
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::LIST>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
+    const LogicalType& type) {
     auto result = createArrayFromVector(vector);
     vector.childPointers.resize(1);
     result->children = vector.childPointers.data();
     result->n_children = 1;
     vector.childPointers[0] =
-        convertVectorToArray(*vector.childData[0], *typeInfo.childrenTypesInfo[0]);
+        convertVectorToArray(*vector.childData[0], ListType::getChildType(type));
     vector.array = std::move(result);
     return vector.array.get();
 }
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::ARRAY>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
+    const LogicalType& type) {
     auto result = createArrayFromVector(vector);
     vector.childPointers.resize(1);
     result->n_buffers = 1;
     result->children = vector.childPointers.data();
     result->n_children = 1;
     vector.childPointers[0] =
-        convertVectorToArray(*vector.childData[0], *typeInfo.childrenTypesInfo[0]);
+        convertVectorToArray(*vector.childData[0], ArrayType::getChildType(type));
     vector.array = std::move(result);
     return vector.array.get();
 }
 
 template<>
+ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::MAP>(ArrowVector& vector,
+    const LogicalType& type) {
+    return templateCreateArray<LogicalTypeID::LIST>(vector, type);
+}
+
+template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::STRUCT>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
-    return convertStructVectorToArray(vector, typeInfo);
+    const LogicalType& type) {
+    return convertStructVectorToArray(vector, type);
 }
 
 ArrowArray* ArrowRowBatch::convertStructVectorToArray(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
+    const LogicalType& type) {
     auto result = createArrayFromVector(vector);
     result->n_buffers = 1;
-    vector.childPointers.resize(typeInfo.childrenTypesInfo.size());
+    vector.childPointers.resize(StructType::getNumFields(type));
     result->children = vector.childPointers.data();
-    result->n_children = (std::int64_t)typeInfo.childrenTypesInfo.size();
-    for (auto i = 0u; i < typeInfo.childrenTypesInfo.size(); i++) {
-        auto& childTypeInfo = typeInfo.childrenTypesInfo[i];
-        vector.childPointers[i] = convertVectorToArray(*vector.childData[i], *childTypeInfo);
+    result->n_children = (std::int64_t)StructType::getNumFields(type);
+    for (auto i = 0u; i < StructType::getNumFields(type); i++) {
+        const auto& childType = StructType::getFieldType(type, i);
+        vector.childPointers[i] = convertVectorToArray(*vector.childData[i], childType);
     }
     vector.array = std::move(result);
+    return vector.array.get();
+}
+
+ArrowArray* ArrowRowBatch::convertInternalIDVectorToArray(ArrowVector& vector,
+    const LogicalType& /*type*/) {
+    auto result = createArrayFromVector(vector);
+    result->n_buffers = 1;
+    vector.childPointers.resize(2);
+    result->children = vector.childPointers.data();
+    result->n_children = 2;
+    for (auto i = 0; i < 2; i++) {
+        auto childType = LogicalType::INT64();
+        vector.childPointers[i] = convertVectorToArray(*vector.childData[i], childType);
+    }
+    vector.array = std::move(result);
+    return vector.array.get();
+}
+
+template<>
+ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::UNION>(ArrowVector& vector,
+    const LogicalType& type) {
+    // since union is a special case, we make the ArrowArray ourselves instead of using
+    // createArrayFromVector
+    auto nChildren = UnionType::getNumFields(type);
+    vector.array = std::make_unique<ArrowArray>();
+    vector.array->private_data = nullptr;
+    vector.array->release = releaseArrowVector;
+    vector.array->n_children = nChildren;
+    vector.childPointers.resize(nChildren);
+    vector.array->children = vector.childPointers.data();
+    vector.array->offset = 0;
+    vector.array->dictionary = nullptr;
+    vector.array->buffers = vector.buffers.data();
+    vector.array->null_count = vector.numNulls;
+    vector.array->length = vector.numValues;
+    vector.array->n_buffers = 2;
+    vector.array->buffers[0] = vector.data.data();
+    vector.array->buffers[1] = vector.overflow.data();
+    for (auto i = 0u; i < nChildren; i++) {
+        const auto& childType = UnionType::getFieldType(type, i);
+        vector.childPointers[i] = convertVectorToArray(*vector.childData[i], childType);
+    }
     return vector.array.get();
 }
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::INTERNAL_ID>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
-    return convertStructVectorToArray(vector, typeInfo);
+    const LogicalType& type) {
+    return convertInternalIDVectorToArray(vector, type);
 }
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::NODE>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
-    return convertStructVectorToArray(vector, typeInfo);
+    const LogicalType& type) {
+    return convertStructVectorToArray(vector, type);
 }
 
 template<>
 ArrowArray* ArrowRowBatch::templateCreateArray<LogicalTypeID::REL>(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
-    return convertStructVectorToArray(vector, typeInfo);
+    const LogicalType& type) {
+    return convertStructVectorToArray(vector, type);
 }
 
-ArrowArray* ArrowRowBatch::convertVectorToArray(ArrowVector& vector,
-    const main::DataTypeInfo& typeInfo) {
-    switch (typeInfo.typeID) {
+ArrowArray* ArrowRowBatch::convertVectorToArray(ArrowVector& vector, const LogicalType& type) {
+    switch (type.getLogicalTypeID()) {
     case LogicalTypeID::BOOL: {
-        return templateCreateArray<LogicalTypeID::BOOL>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::BOOL>(vector, type);
     }
+    case LogicalTypeID::DECIMAL:
     case LogicalTypeID::INT128: {
-        return templateCreateArray<LogicalTypeID::INT128>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INT128>(vector, type);
     }
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64: {
-        return templateCreateArray<LogicalTypeID::INT64>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INT64>(vector, type);
     }
     case LogicalTypeID::INT32: {
-        return templateCreateArray<LogicalTypeID::INT32>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INT32>(vector, type);
     }
     case LogicalTypeID::INT16: {
-        return templateCreateArray<LogicalTypeID::INT16>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INT16>(vector, type);
     }
     case LogicalTypeID::INT8: {
-        return templateCreateArray<LogicalTypeID::INT8>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INT8>(vector, type);
     }
     case LogicalTypeID::UINT64: {
-        return templateCreateArray<LogicalTypeID::UINT64>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::UINT64>(vector, type);
     }
     case LogicalTypeID::UINT32: {
-        return templateCreateArray<LogicalTypeID::UINT32>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::UINT32>(vector, type);
     }
     case LogicalTypeID::UINT16: {
-        return templateCreateArray<LogicalTypeID::UINT16>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::UINT16>(vector, type);
     }
     case LogicalTypeID::UINT8: {
-        return templateCreateArray<LogicalTypeID::UINT8>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::UINT8>(vector, type);
     }
     case LogicalTypeID::DOUBLE: {
-        return templateCreateArray<LogicalTypeID::DOUBLE>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::DOUBLE>(vector, type);
     }
     case LogicalTypeID::FLOAT: {
-        return templateCreateArray<LogicalTypeID::FLOAT>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::FLOAT>(vector, type);
     }
     case LogicalTypeID::DATE: {
-        return templateCreateArray<LogicalTypeID::DATE>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::DATE>(vector, type);
     }
     case LogicalTypeID::TIMESTAMP_MS: {
-        return templateCreateArray<LogicalTypeID::TIMESTAMP_MS>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::TIMESTAMP_MS>(vector, type);
     }
     case LogicalTypeID::TIMESTAMP_NS: {
-        return templateCreateArray<LogicalTypeID::TIMESTAMP_NS>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::TIMESTAMP_NS>(vector, type);
     }
     case LogicalTypeID::TIMESTAMP_SEC: {
-        return templateCreateArray<LogicalTypeID::TIMESTAMP_SEC>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::TIMESTAMP_SEC>(vector, type);
     }
     case LogicalTypeID::TIMESTAMP_TZ: {
-        return templateCreateArray<LogicalTypeID::TIMESTAMP_TZ>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::TIMESTAMP_TZ>(vector, type);
     }
     case LogicalTypeID::TIMESTAMP: {
-        return templateCreateArray<LogicalTypeID::TIMESTAMP>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::TIMESTAMP>(vector, type);
     }
     case LogicalTypeID::INTERVAL: {
-        return templateCreateArray<LogicalTypeID::INTERVAL>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INTERVAL>(vector, type);
     }
+    case LogicalTypeID::BLOB:
     case LogicalTypeID::UUID:
     case LogicalTypeID::STRING: {
-        return templateCreateArray<LogicalTypeID::STRING>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::STRING>(vector, type);
     }
     case LogicalTypeID::LIST: {
-        return templateCreateArray<LogicalTypeID::LIST>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::LIST>(vector, type);
     }
     case LogicalTypeID::ARRAY: {
-        return templateCreateArray<LogicalTypeID::ARRAY>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::ARRAY>(vector, type);
     }
+    case LogicalTypeID::MAP: {
+        return templateCreateArray<LogicalTypeID::MAP>(vector, type);
+    }
+    case LogicalTypeID::RECURSIVE_REL:
     case LogicalTypeID::STRUCT: {
-        return templateCreateArray<LogicalTypeID::STRUCT>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::STRUCT>(vector, type);
+    }
+    case LogicalTypeID::UNION: {
+        return templateCreateArray<LogicalTypeID::UNION>(vector, type);
     }
     case LogicalTypeID::INTERNAL_ID: {
-        return templateCreateArray<LogicalTypeID::INTERNAL_ID>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::INTERNAL_ID>(vector, type);
     }
     case LogicalTypeID::NODE: {
-        return templateCreateArray<LogicalTypeID::NODE>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::NODE>(vector, type);
     }
     case LogicalTypeID::REL: {
-        return templateCreateArray<LogicalTypeID::REL>(vector, typeInfo);
+        return templateCreateArray<LogicalTypeID::REL>(vector, type);
     }
     default: {
         KU_UNREACHABLE;
@@ -795,9 +933,9 @@ ArrowArray* ArrowRowBatch::convertVectorToArray(ArrowVector& vector,
 ArrowArray ArrowRowBatch::toArray() {
     auto rootHolder = std::make_unique<ArrowVector>();
     ArrowArray result;
-    rootHolder->childPointers.resize(typesInfo.size());
+    rootHolder->childPointers.resize(types.size());
     result.children = rootHolder->childPointers.data();
-    result.n_children = (std::int64_t)typesInfo.size();
+    result.n_children = (std::int64_t)types.size();
     result.length = numTuples;
     result.n_buffers = 1;
     result.buffers = rootHolder->buffers.data(); // no actual buffer
@@ -806,8 +944,7 @@ ArrowArray ArrowRowBatch::toArray() {
     result.dictionary = nullptr;
     rootHolder->childData = std::move(vectors);
     for (auto i = 0u; i < rootHolder->childData.size(); i++) {
-        rootHolder->childPointers[i] =
-            convertVectorToArray(*rootHolder->childData[i], *typesInfo[i]);
+        rootHolder->childPointers[i] = convertVectorToArray(*rootHolder->childData[i], types[i]);
     }
     result.private_data = rootHolder.release();
     result.release = releaseArrowVector;
@@ -823,7 +960,7 @@ ArrowArray ArrowRowBatch::append(main::QueryResult& queryResult, std::int64_t ch
         }
         auto tuple = queryResult.getNext();
         for (auto i = 0u; i < numColumns; i++) {
-            appendValue(vectors[i].get(), *typesInfo[i], tuple->getValue(i));
+            appendValue(vectors[i].get(), types[i], tuple->getValue(i));
         }
         numTuplesInBatch++;
     }

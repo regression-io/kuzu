@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/exception/runtime.h"
 #include "common/types/int128_t.h"
 #include "common/types/interval_t.h"
 #include "comparison_functions.h"
@@ -12,17 +13,9 @@ struct ComparisonFunction {
     template<typename OP>
     static function_set getFunctionSet(const std::string& name) {
         function_set functionSet;
-        for (auto& comparableType : common::LogicalTypeUtils::getAllValidComparableLogicalTypes()) {
+        for (auto& comparableType : common::LogicalTypeUtils::getAllValidLogicTypeIDs()) {
             functionSet.push_back(getFunction<OP>(name, comparableType, comparableType));
         }
-        functionSet.push_back(
-            getFunction<OP>(name, common::LogicalTypeID::LIST, common::LogicalTypeID::LIST));
-        functionSet.push_back(
-            getFunction<OP>(name, common::LogicalTypeID::STRUCT, common::LogicalTypeID::STRUCT));
-        // We can only check whether two internal ids are equal or not. So INTERNAL_ID is not
-        // part of the comparable logical types.
-        functionSet.push_back(getFunction<OP>(name, common::LogicalTypeID::INTERNAL_ID,
-            common::LogicalTypeID::INTERNAL_ID));
         return functionSet;
     }
 
@@ -112,6 +105,7 @@ private:
             func =
                 BinaryComparisonExecFunction<common::interval_t, common::interval_t, uint8_t, FUNC>;
         } break;
+        case common::PhysicalTypeID::ARRAY:
         case common::PhysicalTypeID::LIST: {
             func = BinaryComparisonExecFunction<common::list_entry_t, common::list_entry_t, uint8_t,
                 FUNC>;
@@ -122,9 +116,8 @@ private:
         } break;
         default:
             throw common::RuntimeException(
-                "Invalid input data types(" +
-                common::PhysicalTypeUtils::physicalTypeToString(leftType) + "," +
-                common::PhysicalTypeUtils::physicalTypeToString(rightType) + ") for getExecFunc.");
+                "Invalid input data types(" + common::PhysicalTypeUtils::toString(leftType) + "," +
+                common::PhysicalTypeUtils::toString(rightType) + ") for getExecFunc.");
         }
     }
 
@@ -178,6 +171,7 @@ private:
         case common::PhysicalTypeID::INTERVAL: {
             func = BinaryComparisonSelectFunction<common::interval_t, common::interval_t, FUNC>;
         } break;
+        case common::PhysicalTypeID::ARRAY:
         case common::PhysicalTypeID::LIST: {
             func = BinaryComparisonSelectFunction<common::list_entry_t, common::list_entry_t, FUNC>;
         } break;
@@ -187,10 +181,8 @@ private:
         } break;
         default:
             throw common::RuntimeException(
-                "Invalid input data types(" +
-                common::PhysicalTypeUtils::physicalTypeToString(leftTypeID) + "," +
-                common::PhysicalTypeUtils::physicalTypeToString(rightTypeID) +
-                ") for getSelectFunc.");
+                "Invalid input data types(" + common::PhysicalTypeUtils::toString(leftTypeID) +
+                "," + common::PhysicalTypeUtils::toString(rightTypeID) + ") for getSelectFunc.");
         }
     }
 };

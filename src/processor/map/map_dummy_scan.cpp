@@ -10,18 +10,18 @@ namespace processor {
 std::unique_ptr<PhysicalOperator> PlanMapper::mapDummyScan(LogicalOperator* /*logicalOperator*/) {
     auto inSchema = std::make_unique<Schema>();
     auto expression = LogicalDummyScan::getDummyExpression();
-    auto tableSchema = std::make_unique<FactorizedTableSchema>();
+    auto tableSchema = FactorizedTableSchema();
     // TODO(Ziyi): remove vectors when we have done the refactor of dataChunk.
     std::vector<std::shared_ptr<ValueVector>> vectors;
     std::vector<ValueVector*> vectorsToAppend;
-    tableSchema->appendColumn(
-        std::make_unique<ColumnSchema>(false, 0 /* all expressions are in the same datachunk */,
-            LogicalTypeUtils::getRowLayoutSize(expression->dataType)));
+    auto columnSchema = ColumnSchema(false, 0 /* groupID */,
+        LogicalTypeUtils::getRowLayoutSize(expression->dataType));
+    tableSchema.appendColumn(std::move(columnSchema));
     auto expressionEvaluator = ExpressionMapper::getEvaluator(expression, inSchema.get());
     auto memoryManager = clientContext->getMemoryManager();
     // expression can be evaluated statically and does not require an actual resultset to init
-    expressionEvaluator->init(ResultSet(0) /* dummy resultset */, memoryManager);
-    expressionEvaluator->evaluate(clientContext);
+    expressionEvaluator->init(ResultSet(0) /* dummy resultset */, clientContext);
+    expressionEvaluator->evaluate();
     vectors.push_back(expressionEvaluator->resultVector);
     vectorsToAppend.push_back(expressionEvaluator->resultVector.get());
     auto table = std::make_shared<FactorizedTable>(memoryManager, std::move(tableSchema));

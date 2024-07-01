@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/cast.h"
 #include "common/copy_constructors.h"
 #include "common/enums/expression_type.h"
 
@@ -25,19 +26,16 @@ using parsed_expr_pair =
     std::pair<std::unique_ptr<ParsedExpression>, std::unique_ptr<ParsedExpression>>;
 using s_parsed_expr_pair = std::pair<std::string, std::unique_ptr<ParsedExpression>>;
 
-class ParsedExpression {
+class KUZU_API ParsedExpression {
     friend class ParsedExpressionChildrenVisitor;
 
 public:
     ParsedExpression(common::ExpressionType type, std::unique_ptr<ParsedExpression> child,
         std::string rawName);
-
     ParsedExpression(common::ExpressionType type, std::unique_ptr<ParsedExpression> left,
         std::unique_ptr<ParsedExpression> right, std::string rawName);
-
     ParsedExpression(common::ExpressionType type, std::string rawName)
         : type{type}, rawName{std::move(rawName)} {}
-
     explicit ParsedExpression(common::ExpressionType type) : type{type} {}
 
     ParsedExpression(common::ExpressionType type, std::string alias, std::string rawName,
@@ -70,6 +68,19 @@ public:
 
     static std::unique_ptr<ParsedExpression> deserialize(common::Deserializer& deserializer);
 
+    template<class TARGET>
+    TARGET& cast() {
+        return common::ku_dynamic_cast<ParsedExpression&, TARGET&>(*this);
+    }
+    template<class TARGET>
+    const TARGET& constCast() const {
+        return common::ku_dynamic_cast<const ParsedExpression&, const TARGET&>(*this);
+    }
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const ParsedExpression*, const TARGET*>(this);
+    }
+
 protected:
     parsed_expr_vector copyChildren() const;
 
@@ -83,7 +94,7 @@ protected:
     parsed_expr_vector children;
 };
 
-using parsing_option_t = std::unordered_map<std::string, std::unique_ptr<parser::ParsedExpression>>;
+using options_t = std::unordered_map<std::string, std::unique_ptr<parser::ParsedExpression>>;
 
 } // namespace parser
 } // namespace kuzu

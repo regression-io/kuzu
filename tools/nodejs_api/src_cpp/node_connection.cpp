@@ -11,12 +11,12 @@ Napi::Object NodeConnection::Init(Napi::Env env, Napi::Object exports) {
     Napi::HandleScope scope(env);
 
     Napi::Function t = DefineClass(env, "NodeConnection",
-        {
-            InstanceMethod("initAsync", &NodeConnection::InitAsync),
+        {InstanceMethod("initAsync", &NodeConnection::InitAsync),
             InstanceMethod("executeAsync", &NodeConnection::ExecuteAsync),
+            InstanceMethod("queryAsync", &NodeConnection::QueryAsync),
             InstanceMethod("setMaxNumThreadForExec", &NodeConnection::SetMaxNumThreadForExec),
             InstanceMethod("setQueryTimeout", &NodeConnection::SetQueryTimeout),
-        });
+            InstanceMethod("close", &NodeConnection::Close)});
 
     exports.Set("NodeConnection", t);
     return exports;
@@ -41,6 +41,8 @@ Napi::Value NodeConnection::InitAsync(const Napi::CallbackInfo& info) {
 
 void NodeConnection::InitCppConnection() {
     this->connection = std::make_shared<Connection>(database.get());
+    connection->getClientContext()->getProgressBar()->setDisplay(
+        std::make_shared<NodeProgressBarDisplay>());
     // After the connection is initialized, we do not need to hold a reference to the database.
     database.reset();
 }
@@ -67,6 +69,12 @@ void NodeConnection::SetQueryTimeout(const Napi::CallbackInfo& info) {
     }
 }
 
+void NodeConnection::Close(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    Napi::HandleScope scope(env);
+    this->connection.reset();
+}
+
 Napi::Value NodeConnection::ExecuteAsync(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
     Napi::HandleScope scope(env);
@@ -75,13 +83,24 @@ Napi::Value NodeConnection::ExecuteAsync(const Napi::CallbackInfo& info) {
     auto nodeQueryResult = Napi::ObjectWrap<NodeQueryResult>::Unwrap(info[1].As<Napi::Object>());
     auto callback = info[3].As<Napi::Function>();
     try {
-        const auto& parameterMap = nodePreparedStatement->preparedStatement->getParameterMap();
-        auto params = Util::TransformParametersForExec(info[2].As<Napi::Array>(), parameterMap);
+        auto params = Util::TransformParametersForExec(info[2].As<Napi::Array>());
         auto asyncWorker = new ConnectionExecuteAsyncWorker(callback, connection,
-            nodePreparedStatement->preparedStatement, nodeQueryResult, std::move(params));
+            nodePreparedStatement->preparedStatement, nodeQueryResult, std::move(params), info[4]);
         asyncWorker->Queue();
     } catch (const std::exception& exc) {
         Napi::Error::New(env, std::string(exc.what())).ThrowAsJavaScriptException();
     }
+    return info.Env().Undefined();
+}
+
+Napi::Value NodeConnection::QueryAsync(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    Napi::HandleScope scope(env);
+    auto statement = info[0].As<Napi::String>().Utf8Value();
+    auto nodeQueryResult = Napi::ObjectWrap<NodeQueryResult>::Unwrap(info[1].As<Napi::Object>());
+    auto callback = info[2].As<Napi::Function>();
+    auto asyncWorker =
+        new ConnectionQueryAsyncWorker(callback, connection, statement, nodeQueryResult, info[3]);
+    asyncWorker->Queue();
     return info.Env().Undefined();
 }

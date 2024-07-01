@@ -7,7 +7,6 @@
 #include <string_view>
 #include <vector>
 
-#include "common/cast.h"
 #include "common/constants.h"
 #include "common/types/types.h"
 #include "storage/buffer_manager/bm_file_handle.h"
@@ -40,13 +39,13 @@ public:
         const common::ku_string_t& keyInEntry) const;
 
     common::ku_string_t writeString(std::string_view rawString);
-    inline common::ku_string_t writeString(const char* rawString) {
+    common::ku_string_t writeString(const char* rawString) {
         return writeString(std::string_view(rawString));
     }
 
     void prepareCommit();
-    inline void checkpointInMemory() { pageWriteCache.clear(); }
-    inline void rollbackInMemory(PageCursor nextPosToWriteTo_) {
+    void checkpointInMemory() { pageWriteCache.clear(); }
+    void rollbackInMemory(PageCursor nextPosToWriteTo_) {
         pageWriteCache.clear();
         this->nextPosToWriteTo = nextPosToWriteTo_;
     }
@@ -56,7 +55,7 @@ private:
     void setStringOverflow(const char* inMemSrcStr, uint64_t len,
         common::ku_string_t& diskDstString);
 
-    inline void read(transaction::TransactionType trxType, common::page_idx_t pageIdx,
+    void read(transaction::TransactionType trxType, common::page_idx_t pageIdx,
         const std::function<void(uint8_t*)>& func) const;
 
 private:
@@ -78,10 +77,9 @@ struct StringOverflowFileHeader {
     PageCursor cursors[NUM_HASH_INDEXES];
 
     // pages starts at one to reserve space for this header
-    StringOverflowFileHeader() : pages{1} {
-        std::fill(cursors, cursors + NUM_HASH_INDEXES, PageCursor());
-    }
+    StringOverflowFileHeader() : pages{1}, cursors{} {}
 };
+static_assert(std::has_unique_object_representations_v<StringOverflowFileHeader>);
 
 class OverflowFile {
     friend class OverflowFileHandle;
@@ -89,16 +87,13 @@ class OverflowFile {
 public:
     // For reading an existing overflow file
     OverflowFile(const DBFileIDAndName& dbFileIdAndName, BufferManager* bufferManager, WAL* wal,
-        bool readOnly, common::VirtualFileSystem* vfs);
+        bool readOnly, common::VirtualFileSystem* vfs, main::ClientContext* context);
+
+    virtual ~OverflowFile() = default;
 
     // For creating an overflow file from scratch
-    OverflowFile(const std::string& fName, common::VirtualFileSystem* vfs)
-        : numPagesOnDisk{0}, fileHandle{std::make_unique<FileHandle>(fName,
-                                 FileHandle::O_PERSISTENT_FILE_CREATE_NOT_EXISTS, vfs)},
-          bufferManager{nullptr}, wal{nullptr}, pageCounter{0}, headerChanged{true} {
-        // Reserve a page for the header
-        getNewPageIdx();
-    }
+    static void createEmptyFiles(const std::string& fName, common::VirtualFileSystem* vfs,
+        main::ClientContext* context);
 
     // Handles contain a reference to the overflow file
     OverflowFile(OverflowFile&& other) = delete;
@@ -107,15 +102,26 @@ public:
     void prepareCommit();
     void checkpointInMemory();
 
-    inline OverflowFileHandle* addHandle() {
+    OverflowFileHandle* addHandle() {
         KU_ASSERT(handles.size() < NUM_HASH_INDEXES);
         handles.emplace_back(
             std::make_unique<OverflowFileHandle>(*this, header.cursors[handles.size()]));
         return handles.back().get();
     }
 
-    inline BMFileHandle* getBMFileHandle() const {
-        return common::ku_dynamic_cast<FileHandle*, BMFileHandle*>(fileHandle.get());
+    BMFileHandle* getBMFileHandle() const {
+        KU_ASSERT(fileHandle);
+        return fileHandle;
+    }
+
+protected:
+    explicit OverflowFile(const DBFileIDAndName& dbFileIdAndName);
+
+    common::page_idx_t getNewPageIdx() {
+        // If this isn't the first call reserving the page header, then the header flag must be set
+        // prior to this
+        KU_ASSERT(pageCounter == HEADER_PAGE_IDX || headerChanged);
+        return pageCounter.fetch_add(1);
     }
 
 private:
@@ -125,25 +131,24 @@ private:
     // Writes new pages directly to the file and existing pages to the WAL
     void writePageToDisk(common::page_idx_t pageIdx, uint8_t* data) const;
 
-    inline common::page_idx_t getNewPageIdx() {
-        // If this isn't the first call reserving the page header, then the header flag must be set
-        // prior to this
-        KU_ASSERT(pageCounter == HEADER_PAGE_IDX || headerChanged);
-        return pageCounter.fetch_add(1);
-    }
-
-private:
+protected:
     static const uint64_t HEADER_PAGE_IDX = 0;
 
     std::vector<std::unique_ptr<OverflowFileHandle>> handles;
     StringOverflowFileHeader header;
     common::page_idx_t numPagesOnDisk;
     DBFileID dbFileID;
-    std::unique_ptr<FileHandle> fileHandle;
+    BMFileHandle* fileHandle;
     BufferManager* bufferManager;
     WAL* wal;
     std::atomic<common::page_idx_t> pageCounter;
     std::atomic<bool> headerChanged;
+};
+
+class InMemOverflowFile final : public OverflowFile {
+public:
+    explicit InMemOverflowFile(const DBFileIDAndName& dbFileIDAndName)
+        : OverflowFile{dbFileIDAndName} {}
 };
 } // namespace storage
 } // namespace kuzu

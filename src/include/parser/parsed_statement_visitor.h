@@ -37,7 +37,10 @@ private:
     virtual void visitWithClause(const WithClause* /*withClause*/) {}
     virtual void visitReturnClause(const ReturnClause* /*returnClause*/) {}
 
+    virtual void visitCreateSequence(const Statement& /*statement*/) {}
+    virtual void visitDropSequence(const Statement& /*statement*/) {}
     virtual void visitCreateTable(const Statement& /*statement*/) {}
+    virtual void visitCreateType(const Statement& /*statement*/) {}
     virtual void visitDropTable(const Statement& /*statement*/) {}
     virtual void visitAlter(const Statement& /*statement*/) {}
     virtual void visitCopyFrom(const Statement& /*statement*/) {}
@@ -45,13 +48,13 @@ private:
     virtual void visitStandaloneCall(const Statement& /*statement*/) {}
     virtual void visitExplain(const Statement& /*statement*/);
     virtual void visitCreateMacro(const Statement& /*statement*/) {}
-    virtual void visitCommentOn(const Statement& /*statement*/) {}
     virtual void visitTransaction(const Statement& /*statement*/) {}
     virtual void visitExtension(const Statement& /*statement*/) {}
     virtual void visitExportDatabase(const Statement& /*statement*/) {}
     virtual void visitImportDatabase(const Statement& /*statement*/) {}
     virtual void visitAttachDatabase(const Statement& /*statement*/) {}
     virtual void visitDetachDatabase(const Statement& /*statement*/) {}
+    virtual void visitUseDatabase(const Statement& /*statement*/) {}
     // LCOV_EXCL_STOP
 };
 

@@ -25,12 +25,24 @@ namespace testing {
 
 std::unique_ptr<TestGroup> TestParser::parseTestFile() {
     openFile();
+    genGroupName();
     parseHeader();
     if (!testGroup->isValid()) {
         throw TestException("Invalid test header [" + path + "].");
     }
     parseBody();
     return std::move(testGroup);
+}
+
+void TestParser::genGroupName() {
+    std::size_t subStart =
+        TestHelper::appendKuzuRootPath(std::string(TestHelper::E2E_TEST_FILES_DIRECTORY)).length() +
+        1;
+    std::size_t subEnd = path.find_last_of('.') - 1;
+    std::string relPath = path.substr(subStart, subEnd - subStart + 1);
+    std::replace(relPath.begin(), relPath.end(), '/', '~');
+    std::replace(relPath.begin(), relPath.end(), '\\', '~');
+    testGroup->group = relPath;
 }
 
 void TestParser::extractDataset() {
@@ -53,6 +65,9 @@ void TestParser::extractDataset() {
     } else if (datasetType == "TTL") {
         testGroup->datasetType = TestGroup::DatasetType::TURTLE;
         testGroup->dataset = currentToken.params[2];
+    } else if (datasetType == "KUZU") {
+        testGroup->datasetType = TestGroup::DatasetType::KUZU;
+        testGroup->dataset = currentToken.params[2];
     } else {
         throw TestException(
             "Invalid dataset type `" + currentToken.params[1] + "` [" + path + ":" + line + "].");
@@ -66,11 +81,6 @@ void TestParser::parseHeader() {
         case TokenType::EMPTY: {
             break;
         }
-        case TokenType::GROUP: {
-            checkMinimumParams(1);
-            testGroup->group = currentToken.params[1];
-            break;
-        }
         case TokenType::DATASET: {
             checkMinimumParams(2);
             extractDataset();
@@ -78,7 +88,7 @@ void TestParser::parseHeader() {
         }
         case TokenType::BUFFER_POOL_SIZE: {
             checkMinimumParams(1);
-            testGroup->bufferPoolSize = stoi(currentToken.params[1]);
+            testGroup->bufferPoolSize = stoll(currentToken.params[1]);
             break;
         }
         case TokenType::SKIP: {
@@ -115,45 +125,63 @@ void TestParser::replaceVariables(std::string& str) {
     }
 }
 
-void TestParser::extractExpectedResult(TestStatement* statement) {
+void TestParser::extractExpectedResults(TestStatement* statement) {
+    do {
+        tokenize();
+        if (currentToken.type == TokenType::EMPTY) {
+            continue;
+        }
+        if (currentToken.type != TokenType::RESULT) {
+            setCursorToPreviousLine();
+            return;
+        }
+        statement->result.push_back(extractExpectedResultFromToken(statement->checkOutputOrder));
+    } while (nextLine());
+}
+
+TestQueryResult TestParser::extractExpectedResultFromToken(bool checkOutputOrder) {
     checkMinimumParams(1);
     std::string result = currentToken.params[1];
+    TestQueryResult queryResult;
     if (result == "ok") {
-        statement->expectedOk = true;
+        queryResult.type = ResultType::OK;
     } else if (result == "error") {
-        statement->expectedError = true;
-        statement->errorMessage = extractTextBeforeNextStatement();
-        replaceVariables(statement->errorMessage);
+        queryResult.type = ResultType::ERROR_MSG;
+        queryResult.expectedResult.push_back(extractTextBeforeNextStatement());
+        replaceVariables(queryResult.expectedResult[0]);
     } else if (result == "error(regex)") {
-        statement->expectedErrorRegex = true;
-        statement->errorMessage = extractTextBeforeNextStatement();
-        replaceVariables(statement->errorMessage);
+        queryResult.type = ResultType::ERROR_REGEX;
+        queryResult.expectedResult.push_back(extractTextBeforeNextStatement());
+        replaceVariables(queryResult.expectedResult[0]);
     } else if (result.substr(0, 4) == "hash") {
-        statement->expectHash = true;
+        queryResult.type = ResultType::HASH;
         checkMinimumParams(1);
         nextLine();
         tokenize();
-        statement->expectedNumTuples = stoi(currentToken.params[0]);
-        statement->expectedHashValue = currentToken.params.back();
+        queryResult.numTuples = stoi(currentToken.params[0]);
+        queryResult.expectedResult.push_back(currentToken.params.back());
     } else {
         checkMinimumParams(1);
-        statement->expectedNumTuples = stoi(result);
+        queryResult.numTuples = stoi(result);
         nextLine();
         if (line.starts_with("<FILE>:")) {
-            statement->expectedTuplesCSVFile = TestHelper::appendKuzuRootPath(
-                (std::filesystem::path(TestHelper::TEST_ANSWERS_PATH) / line.substr(7)).string());
-            return;
-        }
-        setCursorToPreviousLine();
-        for (auto i = 0u; i < statement->expectedNumTuples; i++) {
-            nextLine();
-            replaceVariables(line);
-            statement->expectedTuples.push_back(line);
-        }
-        if (!statement->checkOutputOrder) { // order is not important for result
-            sort(statement->expectedTuples.begin(), statement->expectedTuples.end());
+            queryResult.type = ResultType::CSV_FILE;
+            queryResult.expectedResult.push_back(TestHelper::appendKuzuRootPath(
+                (std::filesystem::path(TestHelper::TEST_ANSWERS_PATH) / line.substr(7)).string()));
+        } else {
+            queryResult.type = ResultType::TUPLES;
+            setCursorToPreviousLine();
+            for (auto i = 0u; i < queryResult.numTuples; i++) {
+                nextLine();
+                replaceVariables(line);
+                queryResult.expectedResult.push_back(line);
+            }
+            if (!checkOutputOrder) { // order is not important for result
+                sort(queryResult.expectedResult.begin(), queryResult.expectedResult.end());
+            }
         }
     }
+    return queryResult;
 }
 
 std::string TestParser::extractTextBeforeNextStatement(bool ignoreLineBreak) {
@@ -240,11 +268,15 @@ TestStatement* TestParser::extractStatement(TestStatement* statement,
         break;
     }
     case TokenType::RESULT: {
-        extractExpectedResult(statement);
+        extractExpectedResults(statement);
         return statement;
     }
     case TokenType::CHECK_ORDER: {
         statement->checkOutputOrder = true;
+        break;
+    }
+    case TokenType::CHECK_PRECISION: {
+        statement->checkPrecision = true;
         break;
     }
     case TokenType::ENUMERATE: {
@@ -258,6 +290,10 @@ TestStatement* TestParser::extractStatement(TestStatement* statement,
     }
     case TokenType::ENCODED_JOIN: {
         statement->encodedJoin = paramsToString(1);
+        break;
+    }
+    case TokenType::CHECK_COLUMN_NAMES: {
+        statement->checkColumnNames = true;
         break;
     }
     case TokenType::EMPTY: {
@@ -422,8 +458,20 @@ void TestParser::openFile() {
     fileStream.open(path);
 }
 
+static std::vector<std::string> extractToken(std::string& line) {
+    std::vector<std::string> matches;
+    std::regex re(R"((?:[^'"\s\\]+|'[^'\\]*(?:\\.[^'\\]*)*'|"[^"\\]*(?:\\.[^"\\]*)*"|\S+)+)");
+    auto wordsBegin = std::sregex_iterator(line.begin(), line.end(), re);
+    auto wordsEnd = std::sregex_iterator();
+    for (std::sregex_iterator i = wordsBegin; i != wordsEnd; ++i) {
+        std::smatch match = *i;
+        matches.push_back(match.str());
+    }
+    return matches;
+}
+
 void TestParser::tokenize() {
-    currentToken.params = StringUtils::splitBySpace(line);
+    currentToken.params = extractToken(line);
     if ((currentToken.params.size() == 0) || (currentToken.params[0][0] == '#')) {
         currentToken.type = TokenType::EMPTY;
     } else {

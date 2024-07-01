@@ -43,7 +43,7 @@ struct PreparedRowGroup {
 
 class ParquetWriter {
 public:
-    ParquetWriter(std::string fileName, std::vector<std::unique_ptr<common::LogicalType>> types,
+    ParquetWriter(std::string fileName, std::vector<common::LogicalType> types,
         std::vector<std::string> names, kuzu_parquet::format::CompressionCodec::type codec,
         main::ClientContext* context);
 
@@ -59,8 +59,8 @@ public:
     }
     void flush(FactorizedTable& ft);
     void finalize();
-    static kuzu_parquet::format::Type::type convertToParquetType(common::LogicalType* type);
-    static void setSchemaProperties(common::LogicalType* type,
+    static kuzu_parquet::format::Type::type convertToParquetType(const common::LogicalType& type);
+    static void setSchemaProperties(const common::LogicalType& type,
         kuzu_parquet::format::SchemaElement& schemaElement);
 
 private:
@@ -70,13 +70,13 @@ private:
         uint64_t& numTuplesRead);
     inline uint64_t getNumTuples(common::DataChunk* unflatChunk) {
         return unflatChunk->getNumValueVectors() != 0 ?
-                   unflatChunk->state->selVector->selectedSize :
+                   unflatChunk->state->getSelVector().getSelSize() :
                    1;
     }
 
 private:
     std::string fileName;
-    std::vector<std::unique_ptr<common::LogicalType>> types;
+    std::vector<common::LogicalType> types;
     std::vector<std::string> columnNames;
     kuzu_parquet::format::CompressionCodec::type codec;
     std::unique_ptr<common::FileInfo> fileInfo;

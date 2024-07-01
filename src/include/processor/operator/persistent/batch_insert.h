@@ -44,10 +44,7 @@ struct BatchInsertSharedState {
     }
     inline common::row_idx_t getNumRows() { return numRows.load(); }
     // NOLINTNEXTLINE(readability-make-member-function-const): Semantically non-const.
-    inline void logBatchInsertWALRecord() {
-        wal->logCopyTableRecord(table->getTableID());
-        wal->flushAllPages();
-    }
+    inline void logBatchInsertWALRecord() { wal->logCopyTableRecord(table->getTableID()); }
     inline void updateNumTuplesForTable() { table->updateNumTuplesByValue(getNumRows()); }
 };
 
@@ -58,13 +55,14 @@ struct BatchInsertLocalState {
 };
 
 class BatchInsert : public Sink {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::BATCH_INSERT;
+
 public:
     BatchInsert(std::unique_ptr<BatchInsertInfo> info,
         std::shared_ptr<BatchInsertSharedState> sharedState,
         std::unique_ptr<ResultSetDescriptor> resultSetDescriptor, uint32_t id,
-        const std::string& paramsString)
-        : Sink{std::move(resultSetDescriptor), PhysicalOperatorType::BATCH_INSERT, id,
-              paramsString},
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : Sink{std::move(resultSetDescriptor), type_, id, std::move(printInfo)},
           info{std::move(info)}, sharedState{std::move(sharedState)} {}
 
     ~BatchInsert() override = default;
@@ -72,9 +70,6 @@ public:
     std::unique_ptr<PhysicalOperator> clone() override = 0;
 
     inline std::shared_ptr<BatchInsertSharedState> getSharedState() const { return sharedState; }
-
-protected:
-    void checkIfTableIsEmpty();
 
 protected:
     std::unique_ptr<BatchInsertInfo> info;

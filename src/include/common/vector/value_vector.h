@@ -35,19 +35,19 @@ public:
 
     void setState(const std::shared_ptr<DataChunkState>& state_);
 
-    void setAllNull() { nullMask->setAllNull(); }
-    void setAllNonNull() { nullMask->setAllNonNull(); }
+    void setAllNull() { nullMask.setAllNull(); }
+    void setAllNonNull() { nullMask.setAllNonNull(); }
     // On return true, there are no null. On return false, there may or may not be nulls.
-    bool hasNoNullsGuarantee() const { return nullMask->hasNoNullsGuarantee(); }
+    bool hasNoNullsGuarantee() const { return nullMask.hasNoNullsGuarantee(); }
     void setNullRange(uint32_t startPos, uint32_t len, bool value) {
-        nullMask->setNullFromRange(startPos, len, value);
+        nullMask.setNullFromRange(startPos, len, value);
     }
-    const uint64_t* getNullMaskData() { return nullMask->getData(); }
+    const NullMask& getNullMask() const { return nullMask; }
     void setNull(uint32_t pos, bool isNull);
-    uint8_t isNull(uint32_t pos) const { return nullMask->isNull(pos); }
+    uint8_t isNull(uint32_t pos) const { return nullMask.isNull(pos); }
     void setAsSingleNullEntry() {
-        state->selVector->selectedSize = 1;
-        setNull(state->selVector->selectedPositions[0], true);
+        state->getSelVectorUnsafe().setSelSize(1);
+        setNull(state->getSelVector()[0], true);
     }
 
     bool setNullFromBits(const uint64_t* srcNullEntries, uint64_t srcOffset, uint64_t dstOffset,
@@ -86,9 +86,6 @@ public:
         return getValue<nodeID_t>(pos).offset;
     }
 
-    void setSequential() { _isSequential = true; }
-    bool isSequential() const { return _isSequential; }
-
     void resetAuxiliaryBuffer();
 
     // If there is still non-null values after discarding, return true. Otherwise, return false.
@@ -104,9 +101,8 @@ public:
     std::shared_ptr<DataChunkState> state;
 
 private:
-    bool _isSequential = false;
     std::unique_ptr<uint8_t[]> valueBuffer;
-    std::unique_ptr<NullMask> nullMask;
+    NullMask nullMask;
     uint32_t numBytesPerValue;
     std::unique_ptr<AuxiliaryBuffer> auxiliaryBuffer;
 };
@@ -146,46 +142,54 @@ struct KUZU_API BlobVector {
     }
 };
 
+// Currently, ListVector is used for both VAR_LIST and ARRAY physical type
 class KUZU_API ListVector {
 public:
     static void setDataVector(const ValueVector* vector, std::shared_ptr<ValueVector> dataVector) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         auto listBuffer =
             ku_dynamic_cast<AuxiliaryBuffer*, ListAuxiliaryBuffer*>(vector->auxiliaryBuffer.get());
         listBuffer->setDataVector(std::move(dataVector));
     }
     static ValueVector* getDataVector(const ValueVector* vector) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         return ku_dynamic_cast<AuxiliaryBuffer*, ListAuxiliaryBuffer*>(
             vector->auxiliaryBuffer.get())
             ->getDataVector();
     }
     static std::shared_ptr<ValueVector> getSharedDataVector(const ValueVector* vector) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         return ku_dynamic_cast<AuxiliaryBuffer*, ListAuxiliaryBuffer*>(
             vector->auxiliaryBuffer.get())
             ->getSharedDataVector();
     }
     static uint64_t getDataVectorSize(const ValueVector* vector) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         return ku_dynamic_cast<AuxiliaryBuffer*, ListAuxiliaryBuffer*>(
             vector->auxiliaryBuffer.get())
             ->getSize();
     }
 
     static uint8_t* getListValues(const ValueVector* vector, const list_entry_t& listEntry) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         auto dataVector = getDataVector(vector);
         return dataVector->getData() + dataVector->getNumBytesPerValue() * listEntry.offset;
     }
     static uint8_t* getListValuesWithOffset(const ValueVector* vector,
         const list_entry_t& listEntry, offset_t elementOffsetInList) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         return getListValues(vector, listEntry) +
                elementOffsetInList * getDataVector(vector)->getNumBytesPerValue();
     }
     static list_entry_t addList(ValueVector* vector, uint64_t listSize) {
-        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST);
+        KU_ASSERT(vector->dataType.getPhysicalType() == PhysicalTypeID::LIST ||
+                  vector->dataType.getPhysicalType() == PhysicalTypeID::ARRAY);
         return ku_dynamic_cast<AuxiliaryBuffer*, ListAuxiliaryBuffer*>(
             vector->auxiliaryBuffer.get())
             ->addList(listSize);
@@ -261,9 +265,8 @@ public:
 
     static inline void setTagField(ValueVector* vector, union_field_idx_t tag) {
         KU_ASSERT(vector->dataType.getLogicalTypeID() == LogicalTypeID::UNION);
-        for (auto i = 0u; i < vector->state->selVector->selectedSize; i++) {
-            vector->setValue<struct_field_idx_t>(vector->state->selVector->selectedPositions[i],
-                tag);
+        for (auto i = 0u; i < vector->state->getSelVector().getSelSize(); i++) {
+            vector->setValue<struct_field_idx_t>(vector->state->getSelVector()[i], tag);
         }
     }
 };

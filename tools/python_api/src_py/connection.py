@@ -1,13 +1,22 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from . import _kuzu
 from .prepared_statement import PreparedStatement
 from .query_result import QueryResult
 
 if TYPE_CHECKING:
+    import sys
+    from types import TracebackType
+
     from .database import Database
+    from .types import Type
+
+    if sys.version_info >= (3, 11):
+        from typing import Self
+    else:
+        from typing_extensions import Self
 
 
 class Connection:
@@ -29,14 +38,22 @@ class Connection:
         self._connection: Any = None  # (type: _kuzu.Connection from pybind11)
         self.database = database
         self.num_threads = num_threads
+        self.is_closed = False
         self.init_connection()
 
     def __getstate__(self) -> dict[str, Any]:
-        state = {"database": self.database, "num_threads": self.num_threads, "_connection": None}
+        state = {
+            "database": self.database,
+            "num_threads": self.num_threads,
+            "_connection": None,
+        }
         return state
 
     def init_connection(self) -> None:
         """Establish a connection to the database, if not already initalised."""
+        if self.is_closed:
+            error_msg = "Connection is closed."
+            raise RuntimeError(error_msg)
         self.database.init_database()
         if self._connection is None:
             self._connection = _kuzu.Connection(self.database._database, self.num_threads)  # type: ignore[union-attr]
@@ -54,11 +71,34 @@ class Connection:
         self.init_connection()
         self._connection.set_max_threads_for_exec(num_threads)
 
+    def close(self) -> None:
+        """
+        Close the connection.
+
+        Note: Call to this method is optional. The connection will be closed
+        automatically when the object goes out of scope.
+        """
+        if self._connection is not None:
+            self._connection.close()
+        self._connection = None
+        self.is_closed = True
+
+    def __enter__(self) -> Self:
+        return self
+
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        exc_traceback: TracebackType | None,
+    ) -> None:
+        self.close()
+
     def execute(
         self,
         query: str | PreparedStatement,
         parameters: dict[str, Any] | None = None,
-    ) -> QueryResult:
+    ) -> QueryResult | list[QueryResult]:
         """
         Execute a query.
 
@@ -83,16 +123,26 @@ class Connection:
 
         self.init_connection()
         if not isinstance(parameters, dict):
-            # TODO(Chang): remove ROLLBACK once we can guarantee database is deleted after conn
-            self._connection.execute(self.prepare("ROLLBACK")._prepared_statement, {})
             msg = f"Parameters must be a dict; found {type(parameters)}."
             raise RuntimeError(msg)  # noqa: TRY004
 
-        prepared_statement = self.prepare(query) if isinstance(query, str) else query
-        _query_result = self._connection.execute(prepared_statement._prepared_statement, parameters)
+        if len(parameters) == 0:
+            _query_result = self._connection.query(query)
+        else:
+            prepared_statement = self.prepare(query) if isinstance(query, str) else query
+            _query_result = self._connection.execute(prepared_statement._prepared_statement, parameters)
         if not _query_result.isSuccess():
             raise RuntimeError(_query_result.getErrorMessage())
-        return QueryResult(self, _query_result)
+        current_query_result = QueryResult(self, _query_result)
+        if not _query_result.hasNextQueryResult():
+            return current_query_result
+        all_query_results = [current_query_result]
+        while _query_result.hasNextQueryResult():
+            _query_result = _query_result.getNextQueryResult()
+            if not _query_result.isSuccess():
+                raise RuntimeError(_query_result.getErrorMessage())
+            all_query_results.append(QueryResult(self, _query_result))
+        return all_query_results
 
     def prepare(self, query: str) -> PreparedStatement:
         """
@@ -132,7 +182,11 @@ class Connection:
                 if s != "":
                     shape.append(int(s))
             prop_type = splitted[0]
-            results[prop_name] = {"type": prop_type, "dimension": dimension, "is_primary_key": is_primary_key}
+            results[prop_name] = {
+                "type": prop_type,
+                "dimension": dimension,
+                "is_primary_key": is_primary_key,
+            }
             if len(shape) > 0:
                 results[prop_name]["shape"] = tuple(shape)
         return results
@@ -174,3 +228,62 @@ class Connection:
         """
         self.init_connection()
         self._connection.set_query_timeout(timeout_in_ms)
+
+    def create_function(
+        self,
+        name: str,
+        udf: Callable[[...], Any],
+        params_type: list[Type | str] | None = None,
+        return_type: Type | str = "",
+        *,
+        default_null_handling: bool = True,
+        catch_exceptions: bool = False
+    ) -> None:
+        """
+        Sets a User Defined Function (UDF) to use in cypher queries.
+
+        Parameters
+        ----------
+        name: str
+            name of function
+
+        udf: Callable[[...], Any]
+            function to be executed
+
+        params_type: Optional[list[Type]]
+            list of Type enums to describe the input parameters
+
+        return_type: Optional[Type]
+            a Type enum to describe the returned value
+
+        default_null_handling: Optional[bool]
+            if true, when any parameter is null, the resulting value will be null
+
+        catch_exceptions: Optional[bool]
+            if true, when an exception is thrown from python, the function output will be null
+            Otherwise, the exception will be rethrown
+        """
+        if params_type is None:
+            params_type = []
+        parsed_params_type = [x if type(x) is str else x.value for x in params_type]
+        if type(return_type) is not str:
+            return_type = return_type.value
+        
+        self._connection.create_function(
+            name=name,
+            udf=udf,
+            params_type=parsed_params_type,
+            return_value=return_type,
+            default_null=default_null_handling,
+            catch_exceptions=catch_exceptions)
+
+    def remove_function(self, name: str) -> None:
+        """
+        Removes a User Defined Function (UDF).
+
+        Parameters
+        ----------
+        name: str
+            name of function to be removed.
+        """
+        self._connection.remove_function(name)

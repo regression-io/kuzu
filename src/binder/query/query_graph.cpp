@@ -15,11 +15,11 @@ std::size_t SubqueryGraphHasher::operator()(const SubqueryGraph& key) const {
 bool SubqueryGraph::containAllVariables(std::unordered_set<std::string>& variables) const {
     for (auto& var : variables) {
         if (queryGraph.containsQueryNode(var) &&
-            !queryNodesSelector[queryGraph.getQueryNodePos(var)]) {
+            !queryNodesSelector[queryGraph.getQueryNodeIdx(var)]) {
             return false;
         }
         if (queryGraph.containsQueryRel(var) &&
-            !queryRelsSelector[queryGraph.getQueryRelPos(var)]) {
+            !queryRelsSelector[queryGraph.getQueryRelIdx(var)]) {
             return false;
         }
     }
@@ -33,11 +33,11 @@ std::unordered_set<uint32_t> SubqueryGraph::getNodeNbrPositions() const {
             continue;
         }
         auto rel = queryGraph.getQueryRel(relPos);
-        auto srcNodePos = queryGraph.getQueryNodePos(*rel->getSrcNode());
+        auto srcNodePos = queryGraph.getQueryNodeIdx(*rel->getSrcNode());
         if (!queryNodesSelector[srcNodePos]) {
             result.insert(srcNodePos);
         }
-        auto dstNodePos = queryGraph.getQueryNodePos(*rel->getDstNode());
+        auto dstNodePos = queryGraph.getQueryNodeIdx(*rel->getDstNode());
         if (!queryNodesSelector[dstNodePos]) {
             result.insert(dstNodePos);
         }
@@ -52,8 +52,8 @@ std::unordered_set<uint32_t> SubqueryGraph::getRelNbrPositions() const {
             continue;
         }
         auto rel = queryGraph.getQueryRel(relPos);
-        auto srcNodePos = queryGraph.getQueryNodePos(*rel->getSrcNode());
-        auto dstNodePos = queryGraph.getQueryNodePos(*rel->getDstNode());
+        auto srcNodePos = queryGraph.getQueryNodeIdx(*rel->getSrcNode());
+        auto dstNodePos = queryGraph.getQueryNodeIdx(*rel->getDstNode());
         if (queryNodesSelector[srcNodePos] || queryNodesSelector[dstNodePos]) {
             result.insert(relPos);
         }
@@ -100,11 +100,30 @@ std::unordered_set<uint32_t> SubqueryGraph::getNodePositionsIgnoringNodeSelector
     for (auto relPos = 0u; relPos < queryGraph.getNumQueryRels(); ++relPos) {
         auto rel = queryGraph.getQueryRel(relPos);
         if (queryRelsSelector[relPos]) {
-            result.insert(queryGraph.getQueryNodePos(rel->getSrcNodeName()));
-            result.insert(queryGraph.getQueryNodePos(rel->getDstNodeName()));
+            result.insert(queryGraph.getQueryNodeIdx(rel->getSrcNodeName()));
+            result.insert(queryGraph.getQueryNodeIdx(rel->getDstNodeName()));
         }
     }
     return result;
+}
+
+std::vector<common::idx_t> SubqueryGraph::getNbrNodeIndices() const {
+    std::unordered_set<common::idx_t> result;
+    for (auto i = 0u; i < queryGraph.getNumQueryRels(); ++i) {
+        if (!queryRelsSelector[i]) {
+            continue;
+        }
+        auto rel = queryGraph.getQueryRel(i);
+        auto srcNodePos = queryGraph.getQueryNodeIdx(rel->getSrcNodeName());
+        auto dstNodePos = queryGraph.getQueryNodeIdx(rel->getDstNodeName());
+        if (!queryNodesSelector[srcNodePos]) {
+            result.insert(srcNodePos);
+        }
+        if (!queryNodesSelector[dstNodePos]) {
+            result.insert(dstNodePos);
+        }
+    }
+    return std::vector<common::idx_t>{result.begin(), result.end()};
 }
 
 subquery_graph_set_t SubqueryGraph::getBaseNbrSubgraph() const {
@@ -141,6 +160,20 @@ subquery_graph_set_t SubqueryGraph::getNextNbrSubgraphs(const SubqueryGraph& pre
         result.insert(std::move(nbr));
     }
     return result;
+}
+
+bool QueryGraph::isEmpty() const {
+    for (auto& n : queryNodes) {
+        if (n->isEmpty()) {
+            return true;
+        }
+    }
+    for (auto& r : queryRels) {
+        if (r->isEmpty()) {
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<std::shared_ptr<NodeOrRelExpression>> QueryGraph::getAllPatterns() const {
@@ -228,11 +261,11 @@ void QueryGraphCollection::finalize() {
 std::vector<QueryGraph> QueryGraphCollection::mergeGraphs(common::idx_t baseGraphIdx) {
     KU_ASSERT(baseGraphIdx < queryGraphs.size());
     auto baseGraph = std::move(queryGraphs[baseGraphIdx]);
-    std::unordered_set<common::vector_idx_t> mergedGraphIndices;
+    std::unordered_set<common::idx_t> mergedGraphIndices;
     mergedGraphIndices.insert(baseGraphIdx);
     while (true) {
         // find graph to merge
-        common::vector_idx_t graphToMergeIdx = common::INVALID_VECTOR_IDX;
+        common::idx_t graphToMergeIdx = common::INVALID_IDX;
         for (auto i = 0u; i < queryGraphs.size(); ++i) {
             if (mergedGraphIndices.contains(i)) { // graph has been merged.
                 continue;
@@ -242,7 +275,7 @@ std::vector<QueryGraph> QueryGraphCollection::mergeGraphs(common::idx_t baseGrap
                 break;
             }
         }
-        if (graphToMergeIdx == common::INVALID_VECTOR_IDX) { // No graph can be merged. Terminate.
+        if (graphToMergeIdx == common::INVALID_IDX) { // No graph can be merged. Terminate.
             break;
         }
         // Perform merge

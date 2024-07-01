@@ -15,6 +15,11 @@ struct TableFuncBindInput;
 
 struct TableFuncSharedState {
     virtual ~TableFuncSharedState() = default;
+
+    template<class TARGET>
+    TARGET* ptrCast() {
+        return common::ku_dynamic_cast<TableFuncSharedState*, TARGET*>(this);
+    }
 };
 
 struct TableFuncLocalState {
@@ -65,7 +70,7 @@ using table_func_init_local_t = std::function<std::unique_ptr<TableFuncLocalStat
 using table_func_can_parallel_t = std::function<bool()>;
 using table_func_progress_t = std::function<double(TableFuncSharedState* sharedState)>;
 
-struct TableFunction final : public Function {
+struct KUZU_API TableFunction : public Function {
     table_func_t tableFunc;
     table_func_bind_t bindFunc;
     table_func_init_shared_t initSharedStateFunc;
@@ -79,17 +84,17 @@ struct TableFunction final : public Function {
     TableFunction(std::string name, table_func_t tableFunc, table_func_bind_t bindFunc,
         table_func_init_shared_t initSharedFunc, table_func_init_local_t initLocalFunc,
         std::vector<common::LogicalTypeID> inputTypes)
-        : Function{FunctionType::TABLE, std::move(name), std::move(inputTypes)},
-          tableFunc{tableFunc}, bindFunc{bindFunc}, initSharedStateFunc{initSharedFunc},
+        : Function{std::move(name), std::move(inputTypes)}, tableFunc{tableFunc},
+          bindFunc{bindFunc}, initSharedStateFunc{initSharedFunc},
           initLocalStateFunc{initLocalFunc} {}
     TableFunction(std::string name, table_func_t tableFunc, table_func_bind_t bindFunc,
         table_func_init_shared_t initSharedFunc, table_func_init_local_t initLocalFunc,
         table_func_progress_t progressFunc, std::vector<common::LogicalTypeID> inputTypes)
-        : Function{FunctionType::TABLE, std::move(name), std::move(inputTypes)},
-          tableFunc{tableFunc}, bindFunc{bindFunc}, initSharedStateFunc{initSharedFunc},
+        : Function{std::move(name), std::move(inputTypes)}, tableFunc{tableFunc},
+          bindFunc{bindFunc}, initSharedStateFunc{initSharedFunc},
           initLocalStateFunc{initLocalFunc}, progressFunc{progressFunc} {}
 
-    inline std::string signatureToString() const override {
+    std::string signatureToString() const override {
         return common::LogicalTypeUtils::toString(parameterTypeIDs);
     }
 

@@ -1,4 +1,4 @@
-#include "binder/copy/bound_export_database.h"
+#include "binder/bound_export_database.h"
 #include "binder/query/bound_regular_query.h"
 #include "catalog/catalog.h"
 #include "catalog/catalog_entry/node_table_catalog_entry.h"
@@ -29,21 +29,11 @@ static std::string getPrimaryKeyName(table_id_t tableId, const Catalog& catalog,
 static std::vector<ExportedTableData> getExportInfo(const Catalog& catalog, Transaction* tx,
     Binder* binder) {
     std::vector<ExportedTableData> exportData;
-    for (auto& nodeTableEntry : catalog.getNodeTableEntries(tx)) {
-        auto tableName = nodeTableEntry->getName();
-        std::string selQuery = "match (a:" + tableName + ") return a.*";
-        exportData.push_back(binder->extractExportData(selQuery, tableName));
-    }
-    for (auto& relTableEntry : catalog.getRelTableEntries(tx)) {
-        auto srcPrimaryKeyName = getPrimaryKeyName(relTableEntry->getSrcTableID(), catalog, tx);
-        auto dstPrimaryKeyName = getPrimaryKeyName(relTableEntry->getDstTableID(), catalog, tx);
-        auto srcName = catalog.getTableName(tx, relTableEntry->getSrcTableID());
-        auto dstName = catalog.getTableName(tx, relTableEntry->getDstTableID());
-        auto relName = relTableEntry->getName();
-        std::string selQuery = "match (a:" + srcName + ")-[r:" + relName + "]->(b:" + dstName +
-                               ") return a." + srcPrimaryKeyName + ",b." + dstPrimaryKeyName +
-                               ",r.*";
-        exportData.push_back(binder->extractExportData(selQuery, relName));
+    for (auto tableEntry : catalog.getTableEntries(tx)) {
+        ExportedTableData tableData;
+        if (binder->bindExportTableData(tableData, *tableEntry, catalog, tx)) {
+            exportData.push_back(std::move(tableData));
+        }
     }
     return exportData;
 }
@@ -52,7 +42,7 @@ FileType getFileType(std::unordered_map<std::string, common::Value>& options) {
     auto fileType = FileType::CSV;
     if (options.find("FORMAT") != options.end()) {
         auto value = options.at("FORMAT");
-        if (value.getDataType()->getLogicalTypeID() != LogicalTypeID::STRING) {
+        if (value.getDataType().getLogicalTypeID() != LogicalTypeID::STRING) {
             throw BinderException("The type of format option must be a string.");
         }
         auto valueStr = value.getValue<std::string>();
@@ -63,29 +53,71 @@ FileType getFileType(std::unordered_map<std::string, common::Value>& options) {
     return fileType;
 }
 
-ExportedTableData Binder::extractExportData(std::string selQuery, std::string tableName) {
-    auto parsedStatement = Parser::parseQuery(selQuery);
-    ExportedTableData exportedTableData;
-    exportedTableData.tableName = tableName;
+static void bindExportNodeTableDataQuery(const TableCatalogEntry& entry, std::string& exportQuery) {
+    exportQuery = stringFormat("match (a:{}) return ", entry.getName());
+    for (auto i = 0u; i < entry.getNumProperties(); i++) {
+        auto& prop = entry.getPropertiesRef()[i];
+        exportQuery += stringFormat("a.{}", prop.getName());
+        exportQuery += i == entry.getNumProperties() - 1 ? " " : ",";
+    }
+}
+
+static void bindExportRelTableDataQuery(const TableCatalogEntry& entry, std::string& exportQuery,
+    const catalog::Catalog& catalog, transaction::Transaction* tx) {
+    auto relTableEntry = entry.constPtrCast<RelTableCatalogEntry>();
+    auto srcPrimaryKeyName = getPrimaryKeyName(relTableEntry->getSrcTableID(), catalog, tx);
+    auto dstPrimaryKeyName = getPrimaryKeyName(relTableEntry->getDstTableID(), catalog, tx);
+    auto srcName = catalog.getTableName(tx, relTableEntry->getSrcTableID());
+    auto dstName = catalog.getTableName(tx, relTableEntry->getDstTableID());
+    auto relName = relTableEntry->getName();
+    exportQuery = stringFormat("match (a:{})-[r:{}]->(b:{}) return a.{},b.{},r.*;", srcName,
+        relName, dstName, srcPrimaryKeyName, dstPrimaryKeyName);
+}
+
+static bool bindExportQuery(std::string& exportQuery, const TableCatalogEntry& entry,
+    const Catalog& catalog, transaction::Transaction* tx) {
+    switch (entry.getTableType()) {
+    case common::TableType::NODE: {
+        bindExportNodeTableDataQuery(entry, exportQuery);
+    } break;
+    case common::TableType::REL: {
+        bindExportRelTableDataQuery(entry, exportQuery, catalog, tx);
+    } break;
+    default:
+        return false;
+    }
+    return true;
+}
+
+bool Binder::bindExportTableData(ExportedTableData& tableData, const TableCatalogEntry& entry,
+    const Catalog& catalog, transaction::Transaction* tx) {
+    if (catalog.tableInRDFGraph(tx, entry.getTableID())) {
+        return false;
+    }
+    std::string exportQuery;
+    tableData.tableName = entry.getName();
+    if (!bindExportQuery(exportQuery, entry, catalog, tx)) {
+        return false;
+    }
+    auto parsedStatement = Parser::parseQuery(exportQuery);
     KU_ASSERT(parsedStatement.size() == 1);
-    auto parsedQuery =
-        ku_dynamic_cast<const Statement*, const RegularQuery*>(parsedStatement[0].get());
+    auto parsedQuery = parsedStatement[0]->constPtrCast<RegularQuery>();
     auto query = bindQuery(*parsedQuery);
     auto columns = query->getStatementResult()->getColumns();
     for (auto& column : columns) {
         auto columnName = column->hasAlias() ? column->getAlias() : column->toString();
-        exportedTableData.columnNames.push_back(columnName);
-        exportedTableData.columnTypes.push_back(column->getDataType());
+        tableData.columnNames.push_back(columnName);
+        tableData.columnTypes.push_back(column->getDataType().copy());
     }
-    exportedTableData.regularQuery = std::move(query);
-    return exportedTableData;
+    tableData.regularQuery = std::move(query);
+    return true;
 }
 
 std::unique_ptr<BoundStatement> Binder::bindExportDatabaseClause(const Statement& statement) {
-    auto& exportDatabaseStatement = ku_dynamic_cast<const Statement&, const ExportDB&>(statement);
-    auto boundFilePath = exportDatabaseStatement.getFilePath();
+    auto& exportDB = statement.constCast<ExportDB>();
+    auto boundFilePath = exportDB.getFilePath();
     auto exportData = getExportInfo(*clientContext->getCatalog(), clientContext->getTx(), this);
-    auto parsedOptions = bindParsingOptions(exportDatabaseStatement.getParsingOptionsRef());
+    auto parsedOptions = bindParsingOptions(exportDB.getParsingOptionsRef());
     auto fileType = getFileType(parsedOptions);
     if (fileType != FileType::CSV && fileType != FileType::PARQUET) {
         throw BinderException("Export database currently only supports csv and parquet files.");
@@ -96,5 +128,6 @@ std::unique_ptr<BoundStatement> Binder::bindExportDatabaseClause(const Statement
     return std::make_unique<BoundExportDatabase>(boundFilePath, fileType, std::move(exportData),
         std::move(parsedOptions));
 }
+
 } // namespace binder
 } // namespace kuzu

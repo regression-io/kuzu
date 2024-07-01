@@ -1,4 +1,3 @@
--GROUP Set_Transaction
 -DATASET CSV tinysnb
 
 --
@@ -14,6 +13,9 @@
 -STATEMENT MATCH (a:person) WHERE a.ID=0 RETURN a.age;
 ---- 1
 70
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE NullTest
 -STATEMENT BEGIN TRANSACTION
@@ -25,6 +27,10 @@
 ---- ok
 -STATEMENT MATCH (a:person) WHERE a.ID=0 RETURN a.age;
 ---- 1
+
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE TimeoutErrorTest
 -CHECKPOINT_WAIT_TIMEOUT 10000
@@ -38,10 +44,11 @@
 ---- ok
 -STATEMENT [conn2] COMMIT
 ---- error
-Timeout waiting for read transactions to leave the system before committing and checkpointing a write transaction. If you have an open read transaction close and try again.
+Timeout waiting for active transactions to leave the system before checkpointing. If you have an open transaction, please close it and try again.
 -STATEMENT [conn1] MATCH (a:person) WHERE a.ID=0 RETURN a.age;
 ---- 1
 35
+
 
 -CASE RollbackTest
 -STATEMENT BEGIN TRANSACTION;
@@ -53,10 +60,3 @@ Timeout waiting for read transactions to leave the system before committing and 
 -STATEMENT MATCH (a:person) WHERE a.ID=0 RETURN a.fName;
 ---- 1
 Alice
--CASE VeryLongStringErrorsTest
--LOG Set Very Long String Errors Test
--STATEMENT BEGIN TRANSACTION;
----- ok
--DEFINE test_long_string REPEAT 262144 "a"
--STATEMENT MATCH (a:person) WHERE a.ID=0 SET a.fName='${test_long_string}';
----- ok

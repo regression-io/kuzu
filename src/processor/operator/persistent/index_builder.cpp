@@ -9,7 +9,7 @@
 #include "common/type_utils.h"
 #include "common/types/ku_string.h"
 #include "storage/index/hash_index_utils.h"
-#include "storage/store/string_column_chunk.h"
+#include "storage/store/string_chunk_data.h"
 
 namespace kuzu {
 namespace processor {
@@ -17,8 +17,7 @@ namespace processor {
 using namespace kuzu::common;
 using namespace kuzu::storage;
 
-IndexBuilderGlobalQueues::IndexBuilderGlobalQueues(PrimaryKeyIndexBuilder* pkIndex)
-    : pkIndex(pkIndex) {
+IndexBuilderGlobalQueues::IndexBuilderGlobalQueues(PrimaryKeyIndex* pkIndex) : pkIndex(pkIndex) {
     TypeUtils::visit(
         pkTypeID(), [&](ku_string_t) { queues.emplace<Queue<std::string>>(); },
         [&]<HashablePrimitive T>(T) { queues.emplace<Queue<T>>(); }, [](auto) { KU_UNREACHABLE; });
@@ -58,7 +57,7 @@ void IndexBuilderGlobalQueues::maybeConsumeIndex(size_t index) {
 }
 
 void IndexBuilderGlobalQueues::flushToDisk() const {
-    pkIndex->flush();
+    pkIndex->prepareCommit();
 }
 
 IndexBuilderLocalBuffers::IndexBuilderLocalBuffers(IndexBuilderGlobalQueues& globalQueues)
@@ -89,7 +88,7 @@ void IndexBuilderSharedState::quitProducer() {
     }
 }
 
-void IndexBuilder::insert(const ColumnChunk& chunk, offset_t nodeOffset, offset_t numNodes) {
+void IndexBuilder::insert(const ColumnChunkData& chunk, offset_t nodeOffset, offset_t numNodes) {
     checkNonNullConstraint(chunk.getNullChunk(), numNodes);
 
     TypeUtils::visit(
@@ -102,7 +101,7 @@ void IndexBuilder::insert(const ColumnChunk& chunk, offset_t nodeOffset, offset_
         },
         [&](ku_string_t) {
             auto& stringColumnChunk =
-                ku_dynamic_cast<const ColumnChunk&, const StringColumnChunk&>(chunk);
+                ku_dynamic_cast<const ColumnChunkData&, const StringChunkData&>(chunk);
             for (auto i = 0u; i < numNodes; i++) {
                 auto value = stringColumnChunk.getValue<std::string>(i);
                 localBuffers.insert(std::move(value), nodeOffset + i);
@@ -130,7 +129,7 @@ void IndexBuilder::finalize(ExecutionContext* /*context*/) {
     sharedState->flush();
 }
 
-void IndexBuilder::checkNonNullConstraint(const NullColumnChunk& nullChunk, offset_t numNodes) {
+void IndexBuilder::checkNonNullConstraint(const NullChunkData& nullChunk, offset_t numNodes) {
     for (auto i = 0u; i < numNodes; i++) {
         if (nullChunk.isNull(i)) {
             throw CopyException(ExceptionMessage::nullPKException());

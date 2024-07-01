@@ -2,6 +2,8 @@
 
 #include "common/cast.h"
 #include "common/exception/io.h"
+#include "common/exception/not_implemented.h"
+#include "common/file_system/virtual_file_system.h"
 
 namespace kuzu {
 namespace httpfs {
@@ -15,14 +17,16 @@ HTTPResponse::HTTPResponse(httplib::Response& res, const std::string& url)
     }
 }
 
-HTTPFileInfo::HTTPFileInfo(std::string path, FileSystem* fileSystem, int flags)
+HTTPFileInfo::HTTPFileInfo(std::string path, FileSystem* fileSystem, int flags,
+    main::ClientContext* context)
     : FileInfo{std::move(path), fileSystem}, flags{flags}, length{0}, availableBuffer{0},
-      bufferIdx{0}, fileOffset{0}, bufferStartPos{0}, bufferEndPos{0} {}
+      bufferIdx{0}, fileOffset{0}, bufferStartPos{0}, bufferEndPos{0}, httpConfig{context},
+      cachedFileInfo{nullptr} {}
 
-void HTTPFileInfo::initialize() {
+void HTTPFileInfo::initialize(main::ClientContext* context) {
     initializeClient();
-    auto hfs = ku_dynamic_cast<const FileSystem*, const HTTPFileSystem*>(fileSystem);
-    auto res = hfs->headRequest(ku_dynamic_cast<HTTPFileInfo*, FileInfo*>(this), path, {});
+    auto hfs = fileSystem->ptrCast<HTTPFileSystem>();
+    auto res = hfs->headRequest(this->ptrCast<HTTPFileInfo>(), path, {});
     std::string rangeLength;
     if (res->code != 200) {
         auto accessMode = flags & O_ACCMODE;
@@ -102,6 +106,10 @@ void HTTPFileInfo::initialize() {
             // LCOV_EXCL_STOP
         }
     }
+    if (httpConfig.cacheFile) {
+        cachedFileInfo =
+            hfs->getCachedFileManager().getCachedFileInfo(this, context->getTx()->getID());
+    }
 }
 
 void HTTPFileInfo::initializeClient() {
@@ -110,10 +118,11 @@ void HTTPFileInfo::initializeClient() {
 }
 
 std::unique_ptr<common::FileInfo> HTTPFileSystem::openFile(const std::string& path, int flags,
-    main::ClientContext* /*context*/, common::FileLockType /*lock_type*/) {
-    auto httpFileInfo = std::make_unique<HTTPFileInfo>(path, this, flags);
-    httpFileInfo->initialize();
-    return std::move(httpFileInfo);
+    main::ClientContext* context, common::FileLockType /*lock_type*/) {
+    initCachedFileManager(context);
+    auto httpFileInfo = std::make_unique<HTTPFileInfo>(path, this, flags, context);
+    httpFileInfo->initialize(context);
+    return httpFileInfo;
 }
 
 std::vector<std::string> HTTPFileSystem::glob(main::ClientContext* /*context*/,
@@ -126,81 +135,109 @@ bool HTTPFileSystem::canHandleFile(const std::string& path) const {
     return path.rfind("https://", 0) == 0 || path.rfind("http://", 0) == 0;
 }
 
-void HTTPFileSystem::readFromFile(common::FileInfo* fileInfo, void* buffer, uint64_t numBytes,
+bool HTTPFileSystem::fileOrPathExists(const std::string& path, main::ClientContext* context) {
+    try {
+        auto fileInfo = openFile(path, O_RDONLY, context, FileLockType::READ_LOCK);
+        auto httpFileInfo = fileInfo->constPtrCast<HTTPFileInfo>();
+        if (httpFileInfo->length == 0) {
+            return false;
+        }
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+void HTTPFileSystem::cleanUP(main::ClientContext* context) {
+    if (cachedFileManager != nullptr) {
+        cachedFileManager->cleanUP(context);
+    }
+}
+
+void HTTPFileSystem::readFromFile(common::FileInfo& fileInfo, void* buffer, uint64_t numBytes,
     uint64_t position) const {
-    auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
+    auto& httpFileInfo = ku_dynamic_cast<FileInfo&, HTTPFileInfo&>(fileInfo);
     auto numBytesToRead = numBytes;
     auto bufferOffset = 0;
-    if (position >= httpFileInfo->bufferStartPos && position < httpFileInfo->bufferEndPos) {
-        httpFileInfo->fileOffset = position;
-        httpFileInfo->bufferIdx = position - httpFileInfo->bufferStartPos;
-        httpFileInfo->availableBuffer =
-            (httpFileInfo->bufferEndPos - httpFileInfo->bufferStartPos) - httpFileInfo->bufferIdx;
+    if (httpFileInfo.cachedFileInfo != nullptr) {
+        httpFileInfo.cachedFileInfo->readFromFile(buffer, numBytes, position);
+        httpFileInfo.fileOffset = position + numBytes;
+        return;
+    }
+    if (position >= httpFileInfo.bufferStartPos && position < httpFileInfo.bufferEndPos) {
+        httpFileInfo.fileOffset = position;
+        httpFileInfo.bufferIdx = position - httpFileInfo.bufferStartPos;
+        httpFileInfo.availableBuffer =
+            (httpFileInfo.bufferEndPos - httpFileInfo.bufferStartPos) - httpFileInfo.bufferIdx;
     } else {
-        httpFileInfo->availableBuffer = 0;
-        httpFileInfo->bufferIdx = 0;
-        httpFileInfo->fileOffset = position;
+        httpFileInfo.availableBuffer = 0;
+        httpFileInfo.bufferIdx = 0;
+        httpFileInfo.fileOffset = position;
     }
     while (numBytesToRead > 0) {
-        auto buffer_read_len = std::min<uint64_t>(httpFileInfo->availableBuffer, numBytesToRead);
+        auto buffer_read_len = std::min<uint64_t>(httpFileInfo.availableBuffer, numBytesToRead);
         if (buffer_read_len > 0) {
-            KU_ASSERT(httpFileInfo->bufferStartPos + httpFileInfo->bufferIdx + buffer_read_len <=
-                      httpFileInfo->bufferEndPos);
+            KU_ASSERT(httpFileInfo.bufferStartPos + httpFileInfo.bufferIdx + buffer_read_len <=
+                      httpFileInfo.bufferEndPos);
             memcpy((char*)buffer + bufferOffset,
-                httpFileInfo->readBuffer.get() + httpFileInfo->bufferIdx, buffer_read_len);
+                httpFileInfo.readBuffer.get() + httpFileInfo.bufferIdx, buffer_read_len);
 
             bufferOffset += buffer_read_len;
             numBytesToRead -= buffer_read_len;
 
-            httpFileInfo->bufferIdx += buffer_read_len;
-            httpFileInfo->availableBuffer -= buffer_read_len;
-            httpFileInfo->fileOffset += buffer_read_len;
+            httpFileInfo.bufferIdx += buffer_read_len;
+            httpFileInfo.availableBuffer -= buffer_read_len;
+            httpFileInfo.fileOffset += buffer_read_len;
         }
 
-        if (numBytesToRead > 0 && httpFileInfo->availableBuffer == 0) {
-            auto newBufferAvailableSize = std::min<uint64_t>(httpFileInfo->READ_BUFFER_LEN,
-                httpFileInfo->length - httpFileInfo->fileOffset);
+        if (numBytesToRead > 0 && httpFileInfo.availableBuffer == 0) {
+            auto newBufferAvailableSize = std::min<uint64_t>(httpFileInfo.READ_BUFFER_LEN,
+                httpFileInfo.length - httpFileInfo.fileOffset);
 
             // Bypass buffer if we read more than buffer size.
             if (numBytesToRead > newBufferAvailableSize) {
-                getRangeRequest(httpFileInfo, httpFileInfo->path, {}, position + bufferOffset,
+                getRangeRequest(&httpFileInfo, httpFileInfo.path, {}, position + bufferOffset,
                     (char*)buffer + bufferOffset, numBytesToRead);
-                httpFileInfo->availableBuffer = 0;
-                httpFileInfo->bufferIdx = 0;
-                httpFileInfo->fileOffset += numBytesToRead;
+                httpFileInfo.availableBuffer = 0;
+                httpFileInfo.bufferIdx = 0;
+                httpFileInfo.fileOffset += numBytesToRead;
                 break;
             } else {
-                getRangeRequest(httpFileInfo, httpFileInfo->path, {}, httpFileInfo->fileOffset,
-                    (char*)httpFileInfo->readBuffer.get(), newBufferAvailableSize);
-                httpFileInfo->availableBuffer = newBufferAvailableSize;
-                httpFileInfo->bufferIdx = 0;
-                httpFileInfo->bufferStartPos = httpFileInfo->fileOffset;
-                httpFileInfo->bufferEndPos = httpFileInfo->bufferStartPos + newBufferAvailableSize;
+                getRangeRequest(&httpFileInfo, httpFileInfo.path, {}, httpFileInfo.fileOffset,
+                    (char*)httpFileInfo.readBuffer.get(), newBufferAvailableSize);
+                httpFileInfo.availableBuffer = newBufferAvailableSize;
+                httpFileInfo.bufferIdx = 0;
+                httpFileInfo.bufferStartPos = httpFileInfo.fileOffset;
+                httpFileInfo.bufferEndPos = httpFileInfo.bufferStartPos + newBufferAvailableSize;
             }
         }
     }
 }
 
-int64_t HTTPFileSystem::readFile(common::FileInfo* fileInfo, void* buf, size_t numBytes) const {
-    auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
-    auto maxNumBytesToRead = httpFileInfo->length - httpFileInfo->fileOffset;
+int64_t HTTPFileSystem::readFile(common::FileInfo& fileInfo, void* buf, size_t numBytes) const {
+    auto& httpFileInfo = ku_dynamic_cast<FileInfo&, HTTPFileInfo&>(fileInfo);
+    auto maxNumBytesToRead = httpFileInfo.length - httpFileInfo.fileOffset;
     numBytes = std::min<uint64_t>(maxNumBytesToRead, numBytes);
-    if (httpFileInfo->fileOffset > httpFileInfo->getFileSize()) {
+    if (httpFileInfo.fileOffset > httpFileInfo.getFileSize()) {
         return 0;
     }
-    readFromFile(fileInfo, buf, numBytes, httpFileInfo->fileOffset);
+    readFromFile(fileInfo, buf, numBytes, httpFileInfo.fileOffset);
     return numBytes;
 }
 
-int64_t HTTPFileSystem::seek(common::FileInfo* fileInfo, uint64_t offset, int /*whence*/) const {
-    auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
-    httpFileInfo->fileOffset = offset;
+void HTTPFileSystem::syncFile(const common::FileInfo&) const {
+    throw NotImplementedException("syncFile is not supported in HTTPFileSystem");
+}
+
+int64_t HTTPFileSystem::seek(common::FileInfo& fileInfo, uint64_t offset, int /*whence*/) const {
+    auto& httpFileInfo = ku_dynamic_cast<FileInfo&, HTTPFileInfo&>(fileInfo);
+    httpFileInfo.fileOffset = offset;
     return offset;
 }
 
-uint64_t HTTPFileSystem::getFileSize(common::FileInfo* fileInfo) const {
-    auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
-    return httpFileInfo->length;
+uint64_t HTTPFileSystem::getFileSize(const common::FileInfo& fileInfo) const {
+    auto& httpFileInfo = ku_dynamic_cast<const FileInfo&, const HTTPFileInfo&>(fileInfo);
+    return httpFileInfo.length;
 }
 
 std::unique_ptr<httplib::Client> HTTPFileSystem::getClient(const std::string& host) {
@@ -250,9 +287,9 @@ std::unique_ptr<HTTPResponse> HTTPFileSystem::runRequestWithRetry(
     uint64_t tries = 0;
     while (true) {
         std::exception_ptr exception = nullptr;
-        httplib::Error err;
+        httplib::Error err = httplib::Error::Success;
         httplib::Response response;
-        int status;
+        int status = 0;
 
         try {
             auto res = request();
@@ -391,9 +428,7 @@ std::unique_ptr<HTTPResponse> HTTPFileSystem::postRequest(common::FileInfo* file
     uint64_t& outputBufferLen, const uint8_t* inputBuffer, uint64_t inputBufferLen,
     std::string /*params*/) const {
     auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
-    auto parsedURL = parseUrl(url);
-    auto host = parsedURL.first;
-    auto hostPath = parsedURL.second;
+    auto hostPath = parseUrl(url).second;
     auto headers = getHTTPHeaders(headerMap);
     uint64_t outputBufferPos = 0;
 
@@ -425,12 +460,10 @@ std::unique_ptr<HTTPResponse> HTTPFileSystem::postRequest(common::FileInfo* file
 }
 
 std::unique_ptr<HTTPResponse> HTTPFileSystem::putRequest(common::FileInfo* fileInfo,
-    const std::string& url, kuzu::httpfs::HeaderMap headerMap, const uint8_t* inputBuffer,
+    const std::string& url, HeaderMap headerMap, const uint8_t* inputBuffer,
     uint64_t inputBufferLen, std::string /*params*/) const {
     auto httpFileInfo = ku_dynamic_cast<FileInfo*, HTTPFileInfo*>(fileInfo);
-    auto parsedURL = parseUrl(url);
-    auto host = parsedURL.first;
-    auto hostPath = parsedURL.second;
+    auto hostPath = parseUrl(url).second;
     auto headers = getHTTPHeaders(headerMap);
     std::function<httplib::Result(void)> request([&]() {
         auto client = httpFileInfo->httpClient.get();
@@ -439,6 +472,13 @@ std::unique_ptr<HTTPResponse> HTTPFileSystem::putRequest(common::FileInfo* fileI
     });
 
     return runRequestWithRetry(request, url, "PUT");
+}
+
+void HTTPFileSystem::initCachedFileManager(main::ClientContext* context) {
+    std::unique_lock<std::mutex> lck{cachedFileManagerMtx};
+    if (cachedFileManager == nullptr) {
+        cachedFileManager = std::make_unique<CachedFileManager>(context);
+    }
 }
 
 } // namespace httpfs

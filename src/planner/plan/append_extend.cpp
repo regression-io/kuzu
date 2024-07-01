@@ -6,10 +6,12 @@
 #include "catalog/catalog.h"
 #include "catalog/catalog_entry/rel_table_catalog_entry.h"
 #include "common/enums/join_type.h"
+#include "main/client_context.h"
 #include "planner/join_order/cost_model.h"
 #include "planner/operator/extend/logical_extend.h"
 #include "planner/operator/extend/logical_recursive_extend.h"
 #include "planner/operator/logical_node_label_filter.h"
+#include "planner/operator/scan/logical_scan_node_table.h"
 #include "planner/planner.h"
 
 using namespace kuzu::common;
@@ -22,6 +24,9 @@ namespace planner {
 
 static bool extendHasAtMostOneNbrGuarantee(RelExpression& rel, NodeExpression& boundNode,
     ExtendDirection direction, const main::ClientContext& clientContext) {
+    if (rel.isEmpty()) {
+        return false;
+    }
     if (boundNode.isMultiLabeled()) {
         return false;
     }
@@ -31,7 +36,7 @@ static bool extendHasAtMostOneNbrGuarantee(RelExpression& rel, NodeExpression& b
     if (direction == ExtendDirection::BOTH) {
         return false;
     }
-    auto relDirection = ExtendDirectionUtils::getRelDataDirection(direction);
+    auto relDirection = ExtendDirectionUtil::getRelDataDirection(direction);
     auto catalog = clientContext.getCatalog();
     auto relTableEntry = ku_dynamic_cast<TableCatalogEntry*, RelTableCatalogEntry*>(
         catalog->getTableCatalogEntry(clientContext.getTx(), rel.getSingleTableID()));
@@ -142,9 +147,8 @@ void Planner::appendNonRecursiveExtend(const std::shared_ptr<NodeExpression>& bo
         auto tmpPlan = std::make_unique<LogicalPlan>();
         cardinalityEstimator.addNodeIDDom(*rdfInfo->predicateID, rdfInfo->resourceTableIDs,
             clientContext->getTx());
-        appendScanInternalID(rdfInfo->predicateID, rdfInfo->resourceTableIDs, *tmpPlan);
-        appendScanNodeProperties(rdfInfo->predicateID, rdfInfo->resourceTableIDs,
-            expression_vector{iri}, *tmpPlan);
+        appendScanNodeTable(rdfInfo->predicateID, rdfInfo->resourceTableIDs, expression_vector{iri},
+            *tmpPlan);
         appendHashJoin(expression_vector{rdfInfo->predicateID}, JoinType::INNER, plan, *tmpPlan,
             plan);
     }
@@ -154,7 +158,7 @@ void Planner::appendRecursiveExtend(const std::shared_ptr<NodeExpression>& bound
     const std::shared_ptr<NodeExpression>& nbrNode, const std::shared_ptr<RelExpression>& rel,
     ExtendDirection direction, LogicalPlan& plan) {
     auto recursiveInfo = rel->getRecursiveInfo();
-    appendAccumulate(AccumulateType::REGULAR, plan);
+    appendAccumulate(plan);
     // Create recursive plan
     auto recursivePlan = std::make_unique<LogicalPlan>();
     createRecursivePlan(*recursiveInfo, direction, *recursivePlan);
@@ -196,7 +200,7 @@ void Planner::appendRecursiveExtend(const std::shared_ptr<NodeExpression>& bound
     // Check for sip
     auto ratio = plan.getCardinality() / relScanCardinality;
     if (ratio > PlannerKnobs::SIP_RATIO) {
-        pathPropertyProbe->setSIP(SidewaysInfoPassing::PROHIBIT_PROBE_TO_BUILD);
+        pathPropertyProbe->getSIPInfoUnsafe().position = SemiMaskPosition::PROHIBIT;
     }
     plan.setLastOperator(std::move(pathPropertyProbe));
     // Update cost
@@ -224,15 +228,13 @@ void Planner::createRecursivePlan(const RecursiveInfo& recursiveInfo, ExtendDire
     auto boundNode = recursiveInfo.node;
     auto nbrNode = recursiveInfo.nodeCopy;
     auto rel = recursiveInfo.rel;
-    auto scanFrontier = std::make_shared<LogicalScanFrontier>(boundNode->getInternalID(),
-        recursiveInfo.nodePredicateExecFlag);
-    scanFrontier->computeFactorizedSchema();
-    plan.setLastOperator(std::move(scanFrontier));
     auto nodeProperties = collectPropertiesToRead(recursiveInfo.nodePredicate);
-    if (!nodeProperties.empty()) {
-        appendScanNodeProperties(boundNode->getInternalID(), boundNode->getTableIDs(),
-            ExpressionUtil::removeDuplication(nodeProperties), plan);
-    }
+    appendScanNodeTable(boundNode->getInternalID(), boundNode->getTableIDs(),
+        ExpressionUtil::removeDuplication(nodeProperties), plan);
+    auto& scan = plan.getLastOperator()->cast<LogicalScanNodeTable>();
+    scan.setScanType(LogicalScanNodeTableType::OFFSET_SCAN);
+    scan.setExtraInfo(std::make_unique<RecursiveJoinScanInfo>(recursiveInfo.nodePredicateExecFlag));
+    scan.computeFactorizedSchema();
     if (recursiveInfo.nodePredicate) {
         appendFilters(recursiveInfo.nodePredicate->splitOnAND(), plan);
     }
@@ -247,8 +249,8 @@ void Planner::createRecursivePlan(const RecursiveInfo& recursiveInfo, ExtendDire
         appendNonRecursiveExtend(boundNode, nbrNode, rel, direction,
             ExpressionUtil::removeDuplication(relProperties), plan);
         auto rdfInfo = rel->getRdfPredicateInfo();
-        appendScanNodeProperties(rdfInfo->predicateID, rdfInfo->resourceTableIDs,
-            expression_vector{iri}, plan);
+        appendScanNodeTable(rdfInfo->predicateID, rdfInfo->resourceTableIDs, expression_vector{iri},
+            plan);
     } else {
         appendNonRecursiveExtend(boundNode, nbrNode, rel, direction,
             ExpressionUtil::removeDuplication(relProperties), plan);
@@ -260,14 +262,13 @@ void Planner::createRecursivePlan(const RecursiveInfo& recursiveInfo, ExtendDire
 
 void Planner::createPathNodePropertyScanPlan(const std::shared_ptr<NodeExpression>& node,
     const expression_vector& properties, LogicalPlan& plan) {
-    appendScanInternalID(node->getInternalID(), node->getTableIDs(), plan);
-    appendScanNodeProperties(node->getInternalID(), node->getTableIDs(), properties, plan);
+    appendScanNodeTable(node->getInternalID(), node->getTableIDs(), properties, plan);
 }
 
 void Planner::createPathRelPropertyScanPlan(const std::shared_ptr<NodeExpression>& boundNode,
     const std::shared_ptr<NodeExpression>& nbrNode, const std::shared_ptr<RelExpression>& rel,
     ExtendDirection direction, const expression_vector& properties, LogicalPlan& plan) {
-    appendScanInternalID(boundNode->getInternalID(), boundNode->getTableIDs(), plan);
+    appendScanNodeTable(boundNode->getInternalID(), boundNode->getTableIDs(), {}, plan);
     appendNonRecursiveExtend(boundNode, nbrNode, rel, direction, properties, plan);
     appendProjection(properties, plan);
 }

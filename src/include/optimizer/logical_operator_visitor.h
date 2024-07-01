@@ -33,14 +33,8 @@ protected:
         return op;
     }
 
-    virtual void visitScanInternalID(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitScanInternalIDReplace(
-        std::shared_ptr<planner::LogicalOperator> op) {
-        return op;
-    }
-
-    virtual void visitIndexScanNode(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitIndexScanNodeReplace(
+    virtual void visitScanNodeTable(planner::LogicalOperator* /*op*/) {}
+    virtual std::shared_ptr<planner::LogicalOperator> visitScanNodeTableReplace(
         std::shared_ptr<planner::LogicalOperator> op) {
         return op;
     }
@@ -135,26 +129,14 @@ protected:
         return op;
     }
 
-    virtual void visitSetNodeProperty(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitSetNodePropertyReplace(
+    virtual void visitSetProperty(planner::LogicalOperator*) {}
+    virtual std::shared_ptr<planner::LogicalOperator> visitSetPropertyReplace(
         std::shared_ptr<planner::LogicalOperator> op) {
         return op;
     }
 
-    virtual void visitSetRelProperty(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitSetRelPropertyReplace(
-        std::shared_ptr<planner::LogicalOperator> op) {
-        return op;
-    }
-
-    virtual void visitDeleteNode(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitDeleteNodeReplace(
-        std::shared_ptr<planner::LogicalOperator> op) {
-        return op;
-    }
-
-    virtual void visitDeleteRel(planner::LogicalOperator* /*op*/) {}
-    virtual std::shared_ptr<planner::LogicalOperator> visitDeleteRelReplace(
+    virtual void visitDelete(planner::LogicalOperator* /*op*/) {}
+    virtual std::shared_ptr<planner::LogicalOperator> visitDeleteReplace(
         std::shared_ptr<planner::LogicalOperator> op) {
         return op;
     }
@@ -179,6 +161,12 @@ protected:
 
     virtual void visitCopyFrom(planner::LogicalOperator* /*op*/) {}
     virtual std::shared_ptr<planner::LogicalOperator> visitCopyFromReplace(
+        std::shared_ptr<planner::LogicalOperator> op) {
+        return op;
+    }
+
+    virtual void visitGDSCall(planner::LogicalOperator* /*op*/) {}
+    virtual std::shared_ptr<planner::LogicalOperator> visitGDSCallReplace(
         std::shared_ptr<planner::LogicalOperator> op) {
         return op;
     }

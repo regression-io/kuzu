@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/in_mem_overflow_buffer.h"
+#include "common/types/types.h"
 
 namespace arrow {
 class ChunkedArray;
@@ -37,8 +38,7 @@ class StructAuxiliaryBuffer : public AuxiliaryBuffer {
 public:
     StructAuxiliaryBuffer(const LogicalType& type, storage::MemoryManager* memoryManager);
 
-    inline void referenceChildVector(vector_idx_t idx,
-        std::shared_ptr<ValueVector> vectorToReference) {
+    inline void referenceChildVector(idx_t idx, std::shared_ptr<ValueVector> vectorToReference) {
         childrenVectors[idx] = std::move(vectorToReference);
     }
     inline const std::vector<std::shared_ptr<ValueVector>>& getFieldVectors() const {

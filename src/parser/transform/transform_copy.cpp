@@ -13,7 +13,7 @@ std::unique_ptr<Statement> Transformer::transformCopyTo(CypherParser::KU_CopyTOC
     auto regularQuery = transformQuery(*ctx.oC_Query());
     auto copyTo = std::make_unique<CopyTo>(std::move(filePath), std::move(regularQuery));
     if (ctx.kU_ParsingOptions()) {
-        copyTo->setParsingOption(transformParsingOptions(*ctx.kU_ParsingOptions()));
+        copyTo->setParsingOption(transformOptions(*ctx.kU_ParsingOptions()->kU_Options()));
     }
     return copyTo;
 }
@@ -26,7 +26,7 @@ std::unique_ptr<Statement> Transformer::transformCopyFrom(CypherParser::KU_CopyF
         copyFrom->setColumnNames(transformColumnNames(*ctx.kU_ColumnNames()));
     }
     if (ctx.kU_ParsingOptions()) {
-        copyFrom->setParsingOption(transformParsingOptions(*ctx.kU_ParsingOptions()));
+        copyFrom->setParsingOption(transformOptions(*ctx.kU_ParsingOptions()->kU_Options()));
     }
     return copyFrom;
 }
@@ -68,20 +68,23 @@ std::unique_ptr<BaseScanSource> Transformer::transformScanSource(
         auto query = transformQuery(*ctx.oC_Query());
         return std::make_unique<QueryScanSource>(std::move(query));
     } else if (ctx.oC_Variable()) {
-        auto variable = transformVariable(*ctx.oC_Variable());
-        return std::make_unique<ObjectScanSource>(std::move(variable));
-    } else {
-        KU_UNREACHABLE;
+        std::vector<std::string> objectNames;
+        objectNames.push_back(transformVariable(*ctx.oC_Variable()));
+        if (ctx.oC_SchemaName()) {
+            objectNames.push_back(transformSchemaName(*ctx.oC_SchemaName()));
+        }
+        return std::make_unique<ObjectScanSource>(std::move(objectNames));
     }
+    KU_UNREACHABLE;
 }
 
-parsing_option_t Transformer::transformParsingOptions(CypherParser::KU_ParsingOptionsContext& ctx) {
-    std::unordered_map<std::string, std::unique_ptr<ParsedExpression>> copyOptions;
-    for (auto loadOption : ctx.kU_ParsingOption()) {
+options_t Transformer::transformOptions(CypherParser::KU_OptionsContext& ctx) {
+    options_t options;
+    for (auto loadOption : ctx.kU_Option()) {
         auto optionName = transformSymbolicName(*loadOption->oC_SymbolicName());
-        copyOptions.emplace(optionName, transformLiteral(*loadOption->oC_Literal()));
+        options.emplace(optionName, transformLiteral(*loadOption->oC_Literal()));
     }
-    return copyOptions;
+    return options;
 }
 
 } // namespace parser

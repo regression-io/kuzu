@@ -1,53 +1,46 @@
 #pragma once
 
 #include "common/enums/rel_direction.h"
-#include "storage/buffer_manager/buffer_manager.h"
 #include "storage/stats/metadata_dah_info.h"
 #include "storage/stats/table_statistics.h"
 
 namespace kuzu {
 namespace storage {
 
+class DiskArrayCollection;
+
 class WAL;
 class RelTableStats : public TableStatistics {
 public:
-    RelTableStats(BMFileHandle* metadataFH, const catalog::TableCatalogEntry& tableEntry,
-        BufferManager* bufferManager, WAL* wal);
+    RelTableStats(DiskArrayCollection& metadataDAC, const catalog::TableCatalogEntry& tableEntry);
     RelTableStats(uint64_t numRels, common::table_id_t tableID, common::offset_t nextRelOffset)
-        : TableStatistics{common::TableType::REL, numRels, tableID, {}},
-          nextRelOffset{nextRelOffset} {}
-    RelTableStats(uint64_t numRels, common::table_id_t tableID,
-        std::unordered_map<common::property_id_t, std::unique_ptr<PropertyStatistics>>&&
-            propertyStats,
-        common::offset_t nextRelOffset)
-        : TableStatistics{common::TableType::REL, numRels, tableID, std::move(propertyStats)},
-          nextRelOffset{nextRelOffset} {}
+        : TableStatistics{common::TableType::REL, numRels, tableID}, nextRelOffset{nextRelOffset} {}
 
     RelTableStats(const RelTableStats& other);
 
-    inline common::offset_t getNextRelOffset() const { return nextRelOffset; }
-    inline void incrementNextRelOffset(uint64_t numTuples) { nextRelOffset += numTuples; }
+    common::offset_t getNextRelOffset() const { return nextRelOffset; }
+    void incrementNextRelOffset(uint64_t numTuples) { nextRelOffset += numTuples; }
 
-    inline void addMetadataDAHInfoForColumn(std::unique_ptr<MetadataDAHInfo> metadataDAHInfo,
+    void addMetadataDAHInfoForColumn(std::unique_ptr<MetadataDAHInfo> metadataDAHInfo,
         common::RelDataDirection direction) {
         auto& metadataDAHInfos = getDirectedMetadataDAHInfosRef(direction);
         metadataDAHInfos.push_back(std::move(metadataDAHInfo));
     }
-    inline void removeMetadataDAHInfoForColumn(common::column_id_t columnID,
+    void removeMetadataDAHInfoForColumn(common::column_id_t columnID,
         common::RelDataDirection direction) {
         auto& metadataDAHInfos = getDirectedMetadataDAHInfosRef(direction);
         KU_ASSERT(columnID < metadataDAHInfos.size());
         metadataDAHInfos.erase(metadataDAHInfos.begin() + columnID);
     }
-    inline MetadataDAHInfo* getCSROffsetMetadataDAHInfo(common::RelDataDirection direction) {
+    MetadataDAHInfo* getCSROffsetMetadataDAHInfo(common::RelDataDirection direction) {
         return direction == common::RelDataDirection::FWD ? fwdCSROffsetMetadataDAHInfo.get() :
                                                             bwdCSROffsetMetadataDAHInfo.get();
     }
-    inline MetadataDAHInfo* getCSRLengthMetadataDAHInfo(common::RelDataDirection direction) {
+    MetadataDAHInfo* getCSRLengthMetadataDAHInfo(common::RelDataDirection direction) {
         return direction == common::RelDataDirection::FWD ? fwdCSRLengthMetadataDAHInfo.get() :
                                                             bwdCSRLengthMetadataDAHInfo.get();
     }
-    inline MetadataDAHInfo* getColumnMetadataDAHInfo(common::column_id_t columnID,
+    MetadataDAHInfo* getColumnMetadataDAHInfo(common::column_id_t columnID,
         common::RelDataDirection direction) {
         auto& metadataDAHInfos = getDirectedMetadataDAHInfosRef(direction);
         KU_ASSERT(columnID < metadataDAHInfos.size());
@@ -58,12 +51,10 @@ public:
     static std::unique_ptr<RelTableStats> deserialize(uint64_t numRels, common::table_id_t tableID,
         common::Deserializer& deserializer);
 
-    inline std::unique_ptr<TableStatistics> copy() final {
-        return std::make_unique<RelTableStats>(*this);
-    }
+    std::unique_ptr<TableStatistics> copy() final { return std::make_unique<RelTableStats>(*this); }
 
 private:
-    inline std::vector<std::unique_ptr<MetadataDAHInfo>>& getDirectedMetadataDAHInfosRef(
+    std::vector<std::unique_ptr<MetadataDAHInfo>>& getDirectedMetadataDAHInfosRef(
         common::RelDataDirection direction) {
         return direction == common::RelDataDirection::FWD ? fwdMetadataDAHInfos :
                                                             bwdMetadataDAHInfos;

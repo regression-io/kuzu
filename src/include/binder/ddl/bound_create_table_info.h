@@ -1,46 +1,72 @@
 #pragma once
 
 #include "common/copy_constructors.h"
+#include "common/enums/conflict_action.h"
 #include "common/enums/rel_multiplicity.h"
 #include "common/enums/table_type.h"
 #include "common/types/types.h"
+#include "common/types/value/value.h"
+#include "parser/expression/parsed_literal_expression.h"
 
 namespace kuzu {
 namespace common {
 enum class RelMultiplicity : uint8_t;
 }
 namespace binder {
-
 struct BoundExtraCreateCatalogEntryInfo {
     virtual ~BoundExtraCreateCatalogEntryInfo() = default;
+
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const BoundExtraCreateCatalogEntryInfo*, const TARGET*>(
+            this);
+    }
+
+    template<class TARGET>
+    TARGET* ptrCast() {
+        return common::ku_dynamic_cast<BoundExtraCreateCatalogEntryInfo*, TARGET*>(this);
+    }
+
     virtual inline std::unique_ptr<BoundExtraCreateCatalogEntryInfo> copy() const = 0;
 };
 
 struct BoundCreateTableInfo {
     common::TableType type;
     std::string tableName;
+    common::ConflictAction onConflict;
     std::unique_ptr<BoundExtraCreateCatalogEntryInfo> extraInfo;
 
     BoundCreateTableInfo(common::TableType type, std::string tableName,
+        common::ConflictAction onConflict,
         std::unique_ptr<BoundExtraCreateCatalogEntryInfo> extraInfo)
-        : type{type}, tableName{std::move(tableName)}, extraInfo{std::move(extraInfo)} {}
+        : type{type}, tableName{std::move(tableName)}, onConflict{onConflict},
+          extraInfo{std::move(extraInfo)} {}
     EXPLICIT_COPY_DEFAULT_MOVE(BoundCreateTableInfo);
 
 private:
     BoundCreateTableInfo(const BoundCreateTableInfo& other)
-        : type{other.type}, tableName{other.tableName}, extraInfo{other.extraInfo->copy()} {}
+        : type{other.type}, tableName{other.tableName}, onConflict{other.onConflict},
+          extraInfo{other.extraInfo->copy()} {}
 };
 
 struct PropertyInfo {
     std::string name;
     common::LogicalType type;
+    std::unique_ptr<parser::ParsedExpression> defaultValue;
 
     PropertyInfo(std::string name, common::LogicalType type)
-        : name{std::move(name)}, type{std::move(type)} {}
+        : PropertyInfo{name, std::move(type),
+              std::make_unique<parser::ParsedLiteralExpression>(common::Value::createNullValue(),
+                  "NULL")} {}
+
+    PropertyInfo(std::string name, common::LogicalType type,
+        std::unique_ptr<parser::ParsedExpression> defaultValue)
+        : name{std::move(name)}, type{std::move(type)}, defaultValue{std::move(defaultValue)} {}
     EXPLICIT_COPY_DEFAULT_MOVE(PropertyInfo);
 
 private:
-    PropertyInfo(const PropertyInfo& other) : name{other.name}, type{other.type} {}
+    PropertyInfo(const PropertyInfo& other)
+        : name{other.name}, type{other.type.copy()}, defaultValue{other.defaultValue->copy()} {}
 };
 
 struct BoundExtraCreateTableInfo : public BoundExtraCreateCatalogEntryInfo {

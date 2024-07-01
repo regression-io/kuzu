@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <variant>
 
 #include "common/copy_constructors.h"
@@ -9,9 +10,9 @@
 #include "common/types/internal_id_t.h"
 #include "common/types/types.h"
 #include "processor/execution_context.h"
-#include "storage/index/hash_index_builder.h"
+#include "storage/index/hash_index.h"
 #include "storage/index/hash_index_utils.h"
-#include "storage/store/column_chunk.h"
+#include "storage/store/column_chunk_data.h"
 
 namespace kuzu {
 namespace processor {
@@ -20,7 +21,7 @@ const size_t SHOULD_FLUSH_QUEUE_SIZE = 32;
 
 class IndexBuilderGlobalQueues {
 public:
-    explicit IndexBuilderGlobalQueues(storage::PrimaryKeyIndexBuilder* pkIndex);
+    explicit IndexBuilderGlobalQueues(storage::PrimaryKeyIndex* pkIndex);
 
     void flushToDisk() const;
 
@@ -42,7 +43,7 @@ private:
     void maybeConsumeIndex(size_t index);
 
     std::array<std::mutex, storage::NUM_HASH_INDEXES> mutexes;
-    storage::PrimaryKeyIndexBuilder* pkIndex;
+    storage::PrimaryKeyIndex* pkIndex;
 
     template<typename T>
     struct Queue {
@@ -103,8 +104,7 @@ class IndexBuilderSharedState {
     friend class IndexBuilder;
 
 public:
-    explicit IndexBuilderSharedState(storage::PrimaryKeyIndexBuilder* pkIndex)
-        : globalQueues{pkIndex} {}
+    explicit IndexBuilderSharedState(storage::PrimaryKeyIndex* pkIndex) : globalQueues{pkIndex} {}
     inline void consume() { globalQueues.consume(); }
     inline void flush() { globalQueues.flushToDisk(); }
 
@@ -150,7 +150,7 @@ public:
 
     IndexBuilder clone() { return IndexBuilder(sharedState); }
 
-    void insert(const storage::ColumnChunk& chunk, common::offset_t nodeOffset,
+    void insert(const storage::ColumnChunkData& chunk, common::offset_t nodeOffset,
         common::offset_t numNodes);
 
     ProducerToken getProducerToken() const { return ProducerToken(sharedState); }
@@ -159,8 +159,7 @@ public:
     void finalize(ExecutionContext* context);
 
 private:
-    void checkNonNullConstraint(const storage::NullColumnChunk& nullChunk,
-        common::offset_t numNodes);
+    void checkNonNullConstraint(const storage::NullChunkData& nullChunk, common::offset_t numNodes);
     std::shared_ptr<IndexBuilderSharedState> sharedState;
 
     IndexBuilderLocalBuffers localBuffers;

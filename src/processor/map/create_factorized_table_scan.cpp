@@ -3,7 +3,7 @@
 #include "binder/expression/expression_util.h"
 #include "catalog/catalog.h"
 #include "function/built_in_function_utils.h"
-#include "processor/operator/call/in_query_call.h"
+#include "processor/operator/table_function_call.h"
 #include "processor/operator/table_scan/ftable_scan_function.h"
 #include "processor/plan_mapper.h"
 
@@ -26,9 +26,9 @@ std::unique_ptr<PhysicalOperator> PlanMapper::createFTableScan(const expression_
     }
     auto bindData =
         std::make_unique<FTableScanBindData>(table, std::move(colIndices), maxMorselSize);
-    auto function = function::BuiltInFunctionsUtils::matchFunction(FTableScan::name,
-        clientContext->getCatalog()->getFunctions(clientContext->getTx()));
-    auto info = InQueryCallInfo();
+    auto function = function::BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+        FTableScan::name, clientContext->getCatalog()->getFunctions(clientContext->getTx()));
+    auto info = TableFunctionCallInfo();
     info.function = *ku_dynamic_cast<Function*, TableFunction*>(function);
     info.bindData = std::move(bindData);
     info.outPosV = std::move(outPosV);
@@ -38,13 +38,14 @@ std::unique_ptr<PhysicalOperator> PlanMapper::createFTableScan(const expression_
         info.rowOffsetPos = DataPos::getInvalidPos(); // Invalid data pos.
     }
     info.outputType = TableScanOutputType::MULTI_DATA_CHUNK;
-    auto sharedState = std::make_shared<InQueryCallSharedState>();
+    auto sharedState = std::make_shared<TableFunctionCallSharedState>();
+    auto printInfo = std::make_unique<OPPrintInfo>(ExpressionUtil::toString(exprs));
     if (child == nullptr) {
-        return std::make_unique<InQueryCall>(std::move(info), sharedState, getOperatorID(),
-            ExpressionUtil::toString(exprs));
+        return std::make_unique<TableFunctionCall>(std::move(info), sharedState, getOperatorID(),
+            std::move(printInfo));
     }
-    return std::make_unique<InQueryCall>(std::move(info), sharedState, std::move(child),
-        getOperatorID(), ExpressionUtil::toString(exprs));
+    return std::make_unique<TableFunctionCall>(std::move(info), sharedState, std::move(child),
+        getOperatorID(), std::move(printInfo));
 }
 
 std::unique_ptr<PhysicalOperator> PlanMapper::createFTableScan(const expression_vector& exprs,

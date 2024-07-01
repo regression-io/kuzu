@@ -1,6 +1,7 @@
 #include "processor/operator/semi_masker.h"
 
 using namespace kuzu::common;
+using namespace kuzu::storage;
 
 namespace kuzu {
 namespace processor {
@@ -16,11 +17,11 @@ void BaseSemiMasker::initGlobalStateInternal(ExecutionContext* /*context*/) {
     }
 }
 
-void BaseSemiMasker::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) {
+void BaseSemiMasker::initLocalStateInternal(ResultSet* resultSet, ExecutionContext*) {
     keyVector = resultSet->getValueVector(info->keyPos).get();
-    for (auto& [table, masks] : info->masksPerTable) {
-        for (auto& maskWithIdx : masks) {
-            maskWithIdx.first->init(context->clientContext->getTx());
+    for (auto& [tableID, masks] : info->masksPerTable) {
+        for (auto& [mask, _] : masks) {
+            mask->init();
         }
     }
 }
@@ -29,15 +30,15 @@ bool SingleTableSemiMasker::getNextTuplesInternal(ExecutionContext* context) {
     if (!children[0]->getNextTuple(context)) {
         return false;
     }
-    auto selVector = keyVector->state->selVector.get();
-    for (auto i = 0u; i < selVector->selectedSize; i++) {
-        auto pos = selVector->selectedPositions[i];
+    auto& selVector = keyVector->state->getSelVector();
+    for (auto i = 0u; i < selVector.getSelSize(); i++) {
+        auto pos = selVector[i];
         auto nodeID = keyVector->getValue<nodeID_t>(pos);
         for (auto& [mask, maskerIdx] : info->getSingleTableMasks()) {
             mask->incrementMaskValue(nodeID.offset, maskerIdx);
         }
     }
-    metrics->numOutputTuple.increase(selVector->selectedSize);
+    metrics->numOutputTuple.increase(selVector.getSelSize());
     return true;
 }
 
@@ -45,29 +46,29 @@ bool MultiTableSemiMasker::getNextTuplesInternal(ExecutionContext* context) {
     if (!children[0]->getNextTuple(context)) {
         return false;
     }
-    auto selVector = keyVector->state->selVector.get();
-    for (auto i = 0u; i < selVector->selectedSize; i++) {
-        auto pos = selVector->selectedPositions[i];
+    auto& selVector = keyVector->state->getSelVector();
+    for (auto i = 0u; i < selVector.getSelSize(); i++) {
+        auto pos = selVector[i];
         auto nodeID = keyVector->getValue<nodeID_t>(pos);
         for (auto& [mask, maskerIdx] : info->getTableMasks(nodeID.tableID)) {
             mask->incrementMaskValue(nodeID.offset, maskerIdx);
         }
     }
-    metrics->numOutputTuple.increase(selVector->selectedSize);
+    metrics->numOutputTuple.increase(selVector.getSelSize());
     return true;
 }
 
 void PathSemiMasker::initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) {
     BaseSemiMasker::initLocalStateInternal(resultSet, context);
-    auto pathRelsFieldIdx = StructType::getFieldIdx(&keyVector->dataType, InternalKeyword::RELS);
+    auto pathRelsFieldIdx = StructType::getFieldIdx(keyVector->dataType, InternalKeyword::RELS);
     pathRelsVector = StructVector::getFieldVector(keyVector, pathRelsFieldIdx).get();
     auto pathRelsDataVector = ListVector::getDataVector(pathRelsVector);
     auto pathRelsSrcIDFieldIdx =
-        StructType::getFieldIdx(&pathRelsDataVector->dataType, InternalKeyword::SRC);
+        StructType::getFieldIdx(pathRelsDataVector->dataType, InternalKeyword::SRC);
     pathRelsSrcIDDataVector =
         StructVector::getFieldVector(pathRelsDataVector, pathRelsSrcIDFieldIdx).get();
     auto pathRelsDstIDFieldIdx =
-        StructType::getFieldIdx(&pathRelsDataVector->dataType, InternalKeyword::DST);
+        StructType::getFieldIdx(pathRelsDataVector->dataType, InternalKeyword::DST);
     pathRelsDstIDDataVector =
         StructVector::getFieldVector(pathRelsDataVector, pathRelsDstIDFieldIdx).get();
 }

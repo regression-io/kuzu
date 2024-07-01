@@ -80,6 +80,28 @@ struct UDF {
     }
 
     template<typename RESULT_TYPE, typename... Args>
+    static function::scalar_func_exec_t createEmptyParameterExecFunc(RESULT_TYPE (*)(Args...),
+        const std::vector<common::LogicalTypeID>&) {
+        KU_UNREACHABLE;
+    }
+
+    template<typename RESULT_TYPE>
+    static function::scalar_func_exec_t createEmptyParameterExecFunc(RESULT_TYPE (*udfFunc)(),
+        const std::vector<common::LogicalTypeID>&) {
+        (void*)(udfFunc); // Disable compiler warnings.
+        return [udfFunc](const std::vector<std::shared_ptr<common::ValueVector>>& params,
+                   common::ValueVector& result, void* /*dataPtr*/ = nullptr) -> void {
+            (void)params;
+            KU_ASSERT(params.size() == 0);
+            auto& resultSelVector = result.state->getSelVector();
+            for (auto i = 0u; i < resultSelVector.getSelSize(); ++i) {
+                auto resultPos = resultSelVector[i];
+                result.copyFromValue(resultPos, common::Value(udfFunc()));
+            }
+        };
+    }
+
+    template<typename RESULT_TYPE, typename... Args>
     static function::scalar_func_exec_t createUnaryExecFunc(RESULT_TYPE (* /*udfFunc*/)(Args...),
         const std::vector<common::LogicalTypeID>& /*parameterTypes*/) {
         KU_UNREACHABLE;
@@ -95,7 +117,7 @@ struct UDF {
         }
         validateType<OPERAND_TYPE>(parameterTypes[0]);
         function::scalar_func_exec_t execFunc =
-            [=](const std::vector<std::shared_ptr<common::ValueVector>>& params,
+            [udfFunc](const std::vector<std::shared_ptr<common::ValueVector>>& params,
                 common::ValueVector& result, void* /*dataPtr*/ = nullptr) -> void {
             KU_ASSERT(params.size() == 1);
             UnaryFunctionExecutor::executeUDF<OPERAND_TYPE, RESULT_TYPE, UnaryUDFExecutor>(
@@ -122,7 +144,7 @@ struct UDF {
         validateType<LEFT_TYPE>(parameterTypes[0]);
         validateType<RIGHT_TYPE>(parameterTypes[1]);
         function::scalar_func_exec_t execFunc =
-            [=](const std::vector<std::shared_ptr<common::ValueVector>>& params,
+            [udfFunc](const std::vector<std::shared_ptr<common::ValueVector>>& params,
                 common::ValueVector& result, void* /*dataPtr*/ = nullptr) -> void {
             KU_ASSERT(params.size() == 2);
             BinaryFunctionExecutor::executeUDF<LEFT_TYPE, RIGHT_TYPE, RESULT_TYPE,
@@ -150,7 +172,7 @@ struct UDF {
         validateType<B_TYPE>(parameterTypes[1]);
         validateType<C_TYPE>(parameterTypes[2]);
         function::scalar_func_exec_t execFunc =
-            [=](const std::vector<std::shared_ptr<common::ValueVector>>& params,
+            [udfFunc](const std::vector<std::shared_ptr<common::ValueVector>>& params,
                 common::ValueVector& result, void* /*dataPtr*/ = nullptr) -> void {
             KU_ASSERT(params.size() == 3);
             TernaryFunctionExecutor::executeUDF<A_TYPE, B_TYPE, C_TYPE, RESULT_TYPE,
@@ -164,6 +186,8 @@ struct UDF {
         std::vector<common::LogicalTypeID> parameterTypes) {
         constexpr auto numArgs = sizeof...(Args);
         switch (numArgs) {
+        case 0:
+            return createEmptyParameterExecFunc<TR, Args...>(udfFunc, std::move(parameterTypes));
         case 1:
             return createUnaryExecFunc<TR, Args...>(udfFunc, std::move(parameterTypes));
         case 2:
@@ -210,7 +234,9 @@ struct UDF {
     template<typename... Args>
     static std::vector<common::LogicalTypeID> getParameterTypes() {
         std::vector<common::LogicalTypeID> parameterTypes;
-        getParameterTypesRecursive<Args...>(parameterTypes);
+        if constexpr (sizeof...(Args) > 0) {
+            getParameterTypesRecursive<Args...>(parameterTypes);
+        }
         return parameterTypes;
     }
 

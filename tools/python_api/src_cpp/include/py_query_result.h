@@ -18,11 +18,16 @@ public:
     static void initialize(py::handle& m);
 
     PyQueryResult() = default;
-    ~PyQueryResult() = default;
+
+    ~PyQueryResult();
 
     bool hasNext();
 
     py::list getNext();
+
+    bool hasNextQueryResult();
+
+    std::unique_ptr<PyQueryResult> getNextQueryResult();
 
     void close();
 
@@ -51,12 +56,12 @@ public:
 private:
     static py::dict convertNodeIdToPyDict(const kuzu::common::nodeID_t& nodeId);
 
-    bool getNextArrowChunk(const std::vector<std::unique_ptr<DataTypeInfo>>& typesInfo,
-        py::list& batches, std::int64_t chunk_size);
-
-    py::object getArrowChunks(
-        const std::vector<std::unique_ptr<DataTypeInfo>>& typesInfo, std::int64_t chunkSize);
+    bool getNextArrowChunk(const std::vector<kuzu::common::LogicalType>& types,
+        const std::vector<std::string>& names, py::list& batches, std::int64_t chunk_size);
+    py::object getArrowChunks(const std::vector<kuzu::common::LogicalType>& types,
+        const std::vector<std::string>& names, std::int64_t chunkSize);
 
 private:
-    std::unique_ptr<QueryResult> queryResult;
+    QueryResult* queryResult = nullptr;
+    bool isOwned = false;
 };

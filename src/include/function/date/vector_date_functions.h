@@ -8,17 +8,25 @@ namespace function {
 struct DatePartFunction {
     static constexpr const char* name = "DATE_PART";
 
-    static constexpr const char* alias = "DATEPART";
-
     static function_set getFunctionSet();
+};
+
+struct DatePartFunctionAlias {
+    using alias = DatePartFunction;
+
+    static constexpr const char* name = "DATEPART";
 };
 
 struct DateTruncFunction {
     static constexpr const char* name = "DATE_TRUNC";
 
-    static constexpr const char* alias = "DATETRUNC";
-
     static function_set getFunctionSet();
+};
+
+struct DateTruncFunctionAlias {
+    using alias = DateTruncFunction;
+
+    static constexpr const char* name = "DATETRUNC";
 };
 
 struct DayNameFunction {
@@ -53,6 +61,18 @@ struct MakeDateFunction {
 
 struct MonthNameFunction {
     static constexpr const char* name = "MONTHNAME";
+
+    static function_set getFunctionSet();
+};
+
+struct CurrentDateFunction {
+    static constexpr const char* name = "CURRENT_DATE";
+
+    static function_set getFunctionSet();
+};
+
+struct CurrentTimestampFunction {
+    static constexpr const char* name = "CURRENT_TIMESTAMP";
 
     static function_set getFunctionSet();
 };

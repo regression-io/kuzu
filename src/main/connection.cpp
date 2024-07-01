@@ -39,6 +39,11 @@ std::unique_ptr<QueryResult> Connection::query(std::string_view queryStatement) 
     return clientContext->query(queryStatement);
 }
 
+std::unique_ptr<QueryResult> Connection::queryWithID(std::string_view queryStatement,
+    uint64_t queryID) {
+    return clientContext->query(queryStatement, queryID);
+}
+
 std::unique_ptr<QueryResult> Connection::query(std::string_view query, std::string_view encodedJoin,
     bool enumerateAllPlans) {
     return clientContext->query(query, encodedJoin, enumerateAllPlans);
@@ -66,13 +71,15 @@ void Connection::setQueryTimeOut(uint64_t timeoutInMS) {
     clientContext->setQueryTimeOut(timeoutInMS);
 }
 
-uint64_t Connection::getQueryTimeOut() {
-    return clientContext->getQueryTimeOut();
-}
-
 std::unique_ptr<QueryResult> Connection::executeWithParams(PreparedStatement* preparedStatement,
     std::unordered_map<std::string, std::unique_ptr<Value>> inputParams) {
     return clientContext->executeWithParams(preparedStatement, std::move(inputParams));
+}
+
+std::unique_ptr<QueryResult> Connection::executeWithParamsWithID(
+    PreparedStatement* preparedStatement,
+    std::unordered_map<std::string, std::unique_ptr<Value>> inputParams, uint64_t queryID) {
+    return clientContext->executeWithParams(preparedStatement, std::move(inputParams), queryID);
 }
 
 void Connection::bindParametersNoLock(PreparedStatement* preparedStatement,
@@ -89,12 +96,8 @@ void Connection::addScalarFunction(std::string name, function::function_set defi
     clientContext->addScalarFunction(name, std::move(definitions));
 }
 
-bool Connection::startUDFAutoTrx(transaction::TransactionContext* trx) {
-    return clientContext->startUDFAutoTrx(trx);
-}
-
-void Connection::commitUDFTrx(bool isAutoCommitTrx) {
-    return clientContext->commitUDFTrx(isAutoCommitTrx);
+void Connection::removeScalarFunction(std::string name) {
+    clientContext->removeScalarFunction(name);
 }
 
 } // namespace main

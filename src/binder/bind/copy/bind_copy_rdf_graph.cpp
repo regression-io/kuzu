@@ -1,6 +1,8 @@
 #include "binder/binder.h"
 #include "binder/copy/bound_copy_from.h"
+#include "binder/expression/variable_expression.h"
 #include "catalog/catalog.h"
+#include "catalog/catalog_entry/node_table_catalog_entry.h"
 #include "catalog/catalog_entry/rdf_graph_catalog_entry.h"
 #include "common/constants.h"
 #include "common/copier_config/rdf_reader_config.h"
@@ -34,50 +36,63 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfFrom(const parser::Statement&
     config->options = bindParsingOptions(copyStatement.getParsingOptionsRef());
     auto catalog = clientContext->getCatalog();
     auto functions = catalog->getFunctions(clientContext->getTx());
-    auto offset = expressionBinder.createVariableExpression(*LogicalType::INT64(),
+    auto offset = expressionBinder.createVariableExpression(LogicalType::INT64(),
         InternalKeyword::ROW_OFFSET);
-    auto r = expressionBinder.createVariableExpression(*LogicalType::STRING(), rdf::IRI);
-    auto l = expressionBinder.createVariableExpression(*LogicalType::RDF_VARIANT(), rdf::VAL);
-    auto lang = expressionBinder.createVariableExpression(*LogicalType::STRING(), rdf::LANG);
-    auto s = expressionBinder.createVariableExpression(*LogicalType::STRING(), rdf::SUBJECT);
-    auto p = expressionBinder.createVariableExpression(*LogicalType::STRING(), rdf::PREDICATE);
-    auto o = expressionBinder.createVariableExpression(*LogicalType::STRING(), rdf::OBJECT);
-    auto sOffset = expressionBinder.createVariableExpression(*LogicalType::INT64(),
+    auto r = expressionBinder.createVariableExpression(LogicalType::STRING(), rdf::IRI);
+    auto l = expressionBinder.createVariableExpression(LogicalType::RDF_VARIANT(), rdf::VAL);
+    auto lang = expressionBinder.createVariableExpression(LogicalType::STRING(), rdf::LANG);
+    auto s = expressionBinder.createVariableExpression(LogicalType::STRING(), rdf::SUBJECT);
+    auto p = expressionBinder.createVariableExpression(LogicalType::STRING(), rdf::PREDICATE);
+    auto o = expressionBinder.createVariableExpression(LogicalType::STRING(), rdf::OBJECT);
+    auto sOffset = expressionBinder.createVariableExpression(LogicalType::INT64(),
         InternalKeyword::SRC_OFFSET);
-    auto pOffset = expressionBinder.createVariableExpression(*LogicalType::INT64(), rdf::PID);
-    auto oOffset = expressionBinder.createVariableExpression(*LogicalType::INT64(),
+    auto pOffset = expressionBinder.createVariableExpression(LogicalType::INT64(), rdf::PID);
+    auto oOffset = expressionBinder.createVariableExpression(LogicalType::INT64(),
         InternalKeyword::DST_OFFSET);
+    auto pOffsetInternal = std::make_shared<VariableExpression>(LogicalType::INTERNAL_ID(),
+        pOffset->getUniqueName(), std::string(rdf::PID));
     auto bindInput = std::make_unique<ScanTableFuncBindInput>(config->copy());
     Function* func;
     // Bind file scan;
     auto inMemory = RdfReaderConfig::construct(config->options).inMemory;
-    func = BuiltInFunctionsUtils::matchFunction(RdfAllTripleScan::name, functions);
+    func = BuiltInFunctionsUtils::matchFunction(clientContext->getTx(), RdfAllTripleScan::name,
+        functions);
     auto scanFunc = ku_dynamic_cast<Function*, TableFunction*>(func);
     auto bindData = scanFunc->bindFunc(clientContext, bindInput.get());
     // Bind copy resource.
-    func = inMemory ? BuiltInFunctionsUtils::matchFunction(RdfResourceInMemScan::name, functions) :
-                      BuiltInFunctionsUtils::matchFunction(RdfResourceScan::name, functions);
+    func = inMemory ? BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfResourceInMemScan::name, functions) :
+                      BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfResourceScan::name, functions);
     auto rScanFunc = ku_dynamic_cast<Function*, TableFunction*>(func);
     auto rColumns = expression_vector{r};
-    auto rFileScanInfo = BoundFileScanInfo(*rScanFunc, bindData->copy(), std::move(rColumns));
+    auto rFileScanInfo = BoundFileScanInfo(*rScanFunc, bindData->copy(), rColumns);
     auto rSource = std::make_unique<BoundFileScanSource>(std::move(rFileScanInfo));
     auto rTableID = rdfGraphEntry->getResourceTableID();
     auto rEntry = catalog->getTableCatalogEntry(clientContext->getTx(), rTableID);
-    auto rCopyInfo = BoundCopyFromInfo(rEntry, std::move(rSource), offset, nullptr /* extraInfo */);
+    auto rCopyInfo = BoundCopyFromInfo(rEntry, std::move(rSource), offset, std::move(rColumns),
+        std::vector<bool>{false}, nullptr /* extraInfo */);
     // Bind copy literal.
-    func = inMemory ? BuiltInFunctionsUtils::matchFunction(RdfLiteralInMemScan::name, functions) :
-                      BuiltInFunctionsUtils::matchFunction(RdfLiteralScan::name, functions);
+    func = inMemory ? BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfLiteralInMemScan::name, functions) :
+                      BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfLiteralScan::name, functions);
     auto lScanFunc = ku_dynamic_cast<Function*, TableFunction*>(func);
     auto lColumns = expression_vector{l, lang};
     auto lFileScanInfo = BoundFileScanInfo(*lScanFunc, bindData->copy(), std::move(lColumns));
     auto lSource = std::make_unique<BoundFileScanSource>(std::move(lFileScanInfo));
     auto lTableID = rdfGraphEntry->getLiteralTableID();
     auto lEntry = catalog->getTableCatalogEntry(clientContext->getTx(), lTableID);
-    auto lCopyInfo = BoundCopyFromInfo(lEntry, std::move(lSource), offset, nullptr /* extraInfo */);
+    auto lNodeEntry = lEntry->constPtrCast<NodeTableCatalogEntry>();
+    auto ser = expressionBinder.bindExpression(*lNodeEntry->getPrimaryKey()->getDefaultExpr());
+    auto lCopyColumns = expression_vector{ser, l, lang};
+    auto lCopyInfo = BoundCopyFromInfo(lEntry, std::move(lSource), offset, lCopyColumns,
+        std::vector<bool>{true, false, false}, nullptr /* extraInfo */);
     // Bind copy resource triples
-    func = inMemory ?
-               BuiltInFunctionsUtils::matchFunction(RdfResourceTripleInMemScan::name, functions) :
-               BuiltInFunctionsUtils::matchFunction(RdfResourceTripleScan::name, functions);
+    func = inMemory ? BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfResourceTripleInMemScan::name, functions) :
+                      BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfResourceTripleScan::name, functions);
     auto rrrScanFunc = ku_dynamic_cast<Function*, TableFunction*>(func);
     auto rrrColumns = expression_vector{s, p, o};
     auto rrrFileScanInfo = BoundFileScanInfo(*rrrScanFunc, bindData->copy(), rrrColumns);
@@ -85,20 +100,21 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfFrom(const parser::Statement&
     auto rrrTableID = rdfGraphEntry->getResourceTripleTableID();
     auto rrrEntry = catalog->getTableCatalogEntry(clientContext->getTx(), rrrTableID);
     auto rrrExtraInfo = std::make_unique<ExtraBoundCopyRelInfo>();
-    auto sLookUp = IndexLookupInfo(rTableID, sOffset, s, s->getDataType());
-    auto pLookUp = IndexLookupInfo(rTableID, pOffset, p, p->getDataType());
-    auto oLookUp = IndexLookupInfo(rTableID, oOffset, o, o->getDataType());
+    auto sLookUp = IndexLookupInfo(rTableID, sOffset, s);
+    auto pLookUp = IndexLookupInfo(rTableID, pOffset, p);
+    auto oLookUp = IndexLookupInfo(rTableID, oOffset, o);
     rrrExtraInfo->infos.push_back(sLookUp.copy());
     rrrExtraInfo->infos.push_back(pLookUp.copy());
     rrrExtraInfo->infos.push_back(oLookUp.copy());
-    rrrExtraInfo->fromOffset = sOffset;
-    rrrExtraInfo->toOffset = oOffset;
-    auto rrrCopyInfo =
-        BoundCopyFromInfo(rrrEntry, std::move(rrrSource), offset, std::move(rrrExtraInfo));
+    expression_vector rrrCopyColumns{sOffset, oOffset, offset, pOffsetInternal};
+    std::vector<bool> rrrDefaults{false, false, false, false};
+    auto rrrCopyInfo = BoundCopyFromInfo(rrrEntry, std::move(rrrSource), offset, rrrCopyColumns,
+        rrrDefaults, std::move(rrrExtraInfo));
     // Bind copy literal triples
-    func = inMemory ?
-               BuiltInFunctionsUtils::matchFunction(RdfLiteralTripleInMemScan::name, functions) :
-               BuiltInFunctionsUtils::matchFunction(RdfLiteralTripleScan::name, functions);
+    func = inMemory ? BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfLiteralTripleInMemScan::name, functions) :
+                      BuiltInFunctionsUtils::matchFunction(clientContext->getTx(),
+                          RdfLiteralTripleScan::name, functions);
     auto rrlScanFunc = ku_dynamic_cast<Function*, TableFunction*>(func);
     auto rrlColumns = expression_vector{s, p, oOffset};
     auto rrlFileScanInfo = BoundFileScanInfo(*rrlScanFunc, bindData->copy(), rrlColumns);
@@ -108,11 +124,10 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfFrom(const parser::Statement&
     auto rrlExtraInfo = std::make_unique<ExtraBoundCopyRelInfo>();
     rrlExtraInfo->infos.push_back(sLookUp.copy());
     rrlExtraInfo->infos.push_back(pLookUp.copy());
-    rrlExtraInfo->propertyColumns.push_back(oOffset);
-    rrlExtraInfo->fromOffset = sOffset;
-    rrlExtraInfo->toOffset = oOffset;
-    auto rrLCopyInfo =
-        BoundCopyFromInfo(rrlEntry, std::move(rrlSource), offset, std::move(rrlExtraInfo));
+    expression_vector rrlCopyColumns{sOffset, oOffset, offset, pOffsetInternal};
+    std::vector<bool> rrlDefaults{false, false, false, false};
+    auto rrLCopyInfo = BoundCopyFromInfo(rrlEntry, std::move(rrlSource), offset, rrlCopyColumns,
+        rrlDefaults, std::move(rrlExtraInfo));
     // Bind copy rdf
     auto rdfExtraInfo = std::make_unique<ExtraBoundCopyRdfInfo>(std::move(rCopyInfo),
         std::move(lCopyInfo), std::move(rrrCopyInfo), std::move(rrLCopyInfo));
@@ -123,8 +138,8 @@ std::unique_ptr<BoundStatement> Binder::bindCopyRdfFrom(const parser::Statement&
     } else {
         source = std::make_unique<BoundEmptyScanSource>();
     }
-    auto rdfCopyInfo =
-        BoundCopyFromInfo(rdfGraphEntry, std::move(source), offset, std::move(rdfExtraInfo));
+    auto rdfCopyInfo = BoundCopyFromInfo(rdfGraphEntry, std::move(source), offset, {}, {},
+        std::move(rdfExtraInfo));
     return std::make_unique<BoundCopyFrom>(std::move(rdfCopyInfo));
 }
 

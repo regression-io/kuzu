@@ -1,4 +1,5 @@
 #include "common/arrow/arrow_converter.h"
+#include "common/exception/runtime.h"
 #include "common/types/interval_t.h"
 #include "common/types/types.h"
 #include "common/vector/value_vector.h"
@@ -18,6 +19,20 @@ static void scanArrowArrayFixedSizePrimitive(const ArrowArray* array, ValueVecto
     mask->copyToValueVector(&outputVector, dstOffset, count);
     memcpy(outputVector.getData() + dstOffset * outputVector.getNumBytesPerValue(),
         arrayBuffer + srcOffset * sizeof(T), count * sizeof(T));
+}
+
+template<typename SRC, typename DST>
+static void scanArrowArrayFixedSizePrimitiveAndCastTo(const ArrowArray* array,
+    ValueVector& outputVector, ArrowNullMaskTree* mask, uint64_t srcOffset, uint64_t dstOffset,
+    uint64_t count) {
+    auto arrayBuffer = (const SRC*)array->buffers[1];
+    mask->copyToValueVector(&outputVector, dstOffset, count);
+    for (uint64_t i = 0; i < count; i++) {
+        if (!mask->isNull(i)) {
+            auto curValue = arrayBuffer[i + srcOffset];
+            outputVector.setValue<DST>(i + dstOffset, (DST)curValue);
+        }
+    }
 }
 
 template<>
@@ -163,17 +178,17 @@ static void scanArrowArrayList(const ArrowSchema* schema, const ArrowArray* arra
     uint64_t auxDstPosition = 0;
     for (uint64_t i = 0; i < count; i++) {
         auto curOffset = offsets[i], nextOffset = offsets[i + 1];
-        if (!mask->isNull(i)) {
-            auto newEntry = ListVector::addList(&outputVector, nextOffset - curOffset);
-            outputVector.setValue<list_entry_t>(i + dstOffset, newEntry);
-            if (i == 0) {
-                auxDstPosition = newEntry.offset;
-            }
+        // don't check for validity, since we still need to update the offsets
+        auto newEntry = ListVector::addList(&outputVector, nextOffset - curOffset);
+        outputVector.setValue<list_entry_t>(i + dstOffset, newEntry);
+        if (i == 0) {
+            auxDstPosition = newEntry.offset;
         }
     }
     ValueVector* auxiliaryBuffer = ListVector::getDataVector(&outputVector);
     ArrowConverter::fromArrowArray(schema->children[0], array->children[0], *auxiliaryBuffer,
-        mask->getChild(0), offsets[0], auxDstPosition, offsets[count] - offsets[0]);
+        mask->getChild(0), offsets[0] + array->children[0]->offset, auxDstPosition,
+        offsets[count] - offsets[0]);
 }
 
 template<typename offsetsT>
@@ -196,18 +211,21 @@ static void scanArrowArrayListView(const ArrowSchema* schema, const ArrowArray* 
         }
     }
 }
-/*
-TODO manh: scan arrow fixed list
+
 static void scanArrowArrayFixedList(const ArrowSchema* schema, const ArrowArray* array,
     ValueVector& outputVector, ArrowNullMaskTree* mask, uint64_t srcOffset, uint64_t dstOffset,
     uint64_t count) {
     mask->copyToValueVector(&outputVector, dstOffset, count);
-    int64_t numValuesInList = FixedListType::getNumValuesInList(&outputVector.dataType);
-    ArrowConverter::fromArrowArray(schema->children[0], array->children[0], outputVector,
-        mask->getChild(0), srcOffset * numValuesInList, dstOffset * numValuesInList,
-        count * numValuesInList);
+    auto numElements = ArrayType::getNumElements(outputVector.dataType);
+    for (auto i = 0u; i < count; ++i) {
+        auto newEntry = ListVector::addList(&outputVector, numElements);
+        outputVector.setValue<list_entry_t>(i + dstOffset, newEntry);
+    }
+    auto auxiliaryBuffer = ListVector::getDataVector(&outputVector);
+    ArrowConverter::fromArrowArray(schema->children[0], array->children[0], *auxiliaryBuffer,
+        mask->getChild(0), srcOffset * numElements + array->children[0]->offset,
+        dstOffset * numElements, count * numElements);
 }
-*/
 
 static void scanArrowArrayStruct(const ArrowSchema* schema, const ArrowArray* array,
     ValueVector& outputVector, ArrowNullMaskTree* mask, uint64_t srcOffset, uint64_t dstOffset,
@@ -221,8 +239,8 @@ static void scanArrowArrayStruct(const ArrowSchema* schema, const ArrowArray* ar
     }
     for (int64_t j = 0; j < schema->n_children; j++) {
         ArrowConverter::fromArrowArray(schema->children[j], array->children[j],
-            *StructVector::getFieldVector(&outputVector, j).get(), mask->getChild(j), srcOffset,
-            dstOffset, count);
+            *StructVector::getFieldVector(&outputVector, j).get(), mask->getChild(j),
+            srcOffset + array->children[j]->offset, dstOffset, count);
     }
 }
 
@@ -230,18 +248,24 @@ static void scanArrowArrayDenseUnion(const ArrowSchema* schema, const ArrowArray
     ValueVector& outputVector, ArrowNullMaskTree* mask, uint64_t srcOffset, uint64_t dstOffset,
     uint64_t count) {
     auto types = ((const int8_t*)array->buffers[0]) + srcOffset;
+    auto dstTypes = UnionVector::getTagVector(&outputVector)->getData();
     auto offsets = ((const int32_t*)array->buffers[1]) + srcOffset;
     mask->copyToValueVector(&outputVector, dstOffset, count);
-    for (uint64_t i = 0; i < count; i++) {
+    std::vector<int32_t> firstIncident(array->n_children, INT32_MAX);
+    for (auto i = 0u; i < count; i++) {
+        auto curType = types[i];
+        auto curOffset = offsets[i];
+        if (curOffset < firstIncident[curType]) {
+            firstIncident[curType] = curOffset;
+        }
         if (!mask->isNull(i)) {
-            auto curType = types[i];
-            auto curOffset = offsets[i];
-            UnionVector::setTagField(&outputVector, curType);
+            dstTypes[i] = curType;
+            auto childOffset =
+                mask->getChild(curType)->offsetBy(curOffset - firstIncident[curType]);
             ArrowConverter::fromArrowArray(schema->children[curType], array->children[curType],
-                *StructVector::getFieldVector(&outputVector, curType).get(),
-                mask->getChild(curType), curOffset + srcOffset, i + dstOffset, 1);
+                *UnionVector::getValVector(&outputVector, curType), &childOffset,
+                curOffset + array->children[curType]->offset, i + dstOffset, 1);
             // may be inefficient, since we're only scanning a single value
-            // should probably ask if we support dense unions (ie. is it okay to pack them)
         }
     }
 }
@@ -250,11 +274,11 @@ static void scanArrowArraySparseUnion(const ArrowSchema* schema, const ArrowArra
     ValueVector& outputVector, ArrowNullMaskTree* mask, uint64_t srcOffset, uint64_t dstOffset,
     uint64_t count) {
     auto types = ((const int8_t*)array->buffers[0]) + srcOffset;
+    auto dstTypes = UnionVector::getTagVector(&outputVector)->getData();
     mask->copyToValueVector(&outputVector, dstOffset, count);
     for (uint64_t i = 0; i < count; i++) {
         if (!mask->isNull(i)) {
-            auto curType = types[i];
-            UnionVector::setTagField(&outputVector, curType);
+            dstTypes[i] = types[i];
         }
     }
     // it is specified that values that aren't selected in the type buffer
@@ -263,8 +287,8 @@ static void scanArrowArraySparseUnion(const ArrowSchema* schema, const ArrowArra
     // eg. nulling out unselected children
     for (int8_t i = 0; i < array->n_children; i++) {
         ArrowConverter::fromArrowArray(schema->children[i], array->children[i],
-            *StructVector::getFieldVector(&outputVector, i), mask->getChild(i), srcOffset,
-            dstOffset, count);
+            *UnionVector::getValVector(&outputVector, i), mask->getChild(i),
+            srcOffset + array->children[i]->offset, dstOffset, count);
     }
 }
 
@@ -277,7 +301,7 @@ static void scanArrowArrayDictionaryEncoded(const ArrowSchema* schema, const Arr
     mask->copyToValueVector(&outputVector, dstOffset, count);
     for (uint64_t i = 0; i < count; i++) {
         if (!mask->isNull(i)) {
-            auto dictOffseted = (*mask->getDictionary()) + values[i];
+            auto dictOffseted = mask->getDictionary()->offsetBy(values[i]);
             ArrowConverter::fromArrowArray(schema->dictionary, array->dictionary, outputVector,
                 &dictOffseted, values[i] + array->dictionary->offset, i + dstOffset,
                 1); // possibly inefficient?
@@ -311,7 +335,7 @@ static void scanArrowArrayRunEndEncoded(const ArrowSchema* schema, const ArrowAr
         while (i + srcOffset >= runEndBuffer[runEndIdx + 1]) {
             runEndIdx++;
         }
-        auto valuesOffseted = (*mask->getChild(1)) + runEndIdx;
+        auto valuesOffseted = mask->getChild(1)->offsetBy(runEndIdx);
         ArrowConverter::fromArrowArray(schema->children[1], array->children[1], outputVector,
             &valuesOffseted, runEndIdx, i + dstOffset,
             1); // there is optimization to be made here...
@@ -423,6 +447,24 @@ void ArrowConverter::fromArrowArray(const ArrowSchema* schema, const ArrowArray*
         default:
             KU_UNREACHABLE;
         }
+    case 'd': {
+        switch (outputVector.dataType.getPhysicalType()) {
+        case PhysicalTypeID::INT16:
+            return scanArrowArrayFixedSizePrimitiveAndCastTo<int128_t, int16_t>(array, outputVector,
+                mask, srcOffset, dstOffset, count);
+        case PhysicalTypeID::INT32:
+            return scanArrowArrayFixedSizePrimitiveAndCastTo<int128_t, int32_t>(array, outputVector,
+                mask, srcOffset, dstOffset, count);
+        case PhysicalTypeID::INT64:
+            return scanArrowArrayFixedSizePrimitiveAndCastTo<int128_t, int64_t>(array, outputVector,
+                mask, srcOffset, dstOffset, count);
+        case PhysicalTypeID::INT128:
+            return scanArrowArrayFixedSizePrimitive<int128_t>(array, outputVector, mask, srcOffset,
+                dstOffset, count);
+        default:
+            KU_UNREACHABLE;
+        }
+    }
     case 'w':
         // FIXED BLOB
         return scanArrowArrayFixedBLOB(array, outputVector, mask, std::stoi(arrowType + 2),
@@ -498,12 +540,16 @@ void ArrowConverter::fromArrowArray(const ArrowSchema* schema, const ArrowArray*
             // LONG LIST
             return scanArrowArrayList<int64_t>(schema, array, outputVector, mask, srcOffset,
                 dstOffset, count);
-        case 'w':
-            // FIXED_LIST
-            // TODO Manh: Array Scanning
-            KU_UNREACHABLE;
-            // return scanArrowArrayFixedList(
-            //  schema, array, outputVector, mask, srcOffset, dstOffset, count);
+        case 'w': {
+            // ARRAY
+            RUNTIME_CHECK({
+                auto arrowNumElements = std::stoul(arrowType + 3);
+                auto outputNumElements = ArrayType::getNumElements(outputVector.dataType);
+                KU_ASSERT(arrowNumElements == outputNumElements);
+            });
+            return scanArrowArrayFixedList(schema, array, outputVector, mask, srcOffset, dstOffset,
+                count);
+        }
         case 's':
             // STRUCT
             return scanArrowArrayStruct(schema, array, outputVector, mask, srcOffset, dstOffset,

@@ -4,7 +4,6 @@
 #include "processor/operator/partitioner.h"
 #include "processor/operator/persistent/batch_insert.h"
 #include "storage/store/chunked_node_group.h"
-#include "storage/store/column_chunk.h"
 
 namespace kuzu {
 namespace processor {
@@ -41,9 +40,9 @@ public:
         std::shared_ptr<PartitionerSharedState> partitionerSharedState,
         std::shared_ptr<BatchInsertSharedState> sharedState,
         std::unique_ptr<ResultSetDescriptor> resultSetDescriptor, uint32_t id,
-        const std::string& paramsString)
+        std::unique_ptr<OPPrintInfo> printInfo)
         : BatchInsert{std::move(info), std::move(sharedState), std::move(resultSetDescriptor), id,
-              paramsString},
+              std::move(printInfo)},
           partitionerSharedState{std::move(partitionerSharedState)} {}
 
     inline bool isSource() const override { return true; }
@@ -56,16 +55,16 @@ public:
 
     inline std::unique_ptr<PhysicalOperator> clone() override {
         return std::make_unique<RelBatchInsert>(info->copy(), partitionerSharedState, sharedState,
-            resultSetDescriptor->copy(), id, paramsString);
+            resultSetDescriptor->copy(), id, printInfo->copy());
     }
 
 private:
-    static void appendNewNodeGroup(const RelBatchInsertInfo& relInfo,
-        RelBatchInsertLocalState& localState, BatchInsertSharedState& sharedState,
-        const PartitionerSharedState& partitionerSharedState);
-    static void mergeNodeGroup(ExecutionContext* context, const RelBatchInsertInfo& relInfo,
-        RelBatchInsertLocalState& localState, BatchInsertSharedState& sharedState,
-        const PartitionerSharedState& partitionerSharedState);
+    static void appendNewNodeGroup(transaction::Transaction* transaction,
+        const RelBatchInsertInfo& relInfo, RelBatchInsertLocalState& localState,
+        BatchInsertSharedState& sharedState, const PartitionerSharedState& partitionerSharedState);
+    static void mergeNodeGroup(transaction::Transaction* transaction,
+        const RelBatchInsertInfo& relInfo, RelBatchInsertLocalState& localState,
+        BatchInsertSharedState& sharedState, const PartitionerSharedState& partitionerSharedState);
 
     static void prepareCSRNodeGroup(const storage::ChunkedNodeGroupCollection& partition,
         common::offset_t startNodeOffset, const RelBatchInsertInfo& relInfo,
@@ -77,10 +76,10 @@ private:
         const storage::ChunkedNodeGroupCollection& partition, common::column_id_t offsetColumnID);
     static void populateEndCSROffsets(storage::ChunkedCSRHeader& csrHeader,
         std::vector<common::offset_t>& gaps);
-    static void setOffsetToWithinNodeGroup(storage::ColumnChunk& chunk,
+    static void setOffsetToWithinNodeGroup(storage::ColumnChunkData& chunk,
         common::offset_t startOffset);
-    static void setOffsetFromCSROffsets(storage::ColumnChunk& nodeOffsetChunk,
-        storage::ColumnChunk& csrOffsetChunk);
+    static void setOffsetFromCSROffsets(storage::ColumnChunkData& nodeOffsetChunk,
+        storage::ColumnChunkData& csrOffsetChunk);
 
     static std::optional<common::offset_t> checkRelMultiplicityConstraint(
         const storage::ChunkedCSRHeader& csrHeader, const RelBatchInsertInfo& relInfo);

@@ -1,64 +1,61 @@
 #pragma once
 
-#include <iostream>
 #include <memory>
 #include <mutex>
 
 #include "common/metric.h"
+#include "progress_bar_display.h"
 
 namespace kuzu {
 namespace common {
+
+typedef std::unique_ptr<ProgressBarDisplay> (*progress_bar_display_create_func_t)();
 
 /**
  * @brief Progress bar for tracking the progress of a pipeline. Prints the progress of each query
  * pipeline and the overall progress.
  */
 class ProgressBar {
-
 public:
-    ProgressBar()
-        : numPipelines{0}, numPipelinesFinished{0}, prevCurPipelineProgress{0.0},
-          trackProgress{false}, printing{false}, queryTimer{std::make_unique<TimeMetric>(true)},
-          showProgressAfter{1000} {};
+    ProgressBar();
+
+    static std::shared_ptr<ProgressBarDisplay> DefaultProgressBarDisplay();
 
     void addPipeline();
 
-    void finishPipeline();
+    void finishPipeline(uint64_t queryID);
 
-    void endProgress();
+    void endProgress(uint64_t queryID);
 
-    void addJobsToPipeline(int jobs);
-
-    void finishJobsInPipeline(int jobs);
-
-    void startProgress();
+    void startProgress(uint64_t queryID);
 
     void toggleProgressBarPrinting(bool enable);
 
     void setShowProgressAfter(uint64_t showProgressAfter);
 
-    void updateProgress(double curPipelineProgress);
+    void updateProgress(uint64_t queryID, double curPipelineProgress);
+
+    void setDisplay(std::shared_ptr<ProgressBarDisplay> progressBarDipslay);
+
+    std::shared_ptr<ProgressBarDisplay> getDisplay() { return display; }
+
+    bool getProgressBarPrinting() const { return trackProgress; }
 
 private:
-    inline void setGreenFont() const { std::cerr << "\033[1;32m"; }
+    void resetProgressBar(uint64_t queryID);
 
-    inline void setDefaultFont() const { std::cerr << "\033[0m"; }
+    void updateDisplay(uint64_t queryID, double curPipelineProgress);
 
-    void printProgressBar(double curPipelineProgress);
-
-    void resetProgressBar();
-
-    bool shouldPrintProgress() const;
+    bool shouldUpdateProgress() const;
 
 private:
     uint32_t numPipelines;
     uint32_t numPipelinesFinished;
-    double prevCurPipelineProgress;
     std::mutex progressBarLock;
     bool trackProgress;
-    bool printing;
     std::unique_ptr<TimeMetric> queryTimer;
     uint64_t showProgressAfter;
+    std::shared_ptr<ProgressBarDisplay> display;
 };
 
 } // namespace common

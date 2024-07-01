@@ -1,5 +1,6 @@
 #pragma once
 
+#include "function/export/export_function.h"
 #include "processor/operator/sink.h"
 #include "processor/result/result_set.h"
 
@@ -7,62 +8,53 @@ namespace kuzu {
 namespace processor {
 
 struct CopyToInfo {
-    std::vector<std::string> names;
-    std::vector<DataPos> dataPoses;
-    std::string fileName;
+    function::ExportFunction exportFunc;
+    std::unique_ptr<function::ExportFuncBindData> bindData;
+    std::vector<DataPos> inputVectorPoses;
+    std::vector<bool> isFlatVec;
 
-    CopyToInfo(std::vector<std::string> names, std::vector<DataPos> dataPoses, std::string fileName)
-        : names{std::move(names)}, dataPoses{std::move(dataPoses)}, fileName{std::move(fileName)} {}
+    CopyToInfo(function::ExportFunction exportFunc,
+        std::unique_ptr<function::ExportFuncBindData> bindData,
+        std::vector<DataPos> inputVectorPoses, std::vector<bool> isFlatVec)
+        : exportFunc{std::move(exportFunc)}, bindData{std::move(bindData)},
+          inputVectorPoses{std::move(inputVectorPoses)}, isFlatVec{std::move(isFlatVec)} {}
 
-    virtual ~CopyToInfo() = default;
-
-    virtual std::unique_ptr<CopyToInfo> copy() = 0;
+    CopyToInfo copy() const {
+        return CopyToInfo{exportFunc, bindData->copy(), inputVectorPoses, isFlatVec};
+    }
 };
 
-class CopyToSharedState;
-
-class CopyToLocalState {
-public:
-    virtual ~CopyToLocalState() = default;
-
-    virtual void init(CopyToInfo* info, storage::MemoryManager* mm, ResultSet* resultSet) = 0;
-
-    virtual void sink(CopyToSharedState* sharedState, CopyToInfo* info) = 0;
-
-    virtual void finalize(CopyToSharedState* sharedState) = 0;
+struct CopyToLocalState {
+    std::unique_ptr<function::ExportFuncLocalState> exportFuncLocalState;
+    std::vector<std::shared_ptr<common::ValueVector>> inputVectors;
 };
 
-class CopyToSharedState {
+class CopyTo final : public Sink {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::COPY_TO;
+
 public:
-    virtual ~CopyToSharedState() = default;
+    CopyTo(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor, CopyToInfo info,
+        std::shared_ptr<function::ExportFuncSharedState> sharedState,
+        std::unique_ptr<PhysicalOperator> child, uint32_t id,
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : Sink{std::move(resultSetDescriptor), type_, std::move(child), id, std::move(printInfo)},
+          info{std::move(info)}, sharedState{std::move(sharedState)} {}
 
-    virtual void init(CopyToInfo* info, main::ClientContext* context) = 0;
+    void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) override;
 
-    virtual void finalize() = 0;
-};
+    void finalize(ExecutionContext* context) override;
 
-class CopyTo : public Sink {
-public:
-    CopyTo(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
-        std::unique_ptr<CopyToInfo> info, std::unique_ptr<CopyToLocalState> localState,
-        std::shared_ptr<CopyToSharedState> sharedState, PhysicalOperatorType opType,
-        std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-        : Sink{std::move(resultSetDescriptor), opType, std::move(child), id, paramsString},
-          info{std::move(info)}, localState{std::move(localState)},
-          sharedState{std::move(sharedState)} {}
+    void executeInternal(processor::ExecutionContext* context) override;
 
-    void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) final;
+    std::unique_ptr<PhysicalOperator> clone() override {
+        return std::make_unique<CopyTo>(resultSetDescriptor->copy(), info.copy(), sharedState,
+            children[0]->clone(), id, printInfo->copy());
+    }
 
-    void initGlobalStateInternal(ExecutionContext* context) final;
-
-    void finalize(ExecutionContext* context) final;
-
-    void executeInternal(processor::ExecutionContext* context) final;
-
-protected:
-    std::unique_ptr<CopyToInfo> info;
-    std::unique_ptr<CopyToLocalState> localState;
-    std::shared_ptr<CopyToSharedState> sharedState;
+private:
+    CopyToInfo info;
+    CopyToLocalState localState;
+    std::shared_ptr<function::ExportFuncSharedState> sharedState;
 };
 
 } // namespace processor

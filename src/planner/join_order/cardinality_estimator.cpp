@@ -1,8 +1,9 @@
 #include "planner/join_order/cardinality_estimator.h"
 
 #include "binder/expression/property_expression.h"
+#include "main/client_context.h"
 #include "planner/join_order/join_order_util.h"
-#include "planner/operator/scan/logical_scan_internal_id.h"
+#include "planner/operator/scan/logical_scan_node_table.h"
 
 using namespace kuzu::binder;
 using namespace kuzu::common;
@@ -34,8 +35,8 @@ void CardinalityEstimator::addNodeIDDom(const binder::Expression& nodeID,
 }
 
 uint64_t CardinalityEstimator::estimateScanNode(LogicalOperator* op) {
-    auto scan = ku_dynamic_cast<LogicalOperator*, LogicalScanInternalID*>(op);
-    return atLeastOne(getNodeIDDom(scan->getInternalID()->getUniqueName()));
+    auto& scan = op->constCast<LogicalScanNodeTable>();
+    return atLeastOne(getNodeIDDom(scan.getNodeID()->getUniqueName()));
 }
 
 uint64_t CardinalityEstimator::estimateHashJoin(const expression_vector& joinKeys,
@@ -134,7 +135,8 @@ double CardinalityEstimator::getExtensionRate(const RelExpression& rel,
     case QueryRelType::VARIABLE_LENGTH:
     case QueryRelType::SHORTEST:
     case QueryRelType::ALL_SHORTEST: {
-        return std::min<double>(oneHopExtensionRate * rel.getUpperBound(), numRels);
+        auto rate = std::min<double>(oneHopExtensionRate * rel.getUpperBound(), numRels);
+        return rate * context->getClientConfig()->recursivePatternCardinalityScaleFactor;
     }
     default:
         KU_UNREACHABLE;

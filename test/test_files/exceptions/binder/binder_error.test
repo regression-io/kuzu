@@ -1,4 +1,3 @@
--GROUP BinderErrorTest
 -DATASET CSV tinysnb
 
 --
@@ -94,18 +93,19 @@ Binder exception: Cannot bind s.* as a single property expression.
 -STATEMENT MATCH (a:person)-[e1:knows]->(b:person) WHERE id(a) + 1 < id(b) RETURN *
 ---- error
 Binder exception: Cannot match a built-in function for given function +(INTERNAL_ID,INT64). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -120,18 +120,19 @@ Binder exception: Cannot match a built-in function for given function +(INTERNAL
 -STATEMENT MATCH (a:person) RETURN a.birthdate + date('2031-02-01')
 ---- error
 Binder exception: Cannot match a built-in function for given function +(DATE,DATE). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -146,18 +147,19 @@ Binder exception: Cannot match a built-in function for given function +(DATE,DAT
 -STATEMENT MATCH (a:person) WHERE a.registerTime + 1 < 5 RETURN *
 ---- error
 Binder exception: Cannot match a built-in function for given function +(TIMESTAMP,INT64). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -172,18 +174,19 @@ Binder exception: Cannot match a built-in function for given function +(TIMESTAM
 -STATEMENT MATCH (a:person) RETURN a.registerTime + timestamp('2031-02-11 01:02:03');
 ---- error
 Binder exception: Cannot match a built-in function for given function +(TIMESTAMP,TIMESTAMP). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -229,7 +232,7 @@ Binder exception: The number of columns to union/union all must be the same.
 -LOG UnionAllUnmatchedDataTypesOfExpressions
 -STATEMENT MATCH (p:person) RETURN p.fName UNION ALL MATCH (p1:person) RETURN p1.age
 ---- error
-Binder exception: p1.age has data type INT64 but (STRING) was expected.
+Binder exception: p1.age has data type INT64 but STRING was expected.
 
 -LOG UnionAndUnionAllInSingleQuery
 -STATEMENT MATCH (p:person) RETURN p.age UNION ALL MATCH (p1:person) RETURN p1.age UNION MATCH (p1:person) RETURN p1.age
@@ -439,12 +442,12 @@ DISTINCT (SERIAL) -> SERIAL
 -LOG DropColumnFromNonExistedTable
 -STATEMENT alter table person1 drop k
 ---- error
-Catalog exception: Table: person1 does not exist.
+Catalog exception: person1 does not exist in catalog.
 
 -LOG DropNonExistedColumn
 -STATEMENT alter table person drop random
 ---- error
-Binder exception: person table doesn't have property random.
+Binder exception: person table does not have property random.
 
 -LOG DropPrimaryKeyColumn
 -STATEMENT alter table person drop ID
@@ -464,7 +467,7 @@ Binder exception: Expression 3.2 has data type STRING but expected INT64. Implic
 -LOG RenameNonExistedTable
 -STATEMENT alter table person1 rename to person2
 ---- error
-Catalog exception: Table: person1 does not exist.
+Catalog exception: person1 does not exist in catalog.
 
 -LOG RenameTableDuplicateName
 -STATEMENT alter table person rename to organisation
@@ -474,7 +477,7 @@ Binder exception: Table: organisation already exists.
 -LOG RenamePropertyOfNonExistedTable
 -STATEMENT alter table person1 rename col1 to col2
 ---- error
-Catalog exception: Table: person1 does not exist.
+Catalog exception: person1 does not exist in catalog.
 
 -LOG RenamePropertyDuplicateName
 -STATEMENT alter table person rename fName to gender
@@ -486,37 +489,23 @@ Binder exception: person table already has property gender.
 ---- error
 Binder exception: The number of elements in an array must be greater than 0. Given: 0.
 
--LOG NonPKSerialType
--STATEMENT CREATE NODE TABLE test(ID INT64, seq SERIAL, PRIMARY KEY(ID))
----- error
-Binder exception: Serial property in node table must be the primary key.
-
--LOG AddSerialProperty
--STATEMENT ALTER TABLE person ADD seq SERIAL
----- error
-Binder exception: Serial property in node table must be the primary key.
-
--LOG SerialInRelTable
--STATEMENT CREATE REL TABLE test(FROM person TO person, seq SERIAL)
----- error
-Binder exception: SERIAL properties are not supported in rel tables.
-
 -LOG MatchBuiltIn
 -STATEMENT MATCH (a:person) RETURN a.age + 'hh'
 ---- error
 Binder exception: Cannot match a built-in function for given function +(INT64,STRING). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -535,7 +524,7 @@ Binder exception: Invalid option name: thread.
 -LOG InvalidCallOptionValue
 -STATEMENT CALL threads='abc'
 ---- error
-Binder exception: abc has data type STRING but (INT64) was expected.
+Binder exception: Expression abc has data type STRING but expected INT64. Implicit cast is not supported.
 
 -LOG AllShortestPathInvalidLowerBound
 -STATEMENT MATCH p = (a)-[* ALL SHORTEST 2..3]-(b) RETURN p
@@ -559,34 +548,25 @@ Binder exception: Invalid number of arguments for macro ADD4.
 -LOG CopyToNPYFormat
 -STATEMENT COPY (MATCH (a:person) RETURN a) TO 'person.npy';
 ---- error
-Binder exception: COPY TO currently only supports csv and parquet files.
-
--LOG InvalidArgCast
--STATEMENT RETURN cast("[sdf, fsd, fad]", "STRING[]", "3rd arg");
----- error
-Binder exception: Cannot match a built-in function for given function CAST(STRING,STRING,STRING). Supported inputs are
-(ANY,STRING) -> ANY
--STATEMENT RETURN cast("[sdf, fsd, fad]");
----- error
-Binder exception: Cannot match a built-in function for given function CAST(STRING). Supported inputs are
-(ANY,STRING) -> ANY
+Catalog exception: COPY_NPY function does not exist.
 
 -LOG InvalidImplicitCast
 -STATEMENT RETURN timestamp("2019-11-21") + "ok";
 ---- error
 Binder exception: Cannot match a built-in function for given function +(TIMESTAMP,STRING). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -599,18 +579,19 @@ Binder exception: Cannot match a built-in function for given function +(TIMESTAM
 -STATEMENT RETURN cast("2019-11-21", "TIMESTAMP_MS") + "ok";
 ---- error
 Binder exception: Cannot match a built-in function for given function +(TIMESTAMP_MS,STRING). Supported inputs are
+(INT128,INT128) -> INT128
 (INT64,INT64) -> INT64
 (INT32,INT32) -> INT32
 (INT16,INT16) -> INT16
 (INT8,INT8) -> INT8
+(SERIAL,SERIAL) -> SERIAL
 (UINT64,UINT64) -> UINT64
 (UINT32,UINT32) -> UINT32
 (UINT16,UINT16) -> UINT16
 (UINT8,UINT8) -> UINT8
-(INT128,INT128) -> INT128
 (DOUBLE,DOUBLE) -> DOUBLE
 (FLOAT,FLOAT) -> FLOAT
-(SERIAL,SERIAL) -> SERIAL
+(DECIMAL,DECIMAL) -> DECIMAL
 (LIST,LIST) -> LIST
 (STRING,STRING) -> STRING
 (INTERVAL,INTERVAL) -> INTERVAL
@@ -620,13 +601,6 @@ Binder exception: Cannot match a built-in function for given function +(TIMESTAM
 (INTERVAL,DATE) -> DATE
 (TIMESTAMP,INTERVAL) -> TIMESTAMP
 (INTERVAL,TIMESTAMP) -> TIMESTAMP
-
--LOG CreateWithSerialPK
--STATEMENT create node table Person1(id serial, primary key(id));
----- ok
--STATEMENT create (:Person1 {id: 0});
----- error
-Binder exception: The primary key of Person1 is serial, specifying primary key value is not allowed in the create statement.
 
 -LOG CreateRelWithWrongType
 -STATEMENT CREATE NODE TABLE N (id SERIAL, PRIMARY KEY(id));

@@ -11,13 +11,26 @@ namespace processor {
 
 void CreateTable::executeDDLInternal(ExecutionContext* context) {
     auto catalog = context->clientContext->getCatalog();
-    auto newTableID = catalog->createTableSchema(info);
+    switch (info.onConflict) {
+    case common::ConflictAction::ON_CONFLICT_DO_NOTHING: {
+        if (catalog->containsTable(context->clientContext->getTx(), info.tableName)) {
+            return;
+        }
+    }
+    default:
+        break;
+    }
+    auto newTableID = catalog->createTableSchema(context->clientContext->getTx(), info);
+    tableCreated = true;
     auto storageManager = context->clientContext->getStorageManager();
-    storageManager->createTable(newTableID, catalog, context->clientContext->getTx());
+    storageManager->createTable(newTableID, catalog, context->clientContext);
 }
 
 std::string CreateTable::getOutputMsg() {
-    return stringFormat("Table {} has been created.", info.tableName);
+    if (tableCreated) {
+        return stringFormat("Table {} has been created.", info.tableName);
+    }
+    return stringFormat("Table {} already exists.", info.tableName);
 }
 
 } // namespace processor

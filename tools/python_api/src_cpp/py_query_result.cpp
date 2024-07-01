@@ -2,6 +2,7 @@
 
 #include <string>
 
+#include "cached_import/py_cached_import.h"
 #include "common/arrow/arrow_converter.h"
 #include "common/exception/not_implemented.h"
 #include "common/types/uuid.h"
@@ -9,20 +10,21 @@
 #include "common/types/value/node.h"
 #include "common/types/value/rel.h"
 #include "datetime.h" // python lib
-#include "cached_import/py_cached_import.h"
 #include "include/py_query_result_converter.h"
 
 using namespace kuzu::common;
 using kuzu::importCache;
 
 #define PyDateTimeTZ_FromDateAndTime(year, month, day, hour, min, sec, usec, timezone)             \
-    PyDateTimeAPI->DateTime_FromDateAndTime(                                                       \
-        year, month, day, hour, min, sec, usec, timezone, PyDateTimeAPI->DateTimeType)
+    PyDateTimeAPI->DateTime_FromDateAndTime(year, month, day, hour, min, sec, usec, timezone,      \
+        PyDateTimeAPI->DateTimeType)
 
 void PyQueryResult::initialize(py::handle& m) {
     py::class_<PyQueryResult>(m, "result")
         .def("hasNext", &PyQueryResult::hasNext)
         .def("getNext", &PyQueryResult::getNext)
+        .def("hasNextQueryResult", &PyQueryResult::hasNextQueryResult)
+        .def("getNextQueryResult", &PyQueryResult::getNextQueryResult)
         .def("close", &PyQueryResult::close)
         .def("getAsDF", &PyQueryResult::getAsDF)
         .def("getAsArrow", &PyQueryResult::getAsArrow)
@@ -40,6 +42,10 @@ void PyQueryResult::initialize(py::handle& m) {
     PyDateTime_IMPORT;
 }
 
+PyQueryResult::~PyQueryResult() {
+    close();
+}
+
 bool PyQueryResult::hasNext() {
     return queryResult->hasNext();
 }
@@ -53,11 +59,28 @@ py::list PyQueryResult::getNext() {
     return result;
 }
 
+bool PyQueryResult::hasNextQueryResult() {
+    return queryResult->hasNextQueryResult();
+}
+
+std::unique_ptr<PyQueryResult> PyQueryResult::getNextQueryResult() {
+    py::gil_scoped_release release;
+    auto nextQueryResult = queryResult->getNextQueryResult();
+    py::gil_scoped_acquire acquire;
+    auto pyQueryResult = std::make_unique<PyQueryResult>();
+    pyQueryResult->queryResult = nextQueryResult;
+    pyQueryResult->isOwned = false;
+    return pyQueryResult;
+}
+
 void PyQueryResult::close() {
     // Note: Python does not guarantee objects to be deleted in the reverse order. Therefore, we
     // expose close() interface so that users can explicitly call close() and ensure that
     // QueryResult is destroyed before Database.
-    queryResult.reset();
+    if (isOwned) {
+        delete queryResult;
+        queryResult = nullptr;
+    }
 }
 
 static py::object converTimestampToPyObject(timestamp_t& timestamp) {
@@ -128,7 +151,7 @@ py::object convertRdfVariantToPyObject(const Value& value) {
         auto intervalVal = RdfVariant::getValue<interval_t>(&value);
         auto days = Interval::DAYS_PER_MONTH * intervalVal.months + intervalVal.days;
         return py::cast<py::object>(importCache->datetime.timedelta()(py::arg("days") = days,
-                                            py::arg("microseconds") = intervalVal.micros));
+            py::arg("microseconds") = intervalVal.micros));
     }
     default: {
         KU_UNREACHABLE;
@@ -140,8 +163,8 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
     if (value.isNull()) {
         return py::none();
     }
-    auto dataType = value.getDataType();
-    switch (dataType->getLogicalTypeID()) {
+    const auto& dataType = value.getDataType();
+    switch (dataType.getLogicalTypeID()) {
     case LogicalTypeID::BOOL: {
         return py::cast(value.getValue<bool>());
     }
@@ -173,7 +196,7 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
     case LogicalTypeID::INT128: {
         kuzu::common::int128_t result = value.getValue<kuzu::common::int128_t>();
         std::string int128_string = kuzu::common::Int128_t::ToString(result);
-        
+
         auto Decimal = importCache->decimal.Decimal();
         py::object largeInt = Decimal(int128_string);
         return largeInt;
@@ -183,6 +206,10 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
     }
     case LogicalTypeID::DOUBLE: {
         return py::cast(value.getValue<double>());
+    }
+    case LogicalTypeID::DECIMAL: {
+        auto Decimal = importCache->decimal.Decimal();
+        return Decimal(value.toString());
     }
     case LogicalTypeID::STRING: {
         return py::cast(value.getValue<std::string>());
@@ -217,8 +244,8 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
         Date::convert(date, year, month, day);
         Time::convert(time, hour, min, sec, micros);
 
-        return py::cast<py::object>(PyDateTimeTZ_FromDateAndTime(
-            year, month, day, hour, min, sec, micros, PyDateTime_TimeZone_UTC));
+        return py::cast<py::object>(PyDateTimeTZ_FromDateAndTime(year, month, day, hour, min, sec,
+            micros, PyDateTime_TimeZone_UTC));
     }
     case LogicalTypeID::TIMESTAMP_NS: {
         timestamp_t timestampVal =
@@ -238,9 +265,9 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
     case LogicalTypeID::INTERVAL: {
         auto intervalVal = value.getValue<interval_t>();
         auto days = Interval::DAYS_PER_MONTH * intervalVal.months + intervalVal.days;
-        
+
         return py::cast<py::object>(importCache->datetime.timedelta()(py::arg("days") = days,
-                                            py::arg("microseconds") = intervalVal.micros));
+            py::arg("microseconds") = intervalVal.micros));
     }
     case LogicalTypeID::LIST:
     case LogicalTypeID::ARRAY: {
@@ -317,43 +344,42 @@ py::object PyQueryResult::convertValueToPyObject(const Value& value) {
     }
 
     default:
-        throw NotImplementedException("Unsupported type: " + dataType->toString());
+        throw NotImplementedException("Unsupported type: " + dataType.toString());
     }
 }
 
 py::object PyQueryResult::getAsDF() {
-    return QueryResultConverter(queryResult.get()).toDF();
+    return QueryResultConverter(queryResult).toDF();
 }
 
-bool PyQueryResult::getNextArrowChunk(const std::vector<std::unique_ptr<DataTypeInfo>>& typesInfo,
-    py::list& batches, std::int64_t chunkSize) {
+bool PyQueryResult::getNextArrowChunk(const std::vector<kuzu::common::LogicalType>& types,
+    const std::vector<std::string>& names, py::list& batches, std::int64_t chunkSize) {
     if (!queryResult->hasNext()) {
         return false;
     }
     ArrowArray data;
     ArrowConverter::toArrowArray(*queryResult, &data, chunkSize);
 
-    
     auto batchImportFunc = importCache->pyarrow.lib.RecordBatch._import_from_c();
 
-    auto schema = ArrowConverter::toArrowSchema(typesInfo);
+    auto schema = ArrowConverter::toArrowSchema(types, names);
     batches.append(batchImportFunc((std::uint64_t)&data, (std::uint64_t)schema.get()));
     return true;
 }
 
-py::object PyQueryResult::getArrowChunks(
-    const std::vector<std::unique_ptr<DataTypeInfo>>& typesInfo, std::int64_t chunkSize) {
+py::object PyQueryResult::getArrowChunks(const std::vector<kuzu::common::LogicalType>& types,
+    const std::vector<std::string>& names, std::int64_t chunkSize) {
     py::list batches;
-    while (getNextArrowChunk(typesInfo, batches, chunkSize)) {}
+    while (getNextArrowChunk(types, names, batches, chunkSize)) {}
     return batches;
 }
 
 kuzu::pyarrow::Table PyQueryResult::getAsArrow(std::int64_t chunkSize) {
 
-    auto typesInfo = queryResult->getColumnTypesInfo();
-    py::list batches = getArrowChunks(typesInfo, chunkSize);
-    auto schema = ArrowConverter::toArrowSchema(typesInfo);
-
+    auto types = queryResult->getColumnDataTypes();
+    auto names = queryResult->getColumnNames();
+    py::list batches = getArrowChunks(types, names, chunkSize);
+    auto schema = ArrowConverter::toArrowSchema(types, names);
     auto fromBatchesFunc = importCache->pyarrow.lib.Table.from_batches();
     auto schemaImportFunc = importCache->pyarrow.lib.Schema._import_from_c();
     auto schemaObj = schemaImportFunc((std::uint64_t)schema.get());

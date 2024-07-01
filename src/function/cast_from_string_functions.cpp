@@ -340,7 +340,7 @@ static inline void startListCast(const char* input, uint64_t len, T split, const
 
 // ---------------------- cast String to Array Helper ------------------------------ //
 static void validateNumElementsInArray(uint64_t numElementsRead, const LogicalType& type) {
-    auto numElementsInArray = ArrayType::getNumElements(&type);
+    auto numElementsInArray = ArrayType::getNumElements(type);
     if (numElementsRead != numElementsInArray) {
         throw CopyException(stringFormat(
             "Each array should have fixed number of elements. Expected: {}, Actual: {}.",
@@ -540,7 +540,7 @@ static bool tryCastStringToStruct(const char* input, uint64_t len, ValueVector* 
 
     // check if start with {
     auto end = input + len;
-    auto type = vector->dataType;
+    const auto& type = vector->dataType;
     skipWhitespace(input, end);
     if (input == end || *input != '{') {
         return false;
@@ -564,7 +564,7 @@ static bool tryCastStringToStruct(const char* input, uint64_t len, ValueVector* 
         auto keyEnd = input;
         trimRightWhitespace(keyStart, keyEnd);
         trimQuotes(keyStart, keyEnd);
-        auto fieldIdx = StructType::getFieldIdx(&type, std::string{keyStart, keyEnd});
+        auto fieldIdx = StructType::getFieldIdx(type, std::string{keyStart, keyEnd});
         if (fieldIdx == INVALID_STRUCT_FIELD_IDX) {
             throw ParserException{"Invalid struct field name: " + std::string{keyStart, keyEnd}};
         }
@@ -679,6 +679,36 @@ static bool tryCastUnionField(ValueVector* vector, uint64_t rowToAdd, const char
         success = function::tryDoubleCast(input, len, result);
         testAndSetValue(vector, rowToAdd, result, success);
     } break;
+    case LogicalTypeID::DECIMAL: {
+        switch (targetType.getPhysicalType()) {
+        case PhysicalTypeID::INT16: {
+            int16_t result;
+            tryDecimalCast(input, len, result, DecimalType::getPrecision(targetType),
+                DecimalType::getScale(targetType));
+            testAndSetValue(vector, rowToAdd, result, success);
+        } break;
+        case PhysicalTypeID::INT32: {
+            int32_t result;
+            tryDecimalCast(input, len, result, DecimalType::getPrecision(targetType),
+                DecimalType::getScale(targetType));
+            testAndSetValue(vector, rowToAdd, result, success);
+        } break;
+        case PhysicalTypeID::INT64: {
+            int64_t result;
+            tryDecimalCast(input, len, result, DecimalType::getPrecision(targetType),
+                DecimalType::getScale(targetType));
+            testAndSetValue(vector, rowToAdd, result, success);
+        } break;
+        case PhysicalTypeID::INT128: {
+            int128_t result;
+            tryDecimalCast(input, len, result, DecimalType::getPrecision(targetType),
+                DecimalType::getScale(targetType));
+            testAndSetValue(vector, rowToAdd, result, success);
+        } break;
+        default:
+            KU_UNREACHABLE;
+        }
+    } break;
     case LogicalTypeID::DATE: {
         date_t result;
         uint64_t pos;
@@ -730,7 +760,7 @@ void CastStringHelper::cast(const char* input, uint64_t len, union_entry_t& /*re
     auto& type = vector->dataType;
     union_field_idx_t selectedFieldIdx = INVALID_STRUCT_FIELD_IDX;
 
-    for (auto i = 0u; i < UnionType::getNumFields(&type); i++) {
+    for (auto i = 0u; i < UnionType::getNumFields(type); i++) {
         auto internalFieldIdx = UnionType::getInternalFieldIdx(i);
         auto fieldVector = StructVector::getFieldVector(vector, internalFieldIdx).get();
         if (tryCastUnionField(fieldVector, rowToAdd, input, len)) {
@@ -773,6 +803,7 @@ void CastString::copyStringToVector(ValueVector* vector, uint64_t vectorPos,
         CastStringHelper::cast(strVal.data(), strVal.length(), val);
         vector->setValue(vectorPos, val);
     } break;
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64: {
         int64_t val;
         CastStringHelper::cast(strVal.data(), strVal.length(), val);
@@ -817,6 +848,32 @@ void CastString::copyStringToVector(ValueVector* vector, uint64_t vectorPos,
         float val;
         CastStringHelper::cast(strVal.data(), strVal.length(), val);
         vector->setValue(vectorPos, val);
+    } break;
+    case LogicalTypeID::DECIMAL: {
+        switch (type.getPhysicalType()) {
+        case PhysicalTypeID::INT16: {
+            int16_t val;
+            decimalCast(strVal.data(), strVal.length(), val, type);
+            vector->setValue(vectorPos, val);
+        } break;
+        case PhysicalTypeID::INT32: {
+            int32_t val;
+            decimalCast(strVal.data(), strVal.length(), val, type);
+            vector->setValue(vectorPos, val);
+        } break;
+        case PhysicalTypeID::INT64: {
+            int64_t val;
+            decimalCast(strVal.data(), strVal.length(), val, type);
+            vector->setValue(vectorPos, val);
+        } break;
+        case PhysicalTypeID::INT128: {
+            int128_t val;
+            decimalCast(strVal.data(), strVal.length(), val, type);
+            vector->setValue(vectorPos, val);
+        } break;
+        default:
+            KU_UNREACHABLE;
+        }
     } break;
     case LogicalTypeID::DOUBLE: {
         double val;

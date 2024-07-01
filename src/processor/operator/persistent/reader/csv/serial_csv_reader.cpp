@@ -19,9 +19,9 @@ std::vector<std::pair<std::string, LogicalType>> SerialCSVReader::sniffCSV() {
     readBOM();
 
     if (option.hasHeader) {
-        SniffCSVNameAndTypeDriver driver;
+        SniffCSVNameAndTypeDriver driver{context};
         parseCSV(driver);
-        return driver.columns;
+        return std::move(driver.columns);
     } else {
         SniffCSVColumnCountDriver driver;
         parseCSV(driver);
@@ -40,7 +40,9 @@ uint64_t SerialCSVReader::parseBlock(block_idx_t blockIdx, DataChunk& resultChun
         handleFirstBlock();
     }
     SerialParsingDriver driver(resultChunk, this);
-    return parseCSV(driver);
+    auto numRowsRead = parseCSV(driver);
+    resultChunk.state->getSelVectorUnsafe().setSelSize(numRowsRead);
+    return numRowsRead;
 }
 
 void SerialCSVScanSharedState::read(DataChunk& outputChunk) {
@@ -49,9 +51,7 @@ void SerialCSVScanSharedState::read(DataChunk& outputChunk) {
         if (fileIdx > readerConfig.getNumFiles()) {
             return;
         }
-        uint64_t numRows = reader->parseBlock(0 /* unused by serial csv reader */, outputChunk);
-        // TODO(Ziyi): parseBlock should set the selectedSize of dataChunk.
-        outputChunk.state->selVector->selectedSize = numRows;
+        uint64_t numRows = reader->parseBlock(reader->getFileOffset() == 0 ? 0 : 1, outputChunk);
         if (numRows > 0) {
             return;
         }
@@ -72,7 +72,7 @@ static common::offset_t tableFunc(TableFuncInput& input, TableFuncOutput& output
     auto serialCSVScanSharedState =
         ku_dynamic_cast<TableFuncSharedState*, SerialCSVScanSharedState*>(input.sharedState);
     serialCSVScanSharedState->read(output.dataChunk);
-    return output.dataChunk.state->selVector->selectedSize;
+    return output.dataChunk.state->getSelVector().getSelSize();
 }
 
 static void bindColumnsFromFile(const ScanTableFuncBindInput* bindInput, uint32_t fileIdx,
@@ -83,7 +83,7 @@ static void bindColumnsFromFile(const ScanTableFuncBindInput* bindInput, uint32_
     auto sniffedColumns = csvReader.sniffCSV();
     for (auto& [name, type] : sniffedColumns) {
         columnNames.push_back(name);
-        columnTypes.push_back(type);
+        columnTypes.push_back(type.copy());
     }
 }
 

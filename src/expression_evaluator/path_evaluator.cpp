@@ -15,10 +15,10 @@ namespace evaluator {
 static std::vector<ValueVector*> getFieldVectors(const LogicalType& inputType,
     const LogicalType& resultType, ValueVector* inputVector) {
     std::vector<ValueVector*> result;
-    for (auto field : StructType::getFields(&resultType)) {
-        auto fieldName = StringUtils::getUpper(field->getName());
-        if (StructType::hasField(&inputType, fieldName)) {
-            auto idx = StructType::getFieldIdx(&inputType, fieldName);
+    for (auto& field : StructType::getFields(resultType)) {
+        auto fieldName = StringUtils::getUpper(field.getName());
+        if (StructType::hasField(inputType, fieldName)) {
+            auto idx = StructType::getFieldIdx(inputType, fieldName);
             result.push_back(StructVector::getFieldVector(inputVector, idx).get());
         } else {
             result.push_back(nullptr);
@@ -28,15 +28,15 @@ static std::vector<ValueVector*> getFieldVectors(const LogicalType& inputType,
 }
 
 void PathExpressionEvaluator::init(const processor::ResultSet& resultSet,
-    storage::MemoryManager* memoryManager) {
-    ExpressionEvaluator::init(resultSet, memoryManager);
-    auto resultNodesIdx = StructType::getFieldIdx(&resultVector->dataType, InternalKeyword::NODES);
+    main::ClientContext* clientContext) {
+    ExpressionEvaluator::init(resultSet, clientContext);
+    auto resultNodesIdx = StructType::getFieldIdx(resultVector->dataType, InternalKeyword::NODES);
     resultNodesVector = StructVector::getFieldVector(resultVector.get(), resultNodesIdx).get();
     auto resultNodesDataVector = ListVector::getDataVector(resultNodesVector);
     for (auto& fieldVector : StructVector::getFieldVectors(resultNodesDataVector)) {
         resultNodesFieldVectors.push_back(fieldVector.get());
     }
-    auto resultRelsIdx = StructType::getFieldIdx(&resultVector->dataType, InternalKeyword::RELS);
+    auto resultRelsIdx = StructType::getFieldIdx(resultVector->dataType, InternalKeyword::RELS);
     resultRelsVector = StructVector::getFieldVector(resultVector.get(), resultRelsIdx).get();
     auto resultRelsDataVector = ListVector::getDataVector(resultRelsVector);
     for (auto& fieldVector : StructVector::getFieldVectors(resultRelsDataVector)) {
@@ -50,27 +50,27 @@ void PathExpressionEvaluator::init(const processor::ResultSet& resultSet,
         switch (child->dataType.getLogicalTypeID()) {
         case LogicalTypeID::NODE: {
             vectors->nodeFieldVectors =
-                getFieldVectors(child->dataType, *pathExpression->getNodeType(), vectors->input);
+                getFieldVectors(child->dataType, pathExpression->getNodeType(), vectors->input);
         } break;
         case LogicalTypeID::REL: {
             vectors->relFieldVectors =
-                getFieldVectors(child->dataType, *pathExpression->getRelType(), vectors->input);
+                getFieldVectors(child->dataType, pathExpression->getRelType(), vectors->input);
         } break;
         case LogicalTypeID::RECURSIVE_REL: {
             auto rel = (RelExpression*)child;
             auto recursiveNode = rel->getRecursiveInfo()->node;
             auto recursiveRel = rel->getRecursiveInfo()->rel;
-            auto nodeFieldIdx = StructType::getFieldIdx(&child->dataType, InternalKeyword::NODES);
+            auto nodeFieldIdx = StructType::getFieldIdx(child->dataType, InternalKeyword::NODES);
             vectors->nodesInput = StructVector::getFieldVector(vectors->input, nodeFieldIdx).get();
             vectors->nodesDataInput = ListVector::getDataVector(vectors->nodesInput);
             vectors->nodeFieldVectors = getFieldVectors(recursiveNode->dataType,
-                *pathExpression->getNodeType(), vectors->nodesDataInput);
+                pathExpression->getNodeType(), vectors->nodesDataInput);
             auto relFieldIdx =
-                StructType::getFieldIdx(&vectors->input->dataType, InternalKeyword::RELS);
+                StructType::getFieldIdx(vectors->input->dataType, InternalKeyword::RELS);
             vectors->relsInput = StructVector::getFieldVector(vectors->input, relFieldIdx).get();
             vectors->relsDataInput = ListVector::getDataVector(vectors->relsInput);
             vectors->relFieldVectors = getFieldVectors(recursiveRel->dataType,
-                *pathExpression->getRelType(), vectors->relsDataInput);
+                pathExpression->getRelType(), vectors->relsDataInput);
         } break;
         default:
             KU_UNREACHABLE;
@@ -79,14 +79,14 @@ void PathExpressionEvaluator::init(const processor::ResultSet& resultSet,
     }
 }
 
-void PathExpressionEvaluator::evaluate(ClientContext* clientContext) {
+void PathExpressionEvaluator::evaluate() {
     resultVector->resetAuxiliaryBuffer();
     for (auto& child : children) {
-        child->evaluate(clientContext);
+        child->evaluate();
     }
-    auto selVector = resultVector->state->selVector;
-    for (auto i = 0u; i < selVector->selectedSize; ++i) {
-        auto pos = selVector->selectedPositions[i];
+    auto& selVector = resultVector->state->getSelVector();
+    for (auto i = 0u; i < selVector.getSelSize(); ++i) {
+        auto pos = selVector[i];
         auto numRels = copyRels(pos);
         copyNodes(pos, numRels == 0);
     }
@@ -94,7 +94,7 @@ void PathExpressionEvaluator::evaluate(ClientContext* clientContext) {
 
 static inline uint32_t getCurrentPos(ValueVector* vector, uint32_t pos) {
     if (vector->state->isFlat()) {
-        return vector->state->selVector->selectedPositions[0];
+        return vector->state->getSelVector()[0];
     }
     return pos;
 }
@@ -214,7 +214,7 @@ void PathExpressionEvaluator::copyFieldVectors(offset_t inputVectorPos,
 
 void PathExpressionEvaluator::resolveResultVector(const processor::ResultSet& /*resultSet*/,
     storage::MemoryManager* memoryManager) {
-    resultVector = std::make_shared<ValueVector>(expression->getDataType(), memoryManager);
+    resultVector = std::make_shared<ValueVector>(expression->getDataType().copy(), memoryManager);
     std::vector<ExpressionEvaluator*> inputEvaluators;
     inputEvaluators.reserve(children.size());
     for (auto& child : children) {

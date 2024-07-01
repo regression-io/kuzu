@@ -147,13 +147,12 @@ public:
      * @param type the logical type of the value.
      * @param val_ the string value to set.
      */
-    KUZU_API explicit Value(std::unique_ptr<LogicalType> type, std::string val_);
+    KUZU_API explicit Value(LogicalType type, std::string val_);
     /**
      * @param dataType the logical type of the value.
      * @param children a vector of children values.
      */
-    KUZU_API explicit Value(std::unique_ptr<LogicalType> dataType,
-        std::vector<std::unique_ptr<Value>> children);
+    KUZU_API explicit Value(LogicalType dataType, std::vector<std::unique_ptr<Value>> children);
     /**
      * @param other the value to copy from.
      */
@@ -164,6 +163,7 @@ public:
      */
     KUZU_API Value(Value&& other) = default;
     KUZU_API Value& operator=(Value&& other) = default;
+    KUZU_API bool operator==(const Value& rhs) const;
 
     /**
      * @brief Sets the data type of the Value.
@@ -173,7 +173,7 @@ public:
     /**
      * @return the dataType of the value.
      */
-    KUZU_API LogicalType* getDataType() const;
+    KUZU_API const LogicalType& getDataType() const;
     /**
      * @brief Sets the null flag of the Value.
      * @param flag null value flag to set.
@@ -188,10 +188,15 @@ public:
      */
     KUZU_API bool isNull() const;
     /**
-     * @brief Copies from the value.
+     * @brief Copies from the row layout value.
      * @param value value to copy from.
      */
-    KUZU_API void copyValueFrom(const uint8_t* value);
+    KUZU_API void copyFromRowLayout(const uint8_t* value);
+    /**
+     * @brief Copies from the col layout value.
+     * @param value value to copy from.
+     */
+    KUZU_API void copyFromColLayout(const uint8_t* value, ValueVector* vec = nullptr);
     /**
      * @brief Copies from the other.
      * @param other value to copy from.
@@ -228,16 +233,26 @@ public:
      */
     KUZU_API std::string toString() const;
 
-    void serialize(Serializer& serializer) const;
+    KUZU_API void serialize(Serializer& serializer) const;
 
-    static std::unique_ptr<Value> deserialize(Deserializer& deserializer);
+    KUZU_API static std::unique_ptr<Value> deserialize(Deserializer& deserializer);
+
+    void validateType(common::LogicalTypeID targetTypeID) const;
+
+    bool hasNoneNullChildren() const;
+    bool allowTypeChange() const;
+
+    uint64_t computeHash() const;
 
 private:
     Value();
     explicit Value(const LogicalType& dataType);
 
-    void copyFromList(ku_list_t& list, const LogicalType& childType);
-    void copyFromStruct(const uint8_t* kuStruct);
+    void resizeChildrenVector(uint64_t size, const LogicalType& childType);
+    void copyFromRowLayoutList(const ku_list_t& list, const LogicalType& childType);
+    void copyFromColLayoutList(const list_entry_t& list, ValueVector* vec);
+    void copyFromRowLayoutStruct(const uint8_t* kuStruct);
+    void copyFromColLayoutStruct(const struct_entry_t& structEntry, ValueVector* vec);
     void copyFromUnion(const uint8_t* kuUnion);
 
     std::string rdfVariantToString() const;
@@ -246,6 +261,7 @@ private:
     std::string structToString() const;
     std::string nodeToString() const;
     std::string relToString() const;
+    std::string decimalToString() const;
 
 public:
     union Val {
@@ -270,11 +286,12 @@ public:
     std::string strVal;
 
 private:
-    std::unique_ptr<LogicalType> dataType;
+    LogicalType dataType;
     bool isNull_;
 
-    // Note: ALWAYS use childrenSize over children.size(). We do NOT resize children when iterating
-    // with nested value. So children.size() reflects the capacity() rather the actual size.
+    // Note: ALWAYS use childrenSize over children.size(). We do NOT resize children when
+    // iterating with nested value. So children.size() reflects the capacity() rather the actual
+    // size.
     std::vector<std::unique_ptr<Value>> children;
     uint32_t childrenSize;
 };
@@ -284,7 +301,7 @@ private:
  */
 template<>
 KUZU_API inline bool Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::BOOL);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::BOOL);
     return val.booleanVal;
 }
 
@@ -293,7 +310,7 @@ KUZU_API inline bool Value::getValue() const {
  */
 template<>
 KUZU_API inline int8_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT8);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT8);
     return val.int8Val;
 }
 
@@ -302,7 +319,7 @@ KUZU_API inline int8_t Value::getValue() const {
  */
 template<>
 KUZU_API inline int16_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT16);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT16);
     return val.int16Val;
 }
 
@@ -311,7 +328,7 @@ KUZU_API inline int16_t Value::getValue() const {
  */
 template<>
 KUZU_API inline int32_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT32);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT32);
     return val.int32Val;
 }
 
@@ -320,7 +337,7 @@ KUZU_API inline int32_t Value::getValue() const {
  */
 template<>
 KUZU_API inline int64_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT64);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT64);
     return val.int64Val;
 }
 
@@ -329,7 +346,7 @@ KUZU_API inline int64_t Value::getValue() const {
  */
 template<>
 KUZU_API inline uint64_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT64);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT64);
     return val.uint64Val;
 }
 
@@ -338,7 +355,7 @@ KUZU_API inline uint64_t Value::getValue() const {
  */
 template<>
 KUZU_API inline uint32_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT32);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT32);
     return val.uint32Val;
 }
 
@@ -347,7 +364,7 @@ KUZU_API inline uint32_t Value::getValue() const {
  */
 template<>
 KUZU_API inline uint16_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT16);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT16);
     return val.uint16Val;
 }
 
@@ -356,7 +373,7 @@ KUZU_API inline uint16_t Value::getValue() const {
  */
 template<>
 KUZU_API inline uint8_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT8);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT8);
     return val.uint8Val;
 }
 
@@ -365,8 +382,7 @@ KUZU_API inline uint8_t Value::getValue() const {
  */
 template<>
 KUZU_API inline int128_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT128 ||
-              dataType->getLogicalTypeID() == LogicalTypeID::UUID);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT128);
     return val.int128Val;
 }
 
@@ -375,7 +391,7 @@ KUZU_API inline int128_t Value::getValue() const {
  */
 template<>
 KUZU_API inline float Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::FLOAT);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::FLOAT);
     return val.floatVal;
 }
 
@@ -384,7 +400,7 @@ KUZU_API inline float Value::getValue() const {
  */
 template<>
 KUZU_API inline double Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::DOUBLE);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::DOUBLE);
     return val.doubleVal;
 }
 
@@ -393,7 +409,7 @@ KUZU_API inline double Value::getValue() const {
  */
 template<>
 KUZU_API inline date_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::DATE);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::DATE);
     return date_t{val.int32Val};
 }
 
@@ -402,7 +418,7 @@ KUZU_API inline date_t Value::getValue() const {
  */
 template<>
 KUZU_API inline timestamp_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP);
     return timestamp_t{val.int64Val};
 }
 
@@ -411,7 +427,7 @@ KUZU_API inline timestamp_t Value::getValue() const {
  */
 template<>
 KUZU_API inline timestamp_ns_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_NS);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_NS);
     return timestamp_ns_t{val.int64Val};
 }
 
@@ -420,7 +436,7 @@ KUZU_API inline timestamp_ns_t Value::getValue() const {
  */
 template<>
 KUZU_API inline timestamp_ms_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_MS);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_MS);
     return timestamp_ms_t{val.int64Val};
 }
 
@@ -429,7 +445,7 @@ KUZU_API inline timestamp_ms_t Value::getValue() const {
  */
 template<>
 KUZU_API inline timestamp_sec_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_SEC);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_SEC);
     return timestamp_sec_t{val.int64Val};
 }
 
@@ -438,7 +454,7 @@ KUZU_API inline timestamp_sec_t Value::getValue() const {
  */
 template<>
 KUZU_API inline timestamp_tz_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
     return timestamp_tz_t{val.int64Val};
 }
 
@@ -447,7 +463,7 @@ KUZU_API inline timestamp_tz_t Value::getValue() const {
  */
 template<>
 KUZU_API inline interval_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INTERVAL);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::INTERVAL);
     return val.intervalVal;
 }
 
@@ -456,7 +472,7 @@ KUZU_API inline interval_t Value::getValue() const {
  */
 template<>
 KUZU_API inline internalID_t Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INTERNAL_ID);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::INTERNAL_ID);
     return val.internalIDVal;
 }
 
@@ -465,9 +481,9 @@ KUZU_API inline internalID_t Value::getValue() const {
  */
 template<>
 KUZU_API inline std::string Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::STRING ||
-              dataType->getLogicalTypeID() == LogicalTypeID::BLOB ||
-              dataType->getLogicalTypeID() == LogicalTypeID::UUID);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::STRING ||
+              dataType.getLogicalTypeID() == LogicalTypeID::BLOB ||
+              dataType.getLogicalTypeID() == LogicalTypeID::UUID);
     return strVal;
 }
 
@@ -476,7 +492,7 @@ KUZU_API inline std::string Value::getValue() const {
  */
 template<>
 KUZU_API inline uint8_t* Value::getValue() const {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::POINTER);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::POINTER);
     return val.pointer;
 }
 
@@ -485,7 +501,7 @@ KUZU_API inline uint8_t* Value::getValue() const {
  */
 template<>
 KUZU_API inline bool& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::BOOL);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::BOOL);
     return val.booleanVal;
 }
 
@@ -494,7 +510,7 @@ KUZU_API inline bool& Value::getValueReference() {
  */
 template<>
 KUZU_API inline int8_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT8);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT8);
     return val.int8Val;
 }
 
@@ -503,7 +519,7 @@ KUZU_API inline int8_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline int16_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT16);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT16);
     return val.int16Val;
 }
 
@@ -512,7 +528,7 @@ KUZU_API inline int16_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline int32_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT32);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT32);
     return val.int32Val;
 }
 
@@ -521,7 +537,7 @@ KUZU_API inline int32_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline int64_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT64);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT64);
     return val.int64Val;
 }
 
@@ -530,7 +546,7 @@ KUZU_API inline int64_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline uint8_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT8);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT8);
     return val.uint8Val;
 }
 
@@ -539,7 +555,7 @@ KUZU_API inline uint8_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline uint16_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT16);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT16);
     return val.uint16Val;
 }
 
@@ -548,7 +564,7 @@ KUZU_API inline uint16_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline uint32_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT32);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT32);
     return val.uint32Val;
 }
 
@@ -557,7 +573,7 @@ KUZU_API inline uint32_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline uint64_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::UINT64);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::UINT64);
     return val.uint64Val;
 }
 
@@ -566,7 +582,7 @@ KUZU_API inline uint64_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline int128_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INT128);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::INT128);
     return val.int128Val;
 }
 
@@ -575,7 +591,7 @@ KUZU_API inline int128_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline float& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::FLOAT);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::FLOAT);
     return val.floatVal;
 }
 
@@ -584,7 +600,7 @@ KUZU_API inline float& Value::getValueReference() {
  */
 template<>
 KUZU_API inline double& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::DOUBLE);
+    KU_ASSERT(dataType.getPhysicalType() == PhysicalTypeID::DOUBLE);
     return val.doubleVal;
 }
 
@@ -593,7 +609,7 @@ KUZU_API inline double& Value::getValueReference() {
  */
 template<>
 KUZU_API inline date_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::DATE);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::DATE);
     return *reinterpret_cast<date_t*>(&val.int32Val);
 }
 
@@ -602,7 +618,7 @@ KUZU_API inline date_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline timestamp_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP);
     return *reinterpret_cast<timestamp_t*>(&val.int64Val);
 }
 
@@ -611,7 +627,7 @@ KUZU_API inline timestamp_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline timestamp_ms_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_MS);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_MS);
     return *reinterpret_cast<timestamp_ms_t*>(&val.int64Val);
 }
 
@@ -620,7 +636,7 @@ KUZU_API inline timestamp_ms_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline timestamp_ns_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_NS);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_NS);
     return *reinterpret_cast<timestamp_ns_t*>(&val.int64Val);
 }
 
@@ -629,7 +645,7 @@ KUZU_API inline timestamp_ns_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline timestamp_sec_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_SEC);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_SEC);
     return *reinterpret_cast<timestamp_sec_t*>(&val.int64Val);
 }
 
@@ -638,7 +654,7 @@ KUZU_API inline timestamp_sec_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline timestamp_tz_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::TIMESTAMP_TZ);
     return *reinterpret_cast<timestamp_tz_t*>(&val.int64Val);
 }
 
@@ -647,7 +663,7 @@ KUZU_API inline timestamp_tz_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline interval_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INTERVAL);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::INTERVAL);
     return val.intervalVal;
 }
 
@@ -656,7 +672,7 @@ KUZU_API inline interval_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline nodeID_t& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::INTERNAL_ID);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::INTERNAL_ID);
     return val.internalIDVal;
 }
 
@@ -665,7 +681,7 @@ KUZU_API inline nodeID_t& Value::getValueReference() {
  */
 template<>
 KUZU_API inline std::string& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::STRING);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::STRING);
     return strVal;
 }
 
@@ -674,7 +690,7 @@ KUZU_API inline std::string& Value::getValueReference() {
  */
 template<>
 KUZU_API inline uint8_t*& Value::getValueReference() {
-    KU_ASSERT(dataType->getLogicalTypeID() == LogicalTypeID::POINTER);
+    KU_ASSERT(dataType.getLogicalTypeID() == LogicalTypeID::POINTER);
     return val.pointer;
 }
 

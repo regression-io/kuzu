@@ -71,20 +71,13 @@ void LogicalPathPropertyProbe::computeFlatSchema() {
     }
 }
 
-void LogicalScanFrontier::computeFlatSchema() {
-    createEmptySchema();
-    schema->createGroup();
-    schema->setGroupAsSingleState(0);
-    schema->insertToGroupAndScope(nodeID, 0);
-    schema->insertToGroupAndScope(nodePredicateExecFlag, 0);
-}
-
-void LogicalScanFrontier::computeFactorizedSchema() {
-    createEmptySchema();
-    auto groupPos = schema->createGroup();
-    schema->setGroupAsSingleState(groupPos);
-    schema->insertToGroupAndScope(nodeID, groupPos);
-    schema->insertToGroupAndScope(nodePredicateExecFlag, groupPos);
+std::unique_ptr<LogicalOperator> LogicalPathPropertyProbe::copy() {
+    auto nodeChildCopy = nodeChild == nullptr ? nullptr : nodeChild->copy();
+    auto relChildCopy = relChild == nullptr ? nullptr : relChild->copy();
+    auto op = std::make_unique<LogicalPathPropertyProbe>(recursiveRel, children[0]->copy(),
+        std::move(nodeChildCopy), std::move(relChildCopy), joinType);
+    op->sipInfo = sipInfo;
+    return op;
 }
 
 } // namespace planner

@@ -4,15 +4,20 @@
 #include "binder/expression_binder.h"
 #include "binder/query/bound_regular_query.h"
 #include "binder/query/query_graph.h"
+#include "catalog/catalog_entry/table_catalog_entry.h"
 #include "common/copier_config/reader_config.h"
 #include "common/enums/table_type.h"
+#include "graph/graph_entry.h"
 #include "parser/query/graph_pattern/pattern_element.h"
 #include "parser/query/regular_query.h"
 
 namespace kuzu {
 namespace parser {
+struct PropertyDefinitionDDL;
 struct CreateTableInfo;
 struct BaseScanSource;
+class ProjectGraph;
+struct JoinHintNode;
 } // namespace parser
 
 namespace catalog {
@@ -20,11 +25,16 @@ class NodeTableCatalogEntry;
 class RelTableCatalogEntry;
 class RDFGraphCatalogEntry;
 class Property;
+class Catalog;
 } // namespace catalog
 
 namespace extension {
 struct ExtensionOptions;
 } // namespace extension
+
+namespace graph {
+struct GraphEntry;
+}
 
 namespace main {
 class ClientContext;
@@ -34,6 +44,10 @@ class Database;
 namespace function {
 struct TableFunction;
 } // namespace function
+
+namespace transaction {
+class Transaction;
+} // namespace transaction
 
 namespace binder {
 struct PropertyInfo;
@@ -46,6 +60,7 @@ class BoundWithClause;
 class BoundReturnClause;
 struct BoundFileScanInfo;
 struct ExportedTableData;
+struct BoundJoinHintNode;
 
 // BinderScope keeps track of expressions in scope and their aliases. We maintain the order of
 // expressions in
@@ -55,7 +70,7 @@ class Binder {
 
 public:
     explicit Binder(main::ClientContext* clientContext)
-        : lastExpressionId{0}, scope{}, expressionBinder{this, clientContext},
+        : lastExpressionId{0}, scope{}, graphEntrySet{}, expressionBinder{this, clientContext},
           clientContext{clientContext} {}
 
     std::unique_ptr<BoundStatement> bind(const parser::Statement& statement);
@@ -65,15 +80,15 @@ public:
         expressionBinder.parameterMap = parameters;
     }
 
-    inline std::unordered_map<std::string, std::shared_ptr<common::Value>> getParameterMap() {
+    std::unordered_map<std::string, std::shared_ptr<common::Value>> getParameterMap() {
         return expressionBinder.parameterMap;
     }
 
-    static std::unique_ptr<common::LogicalType> bindDataType(const std::string& dataType);
+    bool bindExportTableData(ExportedTableData& tableData, const catalog::TableCatalogEntry& entry,
+        const catalog::Catalog& catalog, transaction::Transaction* tx);
+    std::shared_ptr<Expression> createVariable(const std::string& name,
+        const common::LogicalType& dataType);
 
-    ExportedTableData extractExportData(std::string selQuery, std::string tableName);
-
-private:
     std::shared_ptr<Expression> bindWhereExpression(
         const parser::ParsedExpression& parsedExpression);
 
@@ -82,8 +97,6 @@ private:
     std::shared_ptr<Expression> createVariable(std::string_view name, common::LogicalTypeID typeID);
     std::shared_ptr<Expression> createVariable(const std::string& name,
         common::LogicalTypeID typeID);
-    std::shared_ptr<Expression> createVariable(const std::string& name,
-        const common::LogicalType& dataType);
 
     /*** bind DDL ***/
     BoundCreateTableInfo bindCreateTableInfo(const parser::CreateTableInfo* info);
@@ -92,16 +105,21 @@ private:
     BoundCreateTableInfo bindCreateRelTableGroupInfo(const parser::CreateTableInfo* info);
     BoundCreateTableInfo bindCreateRdfGraphInfo(const parser::CreateTableInfo* info);
     std::unique_ptr<BoundStatement> bindCreateTable(const parser::Statement& statement);
+    std::unique_ptr<BoundStatement> bindCreateType(const parser::Statement& statement);
+    std::unique_ptr<BoundStatement> bindCreateSequence(const parser::Statement& statement);
 
     std::unique_ptr<BoundStatement> bindDropTable(const parser::Statement& statement);
+    std::unique_ptr<BoundStatement> bindDropSequence(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindAlter(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindRenameTable(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindAddProperty(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindDropProperty(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindRenameProperty(const parser::Statement& statement);
+    std::unique_ptr<BoundStatement> bindCommentOn(const parser::Statement& statement);
 
     std::vector<PropertyInfo> bindPropertyInfo(
-        const std::vector<std::pair<std::string, std::string>>& propertyNameDataTypes);
+        const std::vector<parser::PropertyDefinitionDDL>& propertyDefinitions,
+        const std::string& tableName);
 
     /*** bind copy ***/
     std::unique_ptr<BoundStatement> bindCopyFromClause(const parser::Statement& statement);
@@ -119,14 +137,15 @@ private:
 
     std::unique_ptr<BoundStatement> bindAttachDatabase(const parser::Statement& statement);
     std::unique_ptr<BoundStatement> bindDetachDatabase(const parser::Statement& statement);
+    std::unique_ptr<BoundStatement> bindUseDatabase(const parser::Statement& statement);
 
     /*** bind scan source ***/
     std::unique_ptr<BoundBaseScanSource> bindScanSource(parser::BaseScanSource* scanSource,
-        const parser::parsing_option_t& options, const std::vector<std::string>& columnNames,
+        const parser::options_t& options, const std::vector<std::string>& columnNames,
         const std::vector<common::LogicalType>& columnTypes);
 
     std::unordered_map<std::string, common::Value> bindParsingOptions(
-        const parser::parsing_option_t& parsingOptions);
+        const parser::options_t& parsingOptions);
     common::FileType bindFileType(const std::vector<std::string>& filePaths);
     common::FileType bindFileType(const std::string& filePath);
     std::vector<std::string> bindFilePaths(const std::vector<std::string>& filePaths);
@@ -135,6 +154,8 @@ private:
     std::unique_ptr<BoundRegularQuery> bindQuery(const parser::RegularQuery& regularQuery);
     NormalizedSingleQuery bindSingleQuery(const parser::SingleQuery& singleQuery);
     NormalizedQueryPart bindQueryPart(const parser::QueryPart& queryPart);
+
+    graph::GraphEntry bindProjectGraph(const parser::ProjectGraph& projectGraph);
 
     /*** bind call ***/
     std::unique_ptr<BoundStatement> bindStandaloneCall(const parser::Statement& statement);
@@ -148,9 +169,6 @@ private:
     /*** bind extension ***/
     std::unique_ptr<BoundStatement> bindExtension(const parser::Statement& statement);
 
-    /*** bind comment on ***/
-    std::unique_ptr<BoundStatement> bindCommentOn(const parser::Statement& statement);
-
     /*** bind explain ***/
     std::unique_ptr<BoundStatement> bindExplain(const parser::Statement& statement);
 
@@ -158,6 +176,7 @@ private:
     std::unique_ptr<BoundReadingClause> bindReadingClause(
         const parser::ReadingClause& readingClause);
     std::unique_ptr<BoundReadingClause> bindMatchClause(const parser::ReadingClause& readingClause);
+    std::shared_ptr<BoundJoinHintNode> bindJoinHint(const parser::JoinHintNode& joinHintNode);
     void rewriteMatchPattern(BoundGraphPattern& boundGraphPattern);
     std::unique_ptr<BoundReadingClause> bindUnwindClause(
         const parser::ReadingClause& readingClause);
@@ -176,7 +195,7 @@ private:
     std::unique_ptr<BoundUpdatingClause> bindDeleteClause(
         const parser::UpdatingClause& updatingClause);
 
-    std::vector<BoundInsertInfo> bindInsertInfos(const QueryGraphCollection& queryGraphCollection,
+    std::vector<BoundInsertInfo> bindInsertInfos(QueryGraphCollection& queryGraphCollection,
         const std::unordered_set<std::string>& patternsInScope);
     void bindInsertNode(std::shared_ptr<NodeExpression> node, std::vector<BoundInsertInfo>& infos);
     void bindInsertRel(std::shared_ptr<RelExpression> rel, std::vector<BoundInsertInfo>& infos);
@@ -256,17 +275,23 @@ private:
 
     /*** helpers ***/
     std::string getUniqueExpressionName(const std::string& name);
-    static bool isReservedPropertyName(const std::string& name);
 
+    static bool reservedInColumnName(const std::string& name);
+    static bool reservedInPropertyLookup(const std::string& name);
+
+    void addToScope(const std::string& name, std::shared_ptr<Expression> expr);
     BinderScope saveScope();
     void restoreScope(BinderScope prevScope);
 
     function::TableFunction getScanFunction(common::FileType fileType,
         const common::ReaderConfig& config);
 
+    ExpressionBinder* getExpressionBinder() { return &expressionBinder; }
+
 private:
     uint32_t lastExpressionId;
     BinderScope scope;
+    graph::GraphEntrySet graphEntrySet;
     ExpressionBinder expressionBinder;
     main::ClientContext* clientContext;
 };

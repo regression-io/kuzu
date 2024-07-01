@@ -45,6 +45,7 @@ class Database {
     );
     this._isInitialized = false;
     this._initPromise = null;
+    this._isClosed = false;
   }
 
   /**
@@ -99,32 +100,36 @@ class Database {
    * @returns {KuzuNative.NodeDatabase} the underlying native database.
    */
   async _getDatabase() {
+    if (this._isClosed) {
+      throw new Error("Database is closed.");
+    }
     await this.init();
     return this._database;
   }
 
   /**
-   * Set the logging level for the database.
+   * Close the database.
    */
-  setLoggingLevel(loggingLevel) {
-    const validLoggingLevels = Object.values(LoggingLevel);
-
-    if (!validLoggingLevels.includes(loggingLevel)) {
-      const validLoggingLevelsEnum = Object.keys(LoggingLevel)
-        .map((k) => "kuzu.LoggingLevel." + k)
-        .join(", ");
-      throw new Error(
-        `Invalid logging level: ${loggingLevel}. Valid logging levels are: ${validLoggingLevelsEnum}.`
-      );
-    }
-
-    // If the database is not initialized yet, store the logging level
-    // and defer setting it until the database is initialized.
-    if (this._isInitialized) {
-      this._database.setLoggingLevel(loggingLevel);
+  async close() {
+    if (this._isClosed) {
       return;
     }
-    this._loggingLevel = loggingLevel;
+    if (!this._isInitialized) {
+      if (this._initPromise) {
+        // Database is initializing, wait for it to finish first.
+        await this._initPromise;
+      } else {
+        // Database is not initialized, simply mark it as closed and initialized.
+        this._isInitialized = true;
+        this._isClosed = true;
+        delete this._database;
+        return;
+      }
+    }
+    // Database is initialized, close it.
+    this._database.close();
+    delete this._database;
+    this._isClosed = true;
   }
 }
 

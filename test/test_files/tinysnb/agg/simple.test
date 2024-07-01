@@ -1,4 +1,3 @@
--GROUP TinySnbReadTest
 -DATASET CSV tinysnb
 
 --
@@ -9,13 +8,17 @@
 -STATEMENT MATCH (a:person)-[:knows]->(b:person)-[:knows]->(c:person) RETURN COUNT(a.ID), MIN(a.fName), MAX(c.ID),count(a.grades)
 -PARALLELISM 8
 -ENUMERATE
+-CHECK_PRECISION
+-CHECK_ORDER
 ---- 1
 36|Alice|5|36
 
 -LOG SimpleAvgTest
+-CHECK_PRECISION
+-CHECK_ORDER
 -STATEMENT MATCH (a:person) RETURN AVG(a.age), AVG(a.eyeSight)
 ---- 1
-37.250000|4.862500
+37.25|4.8625
 
 -LOG SimpleAvgFloatTest
 -STATEMENT MATCH (a:person) RETURN AVG(a.height) + 5
@@ -97,7 +100,7 @@ False
 2|1
 
 -LOG UINT32KeyTest
--STATEMENT MATCH (p:person)-[s:studyAt]->(o:organisation) WHERE s.temprature = 1 RETURN p.ID, o.ID
+-STATEMENT MATCH (p:person)-[s:studyAt]->(o:organisation) WHERE s.temperature = 1 RETURN p.ID, o.ID
 -ENUMERATE
 ---- 1
 2|1
@@ -152,7 +155,7 @@ False
 [9223372036854775808,6689,23]
 
 -LOG SimpleCollectUINT32Test
--STATEMENT MATCH (:person)-[e:studyAt]->(:organisation) RETURN collect(e.temprature)
+-STATEMENT MATCH (:person)-[e:studyAt]->(:organisation) RETURN collect(e.temperature)
 ---- 1
 [32800,1,20]
 
@@ -297,14 +300,14 @@ False
 9223372036854782520
 
 -LOG SimpleAggMaxUInt32Test
--STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) RETURN MAX(s.temprature)
+-STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) RETURN MAX(s.temperature)
 -PARALLELISM 2
 -ENUMERATE
 ---- 1
 32800
 
 -LOG SimpleAggSumUInt32Test
--STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) RETURN SUM(s.temprature)
+-STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) RETURN SUM(s.temperature)
 -PARALLELISM 2
 -ENUMERATE
 ---- 1
@@ -332,7 +335,7 @@ False
 250
 
 -LOG SimpleAggSumUInt8Test
--STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) 
+-STATEMENT MATCH (:person)-[s:studyAt]->(:organisation)
 		   WHERE s.year = 2020
 		   RETURN SUM(s.ulevel)
 -PARALLELISM 2

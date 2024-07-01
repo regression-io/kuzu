@@ -6,7 +6,8 @@
 #include <vector>
 
 #include "common/api.h"
-#include "common/assert.h"
+#include "common/cast.h"
+#include "common/copy_constructors.h"
 #include "common/types/internal_id_t.h"
 #include "common/types/interval_t.h"
 
@@ -32,9 +33,8 @@ using property_id_t = uint32_t;
 constexpr property_id_t INVALID_PROPERTY_ID = UINT32_MAX;
 using column_id_t = property_id_t;
 constexpr column_id_t INVALID_COLUMN_ID = INVALID_PROPERTY_ID;
-using vector_idx_t = uint32_t;
 using idx_t = uint32_t;
-constexpr vector_idx_t INVALID_VECTOR_IDX = UINT32_MAX;
+const idx_t INVALID_IDX = UINT32_MAX;
 using block_idx_t = uint64_t;
 constexpr block_idx_t INVALID_BLOCK_IDX = UINT64_MAX;
 using struct_field_idx_t = uint8_t;
@@ -49,6 +49,10 @@ using partition_idx_t = uint64_t;
 constexpr partition_idx_t INVALID_PARTITION_IDX = UINT64_MAX;
 using length_t = uint64_t;
 using list_size_t = uint32_t;
+using sequence_id_t = uint64_t;
+
+using transaction_t = uint64_t;
+constexpr transaction_t INVALID_TRANSACTION = UINT64_MAX;
 
 // System representation for a variable-sized overflow value.
 struct overflow_value_t {
@@ -82,6 +86,20 @@ struct int128_t;
 struct ku_string_t;
 
 template<typename T>
+concept IntegerTypes =
+    std::is_same_v<T, int8_t> || std::is_same_v<T, int16_t> || std::is_same_v<T, int32_t> ||
+    std::is_same_v<T, int64_t> || std::is_same_v<T, uint8_t> || std::is_same_v<T, uint16_t> ||
+    std::is_same_v<T, uint32_t> || std::is_same_v<T, uint64_t> ||
+    std::is_same_v<T, common::int128_t>;
+
+template<typename T>
+concept NumericTypes = IntegerTypes<T> || std::floating_point<T>;
+
+template<typename T>
+concept ComparableTypes = NumericTypes<T> || std::is_same_v<T, common::ku_string_t> ||
+                          std::is_same_v<T, interval_t> || std::is_same_v<T, bool>;
+
+template<typename T>
 concept HashablePrimitive = ((std::integral<T> && !std::is_same_v<T, bool>) ||
                              std::floating_point<T> || std::is_same_v<T, common::int128_t>);
 template<typename T>
@@ -91,12 +109,19 @@ concept IndexHashable =
         std::is_same_v<T, std::string_view> || std::same_as<T, std::string>);
 
 template<typename T>
-concept HashableTypes = (std::integral<T> || std::floating_point<T> ||
-                         std::is_same_v<T, common::int128_t> || std::is_same_v<T, struct_entry_t> ||
-                         std::is_same_v<T, list_entry_t> || std::is_same_v<T, internalID_t> ||
-                         std::is_same_v<T, interval_t> || std::is_same_v<T, ku_string_t>);
+concept HashableNonNestedTypes =
+    (std::integral<T> || std::floating_point<T> || std::is_same_v<T, common::int128_t> ||
+        std::is_same_v<T, internalID_t> || std::is_same_v<T, interval_t> ||
+        std::is_same_v<T, ku_string_t>);
 
-enum class KUZU_API LogicalTypeID : uint8_t {
+template<typename T>
+concept HashableNestedTypes =
+    (std::is_same_v<T, list_entry_t> || std::is_same_v<T, struct_entry_t>);
+
+template<typename T>
+concept HashableTypes = (HashableNestedTypes<T> || HashableNonNestedTypes<T>);
+
+enum class LogicalTypeID : uint8_t {
     ANY = 0,
     NODE = 10,
     REL = 11,
@@ -124,7 +149,7 @@ enum class KUZU_API LogicalTypeID : uint8_t {
     TIMESTAMP_NS = 38,
     TIMESTAMP_TZ = 39,
     INTERVAL = 40,
-
+    DECIMAL = 41,
     INTERNAL_ID = 42,
 
     STRING = 50,
@@ -138,7 +163,7 @@ enum class KUZU_API LogicalTypeID : uint8_t {
     RDF_VARIANT = 57,
     POINTER = 58,
 
-    UUID = 59
+    UUID = 59,
 };
 
 enum class PhysicalTypeID : uint8_t {
@@ -162,269 +187,113 @@ enum class PhysicalTypeID : uint8_t {
     // Variable size types.
     STRING = 20,
     LIST = 22,
-    STRUCT = 23,
-    POINTER = 24,
+    ARRAY = 23,
+    STRUCT = 24,
+    POINTER = 25,
 };
 
-class LogicalType;
-
-class ExtraTypeInfo {
-public:
-    virtual ~ExtraTypeInfo() = default;
-
-    inline void serialize(Serializer& serializer) const { serializeInternal(serializer); }
-
-    virtual std::unique_ptr<ExtraTypeInfo> copy() const = 0;
-
-protected:
-    virtual void serializeInternal(Serializer& serializer) const = 0;
-};
-
-class ListTypeInfo : public ExtraTypeInfo {
-public:
-    ListTypeInfo() = default;
-    explicit ListTypeInfo(std::unique_ptr<LogicalType> childType)
-        : childType{std::move(childType)} {}
-    inline LogicalType* getChildType() const { return childType.get(); }
-    bool operator==(const ListTypeInfo& other) const;
-    std::unique_ptr<ExtraTypeInfo> copy() const override;
-
-    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
-
-protected:
-    void serializeInternal(Serializer& serializer) const override;
-
-protected:
-    std::unique_ptr<LogicalType> childType;
-};
-
-class ArrayTypeInfo : public ListTypeInfo {
-public:
-    ArrayTypeInfo() = default;
-    explicit ArrayTypeInfo(std::unique_ptr<LogicalType> childType, uint64_t numElements)
-        : ListTypeInfo{std::move(childType)}, numElements{numElements} {}
-    inline uint64_t getNumElements() const { return numElements; }
-    bool operator==(const ArrayTypeInfo& other) const;
-    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
-    std::unique_ptr<ExtraTypeInfo> copy() const override;
-
-private:
-    void serializeInternal(Serializer& serializer) const override;
-
-private:
-    uint64_t numElements;
-};
-
-class StructField {
-public:
-    StructField() : type{std::make_unique<LogicalType>()} {}
-    StructField(std::string name, std::unique_ptr<LogicalType> type)
-        : name{std::move(name)}, type{std::move(type)} {};
-
-    inline bool operator!=(const StructField& other) const { return !(*this == other); }
-    inline std::string getName() const { return name; }
-    inline LogicalType* getType() const { return type.get(); }
-
-    bool operator==(const StructField& other) const;
-
-    void serialize(Serializer& serializer) const;
-
-    static StructField deserialize(Deserializer& deserializer);
-
-    StructField copy() const;
-
-private:
-    std::string name;
-    std::unique_ptr<LogicalType> type;
-};
-
-class StructTypeInfo : public ExtraTypeInfo {
-public:
-    StructTypeInfo() = default;
-    explicit StructTypeInfo(std::vector<StructField>&& fields);
-    StructTypeInfo(const std::vector<std::string>& fieldNames,
-        const std::vector<std::unique_ptr<LogicalType>>& fieldTypes);
-
-    bool hasField(const std::string& fieldName) const;
-    struct_field_idx_t getStructFieldIdx(std::string fieldName) const;
-    const StructField* getStructField(struct_field_idx_t idx) const;
-    const StructField* getStructField(const std::string& fieldName) const;
-    LogicalType* getChildType(struct_field_idx_t idx) const;
-    std::vector<LogicalType*> getChildrenTypes() const;
-    std::vector<std::string> getChildrenNames() const;
-    std::vector<const StructField*> getStructFields() const;
-    bool operator==(const kuzu::common::StructTypeInfo& other) const;
-
-    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
-    std::unique_ptr<ExtraTypeInfo> copy() const override;
-
-private:
-    void serializeInternal(Serializer& serializer) const override;
-
-private:
-    std::vector<StructField> fields;
-    std::unordered_map<std::string, struct_field_idx_t> fieldNameToIdxMap;
-};
+class ExtraTypeInfo;
+class StructField;
+class StructTypeInfo;
 
 class LogicalType {
-    friend class LogicalTypeUtils;
+    friend struct LogicalTypeUtils;
+    friend struct DecimalType;
     friend struct StructType;
     friend struct ListType;
     friend struct ArrayType;
+
+    KUZU_API LogicalType(const LogicalType& other);
 
 public:
     KUZU_API LogicalType() : typeID{LogicalTypeID::ANY}, extraTypeInfo{nullptr} {
         physicalType = getPhysicalType(this->typeID);
     };
     explicit KUZU_API LogicalType(LogicalTypeID typeID);
-    KUZU_API LogicalType(const LogicalType& other);
-    KUZU_API LogicalType(LogicalType&& other) = default;
-
-    KUZU_API LogicalType& operator=(const LogicalType& other);
+    EXPLICIT_COPY_DEFAULT_MOVE(LogicalType);
 
     KUZU_API bool operator==(const LogicalType& other) const;
-
     KUZU_API bool operator!=(const LogicalType& other) const;
 
-    KUZU_API LogicalType& operator=(LogicalType&& other) = default;
-
     KUZU_API std::string toString() const;
+    static bool tryConvertFromString(const std::string& str, LogicalType& type);
+    static LogicalType fromString(const std::string& str);
 
-    KUZU_API inline LogicalTypeID getLogicalTypeID() const { return typeID; }
+    KUZU_API LogicalTypeID getLogicalTypeID() const { return typeID; }
+    bool containsAny() const;
 
-    inline PhysicalTypeID getPhysicalType() const { return physicalType; }
-    static PhysicalTypeID getPhysicalType(LogicalTypeID logicalType);
+    PhysicalTypeID getPhysicalType() const { return physicalType; }
+    static PhysicalTypeID getPhysicalType(LogicalTypeID logicalType,
+        const std::unique_ptr<ExtraTypeInfo>& extraTypeInfo = nullptr);
 
-    inline bool hasExtraTypeInfo() const { return extraTypeInfo != nullptr; }
-    inline void setExtraTypeInfo(std::unique_ptr<ExtraTypeInfo> typeInfo) {
+    void setExtraTypeInfo(std::unique_ptr<ExtraTypeInfo> typeInfo) {
         extraTypeInfo = std::move(typeInfo);
     }
 
     void serialize(Serializer& serializer) const;
 
-    static std::unique_ptr<LogicalType> deserialize(Deserializer& deserializer);
+    static LogicalType deserialize(Deserializer& deserializer);
 
-    KUZU_API std::unique_ptr<LogicalType> copy() const;
+    KUZU_API static std::vector<LogicalType> copy(const std::vector<LogicalType>& types);
+    KUZU_API static std::vector<LogicalType> copy(const std::vector<LogicalType*>& types);
 
-    static std::vector<std::unique_ptr<LogicalType>> copy(
-        const std::vector<std::unique_ptr<LogicalType>>& types);
-    static std::vector<LogicalType> copy(const std::vector<LogicalType>& types);
-    static std::vector<LogicalType> copy(const std::vector<LogicalType*>& types);
+    static LogicalType ANY() { return LogicalType(LogicalTypeID::ANY); }
+    static LogicalType BOOL() { return LogicalType(LogicalTypeID::BOOL); }
+    static LogicalType HASH() { return LogicalType(LogicalTypeID::UINT64); }
+    static LogicalType INT64() { return LogicalType(LogicalTypeID::INT64); }
+    static LogicalType INT32() { return LogicalType(LogicalTypeID::INT32); }
+    static LogicalType INT16() { return LogicalType(LogicalTypeID::INT16); }
+    static LogicalType INT8() { return LogicalType(LogicalTypeID::INT8); }
+    static LogicalType UINT64() { return LogicalType(LogicalTypeID::UINT64); }
+    static LogicalType UINT32() { return LogicalType(LogicalTypeID::UINT32); }
+    static LogicalType UINT16() { return LogicalType(LogicalTypeID::UINT16); }
+    static LogicalType UINT8() { return LogicalType(LogicalTypeID::UINT8); }
+    static LogicalType INT128() { return LogicalType(LogicalTypeID::INT128); }
+    static LogicalType DOUBLE() { return LogicalType(LogicalTypeID::DOUBLE); }
+    static LogicalType FLOAT() { return LogicalType(LogicalTypeID::FLOAT); }
+    static LogicalType DATE() { return LogicalType(LogicalTypeID::DATE); }
+    static LogicalType TIMESTAMP_NS() { return LogicalType(LogicalTypeID::TIMESTAMP_NS); }
+    static LogicalType TIMESTAMP_MS() { return LogicalType(LogicalTypeID::TIMESTAMP_MS); }
+    static LogicalType TIMESTAMP_SEC() { return LogicalType(LogicalTypeID::TIMESTAMP_SEC); }
+    static LogicalType TIMESTAMP_TZ() { return LogicalType(LogicalTypeID::TIMESTAMP_TZ); }
+    static LogicalType TIMESTAMP() { return LogicalType(LogicalTypeID::TIMESTAMP); }
+    static LogicalType INTERVAL() { return LogicalType(LogicalTypeID::INTERVAL); }
+    static LogicalType DECIMAL(uint32_t precision, uint32_t scale);
+    static LogicalType INTERNAL_ID() { return LogicalType(LogicalTypeID::INTERNAL_ID); }
+    static LogicalType SERIAL() { return LogicalType(LogicalTypeID::SERIAL); }
+    static LogicalType STRING() { return LogicalType(LogicalTypeID::STRING); }
+    static LogicalType BLOB() { return LogicalType(LogicalTypeID::BLOB); }
+    static LogicalType UUID() { return LogicalType(LogicalTypeID::UUID); }
+    static LogicalType POINTER() { return LogicalType(LogicalTypeID::POINTER); }
+    static KUZU_API LogicalType STRUCT(std::vector<StructField>&& fields);
 
-    static std::unique_ptr<LogicalType> ANY() {
-        return std::make_unique<LogicalType>(LogicalTypeID::ANY);
-    }
-    static std::unique_ptr<LogicalType> BOOL() {
-        return std::make_unique<LogicalType>(LogicalTypeID::BOOL);
-    }
-    static std::unique_ptr<LogicalType> HASH() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT64);
-    }
-    static std::unique_ptr<LogicalType> INT64() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT64);
-    }
-    static std::unique_ptr<LogicalType> INT32() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT32);
-    }
-    static std::unique_ptr<LogicalType> INT16() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT16);
-    }
-    static std::unique_ptr<LogicalType> INT8() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT8);
-    }
-    static std::unique_ptr<LogicalType> UINT64() {
-        return std::make_unique<LogicalType>(LogicalTypeID::UINT64);
-    }
-    static std::unique_ptr<LogicalType> UINT32() {
-        return std::make_unique<LogicalType>(LogicalTypeID::UINT32);
-    }
-    static std::unique_ptr<LogicalType> UINT16() {
-        return std::make_unique<LogicalType>(LogicalTypeID::UINT16);
-    }
-    static std::unique_ptr<LogicalType> UINT8() {
-        return std::make_unique<LogicalType>(LogicalTypeID::UINT8);
-    }
-    static std::unique_ptr<LogicalType> INT128() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INT128);
-    }
-    static std::unique_ptr<LogicalType> DOUBLE() {
-        return std::make_unique<LogicalType>(LogicalTypeID::DOUBLE);
-    }
-    static std::unique_ptr<LogicalType> FLOAT() {
-        return std::make_unique<LogicalType>(LogicalTypeID::FLOAT);
-    }
-    static std::unique_ptr<LogicalType> DATE() {
-        return std::make_unique<LogicalType>(LogicalTypeID::DATE);
-    }
-    static std::unique_ptr<LogicalType> TIMESTAMP_NS() {
-        return std::make_unique<LogicalType>(LogicalTypeID::TIMESTAMP_NS);
-    }
-    static std::unique_ptr<LogicalType> TIMESTAMP_MS() {
-        return std::make_unique<LogicalType>(LogicalTypeID::TIMESTAMP_MS);
-    }
-    static std::unique_ptr<LogicalType> TIMESTAMP_SEC() {
-        return std::make_unique<LogicalType>(LogicalTypeID::TIMESTAMP_SEC);
-    }
-    static std::unique_ptr<LogicalType> TIMESTAMP_TZ() {
-        return std::make_unique<LogicalType>(LogicalTypeID::TIMESTAMP_TZ);
-    }
-    static std::unique_ptr<LogicalType> TIMESTAMP() {
-        return std::make_unique<LogicalType>(LogicalTypeID::TIMESTAMP);
-    }
-    static std::unique_ptr<LogicalType> INTERVAL() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INTERVAL);
-    }
-    static std::unique_ptr<LogicalType> INTERNAL_ID() {
-        return std::make_unique<LogicalType>(LogicalTypeID::INTERNAL_ID);
-    }
-    static std::unique_ptr<LogicalType> SERIAL() {
-        return std::make_unique<LogicalType>(LogicalTypeID::SERIAL);
-    }
-    static std::unique_ptr<LogicalType> STRING() {
-        return std::make_unique<LogicalType>(LogicalTypeID::STRING);
-    }
-    static std::unique_ptr<LogicalType> BLOB() {
-        return std::make_unique<LogicalType>(LogicalTypeID::BLOB);
-    }
-    static std::unique_ptr<LogicalType> UUID() {
-        return std::make_unique<LogicalType>(LogicalTypeID::UUID);
-    }
-    static std::unique_ptr<LogicalType> POINTER() {
-        return std::make_unique<LogicalType>(LogicalTypeID::POINTER);
-    }
-    static KUZU_API std::unique_ptr<LogicalType> STRUCT(std::vector<StructField>&& fields);
+    static KUZU_API LogicalType RECURSIVE_REL(std::unique_ptr<StructTypeInfo> typeInfo);
 
-    static KUZU_API std::unique_ptr<LogicalType> RECURSIVE_REL(
-        std::unique_ptr<StructTypeInfo> typeInfo);
+    static KUZU_API LogicalType NODE(std::unique_ptr<StructTypeInfo> typeInfo);
 
-    static KUZU_API std::unique_ptr<LogicalType> NODE(std::unique_ptr<StructTypeInfo> typeInfo);
+    static KUZU_API LogicalType REL(std::unique_ptr<StructTypeInfo> typeInfo);
 
-    static KUZU_API std::unique_ptr<LogicalType> REL(std::unique_ptr<StructTypeInfo> typeInfo);
+    static KUZU_API LogicalType RDF_VARIANT();
 
-    static KUZU_API std::unique_ptr<LogicalType> RDF_VARIANT();
+    static KUZU_API LogicalType UNION(std::vector<StructField>&& fields);
 
-    static KUZU_API std::unique_ptr<LogicalType> UNION(std::vector<StructField>&& fields);
-
-    static KUZU_API std::unique_ptr<LogicalType> LIST(std::unique_ptr<LogicalType> childType);
+    static KUZU_API LogicalType LIST(LogicalType childType);
     template<class T>
-    static inline std::unique_ptr<LogicalType> LIST(T&& childType) {
-        return LogicalType::LIST(std::make_unique<LogicalType>(std::forward<T>(childType)));
+    static inline LogicalType LIST(T&& childType) {
+        return LogicalType::LIST(LogicalType(std::forward<T>(childType)));
     }
 
-    static KUZU_API std::unique_ptr<LogicalType> MAP(std::unique_ptr<LogicalType> keyType,
-        std::unique_ptr<LogicalType> valueType);
+    static KUZU_API LogicalType MAP(LogicalType keyType, LogicalType valueType);
     template<class T>
-    static inline std::unique_ptr<LogicalType> MAP(T&& keyType, T&& valueType) {
-        return LogicalType::MAP(std::make_unique<LogicalType>(std::forward<T>(keyType)),
-            std::make_unique<LogicalType>(std::forward<T>(valueType)));
+    static LogicalType MAP(T&& keyType, T&& valueType) {
+        return LogicalType::MAP(LogicalType(std::forward<T>(keyType)),
+            LogicalType(std::forward<T>(valueType)));
     }
 
-    static KUZU_API std::unique_ptr<LogicalType> ARRAY(std::unique_ptr<LogicalType> childType,
-        uint64_t numElements);
+    static KUZU_API LogicalType ARRAY(LogicalType childType, uint64_t numElements);
     template<class T>
-    static inline std::unique_ptr<LogicalType> ARRAY(T&& childType, uint64_t numElements) {
-        return LogicalType::ARRAY(std::make_unique<LogicalType>(std::forward<T>(childType)),
-            numElements);
+    static LogicalType ARRAY(T&& childType, uint64_t numElements) {
+        return LogicalType::ARRAY(LogicalType(std::forward<T>(childType)), numElements);
     }
 
 private:
@@ -439,163 +308,247 @@ private:
     std::unique_ptr<ExtraTypeInfo> extraTypeInfo;
 };
 
-// TODO: Should remove `logical_types_t`.
-using logical_types_t = std::vector<std::unique_ptr<LogicalType>>;
+class ExtraTypeInfo {
+public:
+    virtual ~ExtraTypeInfo() = default;
+
+    void serialize(Serializer& serializer) const { serializeInternal(serializer); }
+
+    virtual bool containsAny() const = 0;
+
+    virtual bool operator==(const ExtraTypeInfo& other) const = 0;
+
+    virtual std::unique_ptr<ExtraTypeInfo> copy() const = 0;
+
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const ExtraTypeInfo*, const TARGET*>(this);
+    }
+
+protected:
+    virtual void serializeInternal(Serializer& serializer) const = 0;
+};
+
+class DecimalTypeInfo : public ExtraTypeInfo {
+public:
+    explicit DecimalTypeInfo(uint32_t precision = 18, uint32_t scale = 3)
+        : precision(precision), scale(scale) {}
+
+    uint32_t getPrecision() const { return precision; }
+    uint32_t getScale() const { return scale; }
+
+    bool containsAny() const override { return false; }
+
+    bool operator==(const ExtraTypeInfo& other) const override;
+
+    std::unique_ptr<ExtraTypeInfo> copy() const override;
+
+    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
+
+protected:
+    void serializeInternal(Serializer& serializer) const override;
+
+    uint32_t precision, scale;
+};
+
+class ListTypeInfo : public ExtraTypeInfo {
+public:
+    ListTypeInfo() = default;
+    explicit ListTypeInfo(LogicalType childType) : childType{std::move(childType)} {}
+
+    const LogicalType& getChildType() const { return childType; }
+
+    bool containsAny() const override;
+
+    bool operator==(const ExtraTypeInfo& other) const override;
+
+    std::unique_ptr<ExtraTypeInfo> copy() const override;
+
+    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
+
+protected:
+    void serializeInternal(Serializer& serializer) const override;
+
+protected:
+    LogicalType childType;
+};
+
+class ArrayTypeInfo : public ListTypeInfo {
+public:
+    ArrayTypeInfo() = default;
+    explicit ArrayTypeInfo(LogicalType childType, uint64_t numElements)
+        : ListTypeInfo{std::move(childType)}, numElements{numElements} {}
+
+    uint64_t getNumElements() const { return numElements; }
+
+    bool operator==(const ExtraTypeInfo& other) const override;
+
+    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
+
+    std::unique_ptr<ExtraTypeInfo> copy() const override;
+
+private:
+    void serializeInternal(Serializer& serializer) const override;
+
+private:
+    uint64_t numElements;
+};
+
+class KUZU_API StructField {
+public:
+    StructField() : type{LogicalType()} {}
+    StructField(std::string name, LogicalType type)
+        : name{std::move(name)}, type{std::move(type)} {};
+
+    std::string getName() const { return name; }
+
+    const LogicalType& getType() const { return type; }
+
+    bool containsAny() const;
+
+    bool operator==(const StructField& other) const;
+    bool operator!=(const StructField& other) const { return !(*this == other); }
+
+    void serialize(Serializer& serializer) const;
+
+    static StructField deserialize(Deserializer& deserializer);
+
+    StructField copy() const;
+
+private:
+    std::string name;
+    LogicalType type;
+};
+
+class StructTypeInfo : public ExtraTypeInfo {
+public:
+    StructTypeInfo() = default;
+    explicit StructTypeInfo(std::vector<StructField>&& fields);
+    StructTypeInfo(const std::vector<std::string>& fieldNames,
+        const std::vector<LogicalType>& fieldTypes);
+
+    bool hasField(const std::string& fieldName) const;
+    struct_field_idx_t getStructFieldIdx(std::string fieldName) const;
+    const StructField& getStructField(struct_field_idx_t idx) const;
+    const StructField& getStructField(const std::string& fieldName) const;
+    const std::vector<StructField>& getStructFields() const;
+
+    const LogicalType& getChildType(struct_field_idx_t idx) const;
+    std::vector<const LogicalType*> getChildrenTypes() const;
+    // can't be a vector of refs since that can't be for-each looped through
+    std::vector<std::string> getChildrenNames() const;
+
+    bool containsAny() const override;
+
+    bool operator==(const ExtraTypeInfo& other) const override;
+
+    static std::unique_ptr<ExtraTypeInfo> deserialize(Deserializer& deserializer);
+    std::unique_ptr<ExtraTypeInfo> copy() const override;
+
+private:
+    void serializeInternal(Serializer& serializer) const override;
+
+private:
+    std::vector<StructField> fields;
+    std::unordered_map<std::string, struct_field_idx_t> fieldNameToIdxMap;
+};
+
 using logical_type_vec_t = std::vector<LogicalType>;
 
-struct ListType {
-    static inline LogicalType* getChildType(const LogicalType* type) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::LIST);
-        auto listTypeInfo = reinterpret_cast<ListTypeInfo*>(type->extraTypeInfo.get());
-        return listTypeInfo->getChildType();
-    }
+struct KUZU_API DecimalType {
+    static uint32_t getPrecision(const LogicalType& type);
+    static uint32_t getScale(const LogicalType& type);
+    static std::string insertDecimalPoint(const std::string& value, uint32_t posFromEnd);
 };
 
-struct ArrayType {
-    static inline LogicalType* getChildType(const LogicalType* type) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::ARRAY);
-        auto arrayTypeInfo = reinterpret_cast<ArrayTypeInfo*>(type->extraTypeInfo.get());
-        return arrayTypeInfo->getChildType();
-    }
-
-    static inline uint64_t getNumElements(const LogicalType* type) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::ARRAY);
-        auto arrayTypeInfo = reinterpret_cast<ArrayTypeInfo*>(type->extraTypeInfo.get());
-        return arrayTypeInfo->getNumElements();
-    }
+struct KUZU_API ListType {
+    static const LogicalType& getChildType(const LogicalType& type);
 };
 
-struct NodeType {
-    static inline void setExtraTypeInfo(LogicalType& type,
-        std::unique_ptr<ExtraTypeInfo> extraTypeInfo) {
-        KU_ASSERT(type.getLogicalTypeID() == LogicalTypeID::NODE);
-        type.setExtraTypeInfo(std::move(extraTypeInfo));
-    }
+struct KUZU_API ArrayType {
+    static const LogicalType& getChildType(const LogicalType& type);
+    static uint64_t getNumElements(const LogicalType& type);
 };
 
-struct RelType {
-    static inline void setExtraTypeInfo(LogicalType& type,
-        std::unique_ptr<ExtraTypeInfo> extraTypeInfo) {
-        KU_ASSERT(type.getLogicalTypeID() == LogicalTypeID::REL);
-        type.setExtraTypeInfo(std::move(extraTypeInfo));
-    }
+struct KUZU_API StructType {
+    static std::vector<const LogicalType*> getFieldTypes(const LogicalType& type);
+    // since the field types isn't stored as a vector of LogicalTypes, we can't return vector<>&
+
+    static const LogicalType& getFieldType(const LogicalType& type, struct_field_idx_t idx);
+
+    static const LogicalType& getFieldType(const LogicalType& type, const std::string& key);
+
+    static std::vector<std::string> getFieldNames(const LogicalType& type);
+
+    static uint64_t getNumFields(const LogicalType& type);
+
+    static const std::vector<StructField>& getFields(const LogicalType& type);
+
+    static bool hasField(const LogicalType& type, const std::string& key);
+
+    static const StructField& getField(const LogicalType& type, struct_field_idx_t idx);
+
+    static const StructField& getField(const LogicalType& type, const std::string& key);
+
+    static struct_field_idx_t getFieldIdx(const LogicalType& type, const std::string& key);
 };
 
-struct StructType {
-    static inline std::vector<LogicalType*> getFieldTypes(const LogicalType* type) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getChildrenTypes();
-    }
+struct KUZU_API MapType {
+    static const LogicalType& getKeyType(const LogicalType& type);
 
-    static inline std::vector<std::string> getFieldNames(const LogicalType* type) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getChildrenNames();
-    }
-
-    static inline uint64_t getNumFields(const LogicalType* type) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        return getFieldTypes(type).size();
-    }
-
-    static inline std::vector<const StructField*> getFields(const LogicalType* type) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getStructFields();
-    }
-
-    static inline bool hasField(const LogicalType* type, const std::string& key) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->hasField(key);
-    }
-
-    static inline const StructField* getField(const LogicalType* type, struct_field_idx_t idx) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getStructField(idx);
-    }
-
-    static inline const StructField* getField(const LogicalType* type, const std::string& key) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getStructField(key);
-    }
-
-    static inline struct_field_idx_t getFieldIdx(const LogicalType* type, const std::string& key) {
-        KU_ASSERT(type->getPhysicalType() == PhysicalTypeID::STRUCT);
-        auto structTypeInfo = reinterpret_cast<StructTypeInfo*>(type->extraTypeInfo.get());
-        return structTypeInfo->getStructFieldIdx(key);
-    }
+    static const LogicalType& getValueType(const LogicalType& type);
 };
 
-struct MapType {
-    static inline LogicalType* getKeyType(const LogicalType* type) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::MAP);
-        return StructType::getFieldTypes(ListType::getChildType(type))[0];
-    }
-
-    static inline LogicalType* getValueType(const LogicalType* type) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::MAP);
-        return StructType::getFieldTypes(ListType::getChildType(type))[1];
-    }
-};
-
-struct UnionType {
+struct KUZU_API UnionType {
     static constexpr union_field_idx_t TAG_FIELD_IDX = 0;
 
     static constexpr LogicalTypeID TAG_FIELD_TYPE = LogicalTypeID::INT8;
 
     static constexpr char TAG_FIELD_NAME[] = "tag";
 
-    static inline union_field_idx_t getInternalFieldIdx(union_field_idx_t idx) { return idx + 1; }
+    static union_field_idx_t getInternalFieldIdx(union_field_idx_t idx);
 
-    static inline std::string getFieldName(const LogicalType* type, union_field_idx_t idx) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::UNION);
-        return StructType::getFieldNames(type)[getInternalFieldIdx(idx)];
-    }
+    static std::string getFieldName(const LogicalType& type, union_field_idx_t idx);
 
-    static inline LogicalType* getFieldType(const LogicalType* type, union_field_idx_t idx) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::UNION);
-        return StructType::getFieldTypes(type)[getInternalFieldIdx(idx)];
-    }
+    static const LogicalType& getFieldType(const LogicalType& type, union_field_idx_t idx);
 
-    static inline uint64_t getNumFields(const LogicalType* type) {
-        KU_ASSERT(type->getLogicalTypeID() == LogicalTypeID::UNION);
-        return StructType::getNumFields(type) - 1;
-    }
+    static uint64_t getNumFields(const LogicalType& type);
 };
 
 struct PhysicalTypeUtils {
-    static std::string physicalTypeToString(PhysicalTypeID physicalType);
+    static std::string toString(PhysicalTypeID physicalType);
     static uint32_t getFixedTypeSize(PhysicalTypeID physicalType);
 };
 
-class LogicalTypeUtils {
-public:
+struct LogicalTypeUtils {
     KUZU_API static std::string toString(LogicalTypeID dataTypeID);
     KUZU_API static std::string toString(const std::vector<LogicalType>& dataTypes);
     KUZU_API static std::string toString(const std::vector<LogicalTypeID>& dataTypeIDs);
-    KUZU_API static LogicalType dataTypeFromString(const std::string& dataTypeString);
     static uint32_t getRowLayoutSize(const LogicalType& logicalType);
+    static bool isDate(const LogicalType& dataType);
+    static bool isDate(const LogicalTypeID& dataType);
+    static bool isTimestamp(const LogicalType& dataType);
+    static bool isTimestamp(const LogicalTypeID& dataType);
+    static bool isUnsigned(const LogicalType& dataType);
+    static bool isUnsigned(const LogicalTypeID& dataType);
+    static bool isIntegral(const LogicalType& dataType);
+    static bool isIntegral(const LogicalTypeID& dataType);
     static bool isNumerical(const LogicalType& dataType);
+    static bool isNumerical(const LogicalTypeID& dataType);
     static bool isNested(const LogicalType& dataType);
     static bool isNested(LogicalTypeID logicalTypeID);
     static std::vector<LogicalTypeID> getAllValidComparableLogicalTypes();
     static std::vector<LogicalTypeID> getNumericalLogicalTypeIDs();
-    static std::vector<LogicalTypeID> getIntegerLogicalTypeIDs();
-    static std::vector<LogicalTypeID> getAllValidLogicTypes();
+    static std::vector<LogicalTypeID> getIntegerTypeIDs();
+    static std::vector<LogicalTypeID> getAllValidLogicTypeIDs();
+    static std::vector<LogicalType> getAllValidLogicTypes();
+    static bool tryGetMaxLogicalType(const LogicalType& left, const LogicalType& right,
+        LogicalType& result);
+    static bool tryGetMaxLogicalType(const std::vector<LogicalType>& types, LogicalType& result);
 
 private:
-    static LogicalTypeID dataTypeIDFromString(const std::string& trimmedStr);
-    static std::vector<std::string> parseStructFields(const std::string& structTypeStr);
-    static std::unique_ptr<LogicalType> parseListType(const std::string& trimmedStr);
-    static std::unique_ptr<LogicalType> parseArrayType(const std::string& trimmedStr);
-    static std::vector<StructField> parseStructTypeInfo(const std::string& structTypeStr);
-    static std::unique_ptr<LogicalType> parseStructType(const std::string& trimmedStr);
-    static std::unique_ptr<LogicalType> parseMapType(const std::string& trimmedStr);
-    static std::unique_ptr<LogicalType> parseUnionType(const std::string& trimmedStr);
+    static bool tryGetMaxLogicalTypeID(const LogicalTypeID& left, const LogicalTypeID& right,
+        LogicalTypeID& result);
 };
 
 enum class FileVersionType : uint8_t { ORIGINAL = 0, WAL_VERSION = 1 };

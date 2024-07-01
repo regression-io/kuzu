@@ -47,6 +47,30 @@ void BaseFrontierScanner::resetState(const BaseBFSState& bfsState) {
     }
 }
 
+bool PathScanner::trailSemanticCheck(const std::vector<nodeID_t>&,
+    const std::vector<relID_t>& edgeIDs) {
+    common::rel_id_set_t set;
+    for (auto i = 0u; i < edgeIDs.size() - 1; ++i) {
+        if (set.contains(edgeIDs[i])) {
+            return false;
+        }
+        set.insert(edgeIDs[i]);
+    }
+    return true;
+}
+
+bool PathScanner::acyclicSemanticCheck(const std::vector<nodeID_t>& nodeIDs,
+    const std::vector<relID_t>&) {
+    common::node_id_set_t set;
+    for (auto i = 0u; i < nodeIDs.size(); ++i) {
+        if (set.contains(nodeIDs[i])) {
+            return false;
+        }
+        set.insert(nodeIDs[i]);
+    }
+    return true;
+}
+
 void PathScanner::scanFromDstOffset(RecursiveJoinVectors* vectors, sel_t& vectorPos,
     sel_t& nodeIDDataVectorPos, sel_t& relIDDataVectorPos) {
     // when bound node is 0
@@ -82,7 +106,7 @@ void PathScanner::scanFromDstOffset(RecursiveJoinVectors* vectors, sel_t& vector
     }
 }
 
-void PathScanner::initDfs(const frontier::node_rel_id_t& nodeAndRelID, size_t currentDepth) {
+void PathScanner::initDfs(const node_rel_id_t& nodeAndRelID, size_t currentDepth) {
     nodeIDs[currentDepth] = nodeAndRelID.first;
     relIDs[currentDepth] = nodeAndRelID.second;
     if (k == 0) {
@@ -98,15 +122,29 @@ void PathScanner::initDfs(const frontier::node_rel_id_t& nodeAndRelID, size_t cu
     initDfs(nbrs->at(0), currentDepth - 1);
 }
 
+static void writePathRels(RecursiveJoinVectors* vectors, sel_t pos, nodeID_t srcNodeID,
+    nodeID_t dstNodeID, relID_t relID, const std::string& labelName) {
+    vectors->pathRelsSrcIDDataVector->setValue<nodeID_t>(pos, srcNodeID);
+    vectors->pathRelsDstIDDataVector->setValue<nodeID_t>(pos, dstNodeID);
+    vectors->pathRelsIDDataVector->setValue<relID_t>(pos, relID);
+    StringVector::addString(vectors->pathRelsLabelDataVector, pos, labelName);
+}
+
 void PathScanner::writePathToVector(RecursiveJoinVectors* vectors, sel_t& vectorPos,
     sel_t& nodeIDDataVectorPos, sel_t& relIDDataVectorPos) {
+    if (semanticCheckFunc && !semanticCheckFunc(nodeIDs, relIDs)) {
+        return;
+    }
     KU_ASSERT(vectorPos < DEFAULT_VECTOR_CAPACITY);
+    // Allocate list entries.
     auto nodeTableEntry = ListVector::addList(vectors->pathNodesVector, k > 0 ? k - 1 : 0);
     auto relTableEntry = ListVector::addList(vectors->pathRelsVector, k);
     vectors->pathNodesVector->setValue(vectorPos, nodeTableEntry);
     vectors->pathRelsVector->setValue(vectorPos, relTableEntry);
+    // Write dst
     writeDstNodeOffsetAndLength(vectors->dstNodeIDVector, vectors->pathLengthVector, vectorPos);
     vectorPos++;
+    // Write path nodes.
     for (auto i = 1u; i < k; ++i) {
         auto nodeID = nodeIDs[i];
         vectors->pathNodesIDDataVector->setValue<nodeID_t>(nodeIDDataVectorPos, nodeID);
@@ -115,22 +153,30 @@ void PathScanner::writePathToVector(RecursiveJoinVectors* vectors, sel_t& vector
             labelName.data(), labelName.length());
         nodeIDDataVectorPos++;
     }
-    for (auto i = 0u; i < k; ++i) {
-        auto srcNodeID = nodeIDs[i];
-        auto dstNodeID = nodeIDs[i + 1];
-        vectors->pathRelsSrcIDDataVector->setValue<nodeID_t>(relIDDataVectorPos, srcNodeID);
-        vectors->pathRelsDstIDDataVector->setValue<nodeID_t>(relIDDataVectorPos, dstNodeID);
-        auto relID = relIDs[i];
-        vectors->pathRelsIDDataVector->setValue<relID_t>(relIDDataVectorPos, relID);
-        auto labelName = tableIDToName.at(relID.tableID);
-        StringVector::addString(vectors->pathRelsLabelDataVector, relIDDataVectorPos,
-            labelName.data(), labelName.length());
-        relIDDataVectorPos++;
+    // Write path rels.
+    if (extendInBwd) {
+        for (auto i = 0u; i < k; ++i) {
+            auto srcNodeID = nodeIDs[i + 1];
+            auto dstNodeID = nodeIDs[i];
+            auto relID = relIDs[i];
+            writePathRels(vectors, relIDDataVectorPos, srcNodeID, dstNodeID, relID,
+                tableIDToName.at(relID.tableID));
+            relIDDataVectorPos++;
+        }
+    } else {
+        for (auto i = 0u; i < k; ++i) {
+            auto srcNodeID = nodeIDs[i];
+            auto dstNodeID = nodeIDs[i + 1];
+            auto relID = relIDs[i];
+            writePathRels(vectors, relIDDataVectorPos, srcNodeID, dstNodeID, relID,
+                tableIDToName.at(relID.tableID));
+            relIDDataVectorPos++;
+        }
     }
 }
 
 void DstNodeWithMultiplicityScanner::scanFromDstOffset(RecursiveJoinVectors* vectors,
-    sel_t& vectorPos, sel_t& /*nodeIDDataVectorPos*/, sel_t& /*relIDDataVectorPos*/) {
+    sel_t& vectorPos, sel_t&, sel_t&) {
     auto& multiplicity = frontiers[k]->nodeIDToMultiplicity.at(currentDstNodeID);
     while (multiplicity > 0 && vectorPos < DEFAULT_VECTOR_CAPACITY) {
         writeDstNodeOffsetAndLength(vectors->dstNodeIDVector, vectors->pathLengthVector, vectorPos);

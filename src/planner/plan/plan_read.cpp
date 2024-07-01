@@ -1,8 +1,10 @@
 #include "binder/expression_visitor.h"
-#include "binder/query/reading_clause/bound_in_query_call.h"
+#include "binder/query/reading_clause/bound_gds_call.h"
 #include "binder/query/reading_clause/bound_load_from.h"
 #include "binder/query/reading_clause/bound_match_clause.h"
+#include "binder/query/reading_clause/bound_table_function_call.h"
 #include "common/enums/join_type.h"
+#include "function/gds_function.h"
 #include "planner/planner.h"
 
 using namespace kuzu::binder;
@@ -11,9 +13,9 @@ using namespace kuzu::common;
 namespace kuzu {
 namespace planner {
 
-void Planner::planReadingClause(const BoundReadingClause* readingClause,
+void Planner::planReadingClause(const BoundReadingClause& readingClause,
     std::vector<std::unique_ptr<LogicalPlan>>& prevPlans) {
-    auto readingClauseType = readingClause->getClauseType();
+    auto readingClauseType = readingClause.getClauseType();
     switch (readingClauseType) {
     case ClauseType::MATCH: {
         planMatchClause(readingClause, prevPlans);
@@ -21,8 +23,11 @@ void Planner::planReadingClause(const BoundReadingClause* readingClause,
     case ClauseType::UNWIND: {
         planUnwindClause(readingClause, prevPlans);
     } break;
-    case ClauseType::IN_QUERY_CALL: {
-        planInQueryCall(readingClause, prevPlans);
+    case ClauseType::TABLE_FUNCTION_CALL: {
+        planTableFunctionCall(readingClause, prevPlans);
+    } break;
+    case ClauseType::GDS_CALL: {
+        planGDSCall(readingClause, prevPlans);
     } break;
     case ClauseType::LOAD_FROM: {
         planLoadFrom(readingClause, prevPlans);
@@ -32,16 +37,18 @@ void Planner::planReadingClause(const BoundReadingClause* readingClause,
     }
 }
 
-void Planner::planMatchClause(const BoundReadingClause* boundReadingClause,
+void Planner::planMatchClause(const BoundReadingClause& readingClause,
     std::vector<std::unique_ptr<LogicalPlan>>& plans) {
-    auto boundMatchClause =
-        ku_dynamic_cast<const BoundReadingClause*, const BoundMatchClause*>(boundReadingClause);
-    auto queryGraphCollection = boundMatchClause->getQueryGraphCollection();
-    auto predicates = boundMatchClause->getConjunctivePredicates();
-    switch (boundMatchClause->getMatchClauseType()) {
+    auto& boundMatchClause = readingClause.constCast<BoundMatchClause>();
+    auto queryGraphCollection = boundMatchClause.getQueryGraphCollection();
+    auto predicates = boundMatchClause.getConjunctivePredicates();
+    switch (boundMatchClause.getMatchClauseType()) {
     case MatchClauseType::MATCH: {
         if (plans.size() == 1 && plans[0]->isEmpty()) {
-            plans = enumerateQueryGraphCollection(*queryGraphCollection, predicates);
+            auto info = QueryGraphPlanningInfo();
+            info.predicates = predicates;
+            info.hint = boundMatchClause.getHint();
+            plans = enumerateQueryGraphCollection(*queryGraphCollection, info);
         } else {
             for (auto& plan : plans) {
                 planRegularMatch(*queryGraphCollection, predicates, *plan);
@@ -63,13 +70,13 @@ void Planner::planMatchClause(const BoundReadingClause* boundReadingClause,
     }
 }
 
-void Planner::planUnwindClause(const BoundReadingClause* boundReadingClause,
+void Planner::planUnwindClause(const BoundReadingClause& boundReadingClause,
     std::vector<std::unique_ptr<LogicalPlan>>& plans) {
     for (auto& plan : plans) {
         if (plan->isEmpty()) { // UNWIND [1, 2, 3, 4] AS x RETURN x
             appendDummyScan(*plan);
         }
-        appendUnwind(*boundReadingClause, *plan);
+        appendUnwind(boundReadingClause, *plan);
     }
 }
 
@@ -84,75 +91,115 @@ static bool hasExternalDependency(const std::shared_ptr<Expression>& expression,
     return false;
 }
 
-void Planner::planInQueryCall(const BoundReadingClause* readingClause,
-    std::vector<std::unique_ptr<LogicalPlan>>& plans) {
-    auto inQueryCall =
-        ku_dynamic_cast<const BoundReadingClause*, const BoundInQueryCall*>(readingClause);
+static void splitPredicates(const expression_vector& outputExprs,
+    const expression_vector& predicates, expression_vector& predicatesToPull,
+    expression_vector& predicatesToPush) {
     std::unordered_set<std::string> columnNameSet;
-    for (auto& column : inQueryCall->getOutExprs()) {
+    for (auto& column : outputExprs) {
         columnNameSet.insert(column->getUniqueName());
     }
-    expression_vector predicatesToPushDown;
-    expression_vector predicatesToPullUp;
-    for (auto& predicate : inQueryCall->getConjunctivePredicates()) {
+    for (auto& predicate : predicates) {
         if (hasExternalDependency(predicate, columnNameSet)) {
-            predicatesToPullUp.push_back(predicate);
+            predicatesToPull.push_back(predicate);
         } else {
-            predicatesToPushDown.push_back(predicate);
-        }
-    }
-    for (auto& plan : plans) {
-        if (!plan->isEmpty()) {
-            auto tmpPlan = std::make_unique<LogicalPlan>();
-            appendInQueryCall(*readingClause, *tmpPlan);
-            if (!predicatesToPushDown.empty()) {
-                appendFilters(predicatesToPushDown, *tmpPlan);
-            }
-            appendCrossProduct(AccumulateType::REGULAR, *plan, *tmpPlan, *plan);
-        } else {
-            appendInQueryCall(*readingClause, *plan);
-            if (!predicatesToPushDown.empty()) {
-                appendFilters(predicatesToPushDown, *plan);
-            }
-        }
-        if (!predicatesToPullUp.empty()) {
-            appendFilter(inQueryCall->getPredicate(), *plan);
+            predicatesToPush.push_back(predicate);
         }
     }
 }
 
-void Planner::planLoadFrom(const BoundReadingClause* readingClause,
+void Planner::planTableFunctionCall(const BoundReadingClause& readingClause,
     std::vector<std::unique_ptr<LogicalPlan>>& plans) {
-    auto loadFrom = ku_dynamic_cast<const BoundReadingClause*, const BoundLoadFrom*>(readingClause);
-    std::unordered_set<std::string> columnNameSet;
-    for (auto& column : loadFrom->getInfo()->columns) {
-        columnNameSet.insert(column->getUniqueName());
-    }
-    expression_vector predicatesToPushDown;
-    expression_vector predicatesToPullUp;
-    for (auto& predicate : loadFrom->getConjunctivePredicates()) {
-        if (hasExternalDependency(predicate, columnNameSet)) {
-            predicatesToPullUp.push_back(predicate);
-        } else {
-            predicatesToPushDown.push_back(predicate);
-        }
-    }
+    auto& call = readingClause.constCast<BoundTableFunctionCall>();
+    expression_vector predicatesToPull;
+    expression_vector predicatesToPush;
+    splitPredicates(call.getOutExprs(), call.getConjunctivePredicates(), predicatesToPull,
+        predicatesToPush);
     for (auto& plan : plans) {
-        if (!plan->isEmpty()) {
-            auto tmpPlan = std::make_unique<LogicalPlan>();
-            appendScanFile(loadFrom->getInfo(), *tmpPlan);
-            if (!predicatesToPushDown.empty()) {
-                appendFilters(predicatesToPushDown, *tmpPlan);
-            }
-            appendCrossProduct(AccumulateType::REGULAR, *plan, *tmpPlan, *plan);
-        } else {
-            appendScanFile(loadFrom->getInfo(), *plan);
-            if (!predicatesToPushDown.empty()) {
-                appendFilters(predicatesToPushDown, *plan);
-            }
+        planReadOp(getTableFunctionCall(readingClause), predicatesToPush, *plan);
+        if (!predicatesToPull.empty()) {
+            appendFilters(predicatesToPull, *plan);
         }
-        if (!predicatesToPullUp.empty()) {
-            appendFilter(loadFrom->getPredicate(), *plan);
+    }
+}
+
+void Planner::planGDSCall(const BoundReadingClause& readingClause,
+    std::vector<std::unique_ptr<LogicalPlan>>& plans) {
+    auto& call = readingClause.constCast<BoundGDSCall>();
+    expression_vector predicatesToPull;
+    expression_vector predicatesToPush;
+    splitPredicates(call.getInfo().outExprs, call.getConjunctivePredicates(), predicatesToPull,
+        predicatesToPush);
+    auto bindData = call.getInfo().func->ptrCast<function::GDSFunction>()->gds->getBindData();
+    if (bindData->hasNodeInput()) {
+        auto& node = bindData->getNodeInput()->constCast<NodeExpression>();
+        expression_vector joinConditions;
+        joinConditions.push_back(node.getInternalID());
+        for (auto& plan : plans) {
+            auto probePlan = LogicalPlan();
+            auto gdsCall = getGDSCall(readingClause);
+            gdsCall->computeFactorizedSchema();
+            probePlan.setLastOperator(gdsCall);
+            if (!predicatesToPush.empty()) {
+                appendFilters(predicatesToPush, probePlan);
+            }
+            appendHashJoin(joinConditions, JoinType::INNER, probePlan, *plan, *plan);
+        }
+    } else {
+        for (auto& plan : plans) {
+            planReadOp(getGDSCall(readingClause), predicatesToPush, *plan);
+        }
+    }
+    if (bindData->hasNodeOutput()) {
+        auto& node = bindData->getNodeOutput()->constCast<NodeExpression>();
+        auto scanPlan = LogicalPlan();
+        cardinalityEstimator.addNodeIDDom(*node.getInternalID(), node.getTableIDs(),
+            clientContext->getTx());
+        auto properties = node.getPropertyExprs();
+        appendScanNodeTable(node.getInternalID(), node.getTableIDs(), properties, scanPlan);
+        expression_vector joinConditions;
+        joinConditions.push_back(node.getInternalID());
+        for (auto& plan : plans) {
+            appendHashJoin(joinConditions, JoinType::INNER, *plan, scanPlan, *plan);
+        }
+    }
+
+    for (auto& plan : plans) {
+        if (!predicatesToPull.empty()) {
+            appendFilters(predicatesToPull, *plan);
+        }
+    }
+}
+
+void Planner::planLoadFrom(const BoundReadingClause& readingClause,
+    std::vector<std::unique_ptr<LogicalPlan>>& plans) {
+    auto& loadFrom = readingClause.constCast<BoundLoadFrom>();
+    expression_vector predicatesToPull;
+    expression_vector predicatesToPush;
+    splitPredicates(loadFrom.getInfo()->columns, loadFrom.getConjunctivePredicates(),
+        predicatesToPull, predicatesToPush);
+    for (auto& plan : plans) {
+        auto op = getScanFile(loadFrom.getInfo());
+        planReadOp(std::move(op), predicatesToPush, *plan);
+        if (!predicatesToPull.empty()) {
+            appendFilters(predicatesToPull, *plan);
+        }
+    }
+}
+
+void Planner::planReadOp(std::shared_ptr<LogicalOperator> op, const expression_vector& predicates,
+    LogicalPlan& plan) {
+    op->computeFactorizedSchema();
+    if (!plan.isEmpty()) {
+        auto tmpPlan = LogicalPlan();
+        tmpPlan.setLastOperator(std::move(op));
+        if (!predicates.empty()) {
+            appendFilters(predicates, tmpPlan);
+        }
+        appendCrossProduct(AccumulateType::REGULAR, plan, tmpPlan, plan);
+    } else {
+        plan.setLastOperator(std::move(op));
+        if (!predicates.empty()) {
+            appendFilters(predicates, plan);
         }
     }
 }

@@ -3,15 +3,20 @@
 #include "table_catalog_entry.h"
 
 namespace kuzu {
+namespace transaction {
+class Transaction;
+} // namespace transaction
+
 namespace catalog {
 
+class CatalogSet;
 class NodeTableCatalogEntry final : public TableCatalogEntry {
 public:
     //===--------------------------------------------------------------------===//
     // constructors
     //===--------------------------------------------------------------------===//
     NodeTableCatalogEntry() = default;
-    NodeTableCatalogEntry(std::string name, common::table_id_t tableID,
+    NodeTableCatalogEntry(CatalogSet* set, std::string name, common::table_id_t tableID,
         common::property_id_t primaryKeyPID);
     NodeTableCatalogEntry(const NodeTableCatalogEntry& other);
 
@@ -21,6 +26,7 @@ public:
     bool isParent(common::table_id_t /*tableID*/) override { return false; }
     common::TableType getTableType() const override { return common::TableType::NODE; }
     const Property* getPrimaryKey() const { return getProperty(primaryKeyPID); }
+    uint32_t getPrimaryKeyPos() const { return getPropertyPos(primaryKeyPID); }
     common::property_id_t getPrimaryKeyPID() const { return primaryKeyPID; }
     void addFwdRelTableID(common::table_id_t tableID) { fwdRelTableIDSet.insert(tableID); }
     void addBWdRelTableID(common::table_id_t tableID) { bwdRelTableIDSet.insert(tableID); }
@@ -32,8 +38,12 @@ public:
     //===--------------------------------------------------------------------===//
     void serialize(common::Serializer& serializer) const override;
     static std::unique_ptr<NodeTableCatalogEntry> deserialize(common::Deserializer& deserializer);
-    std::unique_ptr<CatalogEntry> copy() const override;
+    std::unique_ptr<TableCatalogEntry> copy() const override;
     std::string toCypher(main::ClientContext* /*clientContext*/) const override;
+
+private:
+    std::unique_ptr<binder::BoundExtraCreateCatalogEntryInfo> getBoundExtraCreateInfo(
+        transaction::Transaction* transaction) const override;
 
 private:
     // TODO(Semih): When we support updating the schemas, we need to update this or, we need

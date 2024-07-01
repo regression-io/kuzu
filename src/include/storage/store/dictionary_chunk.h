@@ -1,6 +1,6 @@
 #pragma once
 
-#include "storage/store/column_chunk.h"
+#include "storage/store/column_chunk_data.h"
 
 namespace kuzu {
 namespace storage {
@@ -23,8 +23,8 @@ public:
 
     std::string_view getString(string_index_t index) const;
 
-    inline ColumnChunk* getStringDataChunk() const { return stringDataChunk.get(); }
-    inline ColumnChunk* getOffsetChunk() const { return offsetChunk.get(); }
+    ColumnChunkData* getStringDataChunk() const { return stringDataChunk.get(); }
+    ColumnChunkData* getOffsetChunk() const { return offsetChunk.get(); }
 
     bool sanityCheck() const;
 
@@ -32,8 +32,8 @@ private:
     bool enableCompression;
     // String data is stored as a UINT8 chunk, using the numValues in the chunk to track the number
     // of characters stored.
-    std::unique_ptr<ColumnChunk> stringDataChunk;
-    std::unique_ptr<ColumnChunk> offsetChunk;
+    std::unique_ptr<ColumnChunkData> stringDataChunk;
+    std::unique_ptr<ColumnChunkData> offsetChunk;
 
     struct DictionaryEntry {
         string_index_t index;

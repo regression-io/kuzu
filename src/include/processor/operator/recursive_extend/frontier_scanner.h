@@ -54,16 +54,26 @@ protected:
  * that was used to store the data related to the BFS that was computed in the RecursiveJoin
  * operator.
  */
+using path_semantic_check_t =
+    std::function<bool(const std::vector<common::nodeID_t>&, const std::vector<common::relID_t>&)>;
+
 class PathScanner : public BaseFrontierScanner {
-    using nbrs_t = std::vector<frontier::node_rel_id_t>*;
+    using nbrs_t = std::vector<node_rel_id_t>*;
 
 public:
     PathScanner(TargetDstNodes* targetDstNodes, size_t k,
-        std::unordered_map<common::table_id_t, std::string> tableIDToName)
-        : BaseFrontierScanner{targetDstNodes, k}, tableIDToName{std::move(tableIDToName)} {
+        std::unordered_map<common::table_id_t, std::string> tableIDToName,
+        path_semantic_check_t semanticCheckFunc, bool extendInBwd)
+        : BaseFrontierScanner{targetDstNodes, k}, tableIDToName{std::move(tableIDToName)},
+          semanticCheckFunc{semanticCheckFunc}, extendInBwd{extendInBwd} {
         nodeIDs.resize(k + 1);
         relIDs.resize(k + 1);
     }
+
+    static bool trailSemanticCheck(const std::vector<common::nodeID_t>& nodeIDs,
+        const std::vector<common::relID_t>& edgeIDs);
+    static bool acyclicSemanticCheck(const std::vector<common::nodeID_t>& nodeIDs,
+        const std::vector<common::relID_t>& edgeIDs);
 
 private:
     inline void initScanFromDstOffset() final {
@@ -75,7 +85,7 @@ private:
         common::sel_t& nodeIDDataVectorPos, common::sel_t& relIDDataVectorPos) final;
 
     // Initialize stacks for given offset.
-    void initDfs(const frontier::node_rel_id_t& nodeAndRelID, size_t currentDepth);
+    void initDfs(const node_rel_id_t& nodeAndRelID, size_t currentDepth);
 
     void writePathToVector(RecursiveJoinVectors* vectors, common::sel_t& vectorPos,
         common::sel_t& nodeIDDataVectorPos, common::sel_t& relIDDataVectorPos);
@@ -87,6 +97,10 @@ private:
     std::stack<nbrs_t> nbrsStack;
     std::stack<int64_t> cursorStack;
     std::unordered_map<common::table_id_t, std::string> tableIDToName;
+    // Path semantic
+    path_semantic_check_t semanticCheckFunc;
+    // Extend direction
+    bool extendInBwd;
 };
 
 /*
@@ -116,7 +130,7 @@ private:
  */
 struct FrontiersScanner {
     std::vector<std::unique_ptr<BaseFrontierScanner>> scanners;
-    common::vector_idx_t cursor;
+    common::idx_t cursor;
 
     explicit FrontiersScanner(std::vector<std::unique_ptr<BaseFrontierScanner>> scanners)
         : scanners{std::move(scanners)}, cursor{0} {}

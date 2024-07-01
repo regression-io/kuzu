@@ -38,18 +38,18 @@ class HashJoinBuildInfo {
 
 public:
     HashJoinBuildInfo(std::vector<DataPos> keysPos, std::vector<common::FStateType> fStateTypes,
-        std::vector<DataPos> payloadsPos, std::unique_ptr<FactorizedTableSchema> tableSchema)
+        std::vector<DataPos> payloadsPos, FactorizedTableSchema tableSchema)
         : keysPos{std::move(keysPos)}, fStateTypes{std::move(fStateTypes)},
           payloadsPos{std::move(payloadsPos)}, tableSchema{std::move(tableSchema)} {}
     HashJoinBuildInfo(const HashJoinBuildInfo& other)
         : keysPos{other.keysPos}, fStateTypes{other.fStateTypes}, payloadsPos{other.payloadsPos},
-          tableSchema{other.tableSchema->copy()} {}
+          tableSchema{other.tableSchema.copy()} {}
 
-    inline uint32_t getNumKeys() const { return keysPos.size(); }
+    uint32_t getNumKeys() const { return keysPos.size(); }
 
-    inline FactorizedTableSchema* getTableSchema() const { return tableSchema.get(); }
+    const FactorizedTableSchema* getTableSchema() const { return &tableSchema; }
 
-    inline std::unique_ptr<HashJoinBuildInfo> copy() const {
+    std::unique_ptr<HashJoinBuildInfo> copy() const {
         return std::make_unique<HashJoinBuildInfo>(*this);
     }
 
@@ -57,21 +57,17 @@ private:
     std::vector<DataPos> keysPos;
     std::vector<common::FStateType> fStateTypes;
     std::vector<DataPos> payloadsPos;
-    std::unique_ptr<FactorizedTableSchema> tableSchema;
+    FactorizedTableSchema tableSchema;
 };
 
 class HashJoinBuild : public Sink {
 public:
     HashJoinBuild(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
-        std::shared_ptr<HashJoinSharedState> sharedState, std::unique_ptr<HashJoinBuildInfo> info,
-        std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-        : HashJoinBuild{std::move(resultSetDescriptor), PhysicalOperatorType::HASH_JOIN_BUILD,
-              std::move(sharedState), std::move(info), std::move(child), id, paramsString} {}
-    HashJoinBuild(std::unique_ptr<ResultSetDescriptor> resultSetDescriptor,
         PhysicalOperatorType operatorType, std::shared_ptr<HashJoinSharedState> sharedState,
         std::unique_ptr<HashJoinBuildInfo> info, std::unique_ptr<PhysicalOperator> child,
-        uint32_t id, const std::string& paramsString)
-        : Sink{std::move(resultSetDescriptor), operatorType, std::move(child), id, paramsString},
+        uint32_t id, std::unique_ptr<OPPrintInfo> printInfo)
+        : Sink{std::move(resultSetDescriptor), operatorType, std::move(child), id,
+              std::move(printInfo)},
           sharedState{std::move(sharedState)}, info{std::move(info)} {}
 
     inline std::shared_ptr<HashJoinSharedState> getSharedState() const { return sharedState; }
@@ -82,8 +78,8 @@ public:
     void finalize(ExecutionContext* context) override;
 
     inline std::unique_ptr<PhysicalOperator> clone() override {
-        return make_unique<HashJoinBuild>(resultSetDescriptor->copy(), sharedState, info->copy(),
-            children[0]->clone(), id, paramsString);
+        return make_unique<HashJoinBuild>(resultSetDescriptor->copy(), operatorType, sharedState,
+            info->copy(), children[0]->clone(), id, printInfo->copy());
     }
 
 protected:

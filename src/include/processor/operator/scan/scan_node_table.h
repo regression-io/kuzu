@@ -1,60 +1,90 @@
 #pragma once
 
-#include <utility>
-
 #include "processor/operator/scan/scan_table.h"
+#include "storage/predicate/column_predicate.h"
 #include "storage/store/node_table.h"
 
 namespace kuzu {
 namespace processor {
 
+class ScanNodeTableSharedState {
+public:
+    explicit ScanNodeTableSharedState(std::unique_ptr<NodeVectorLevelSemiMask> semiMask)
+        : table{nullptr}, currentCommittedGroupIdx{common::INVALID_NODE_GROUP_IDX},
+          currentUnCommittedGroupIdx{common::INVALID_NODE_GROUP_IDX}, numCommittedNodeGroups{0},
+          semiMask{std::move(semiMask)} {};
+
+    void initialize(transaction::Transaction* transaction, storage::NodeTable* table);
+
+    void nextMorsel(storage::NodeTableScanState& scanState);
+
+    NodeSemiMask* getSemiMask() const { return semiMask.get(); }
+
+private:
+    std::mutex mtx;
+    storage::NodeTable* table;
+    common::node_group_idx_t currentCommittedGroupIdx;
+    common::node_group_idx_t currentUnCommittedGroupIdx;
+    common::node_group_idx_t numCommittedNodeGroups;
+    std::vector<storage::LocalNodeGroup*> localNodeGroups;
+    std::unique_ptr<NodeVectorLevelSemiMask> semiMask;
+};
+
 struct ScanNodeTableInfo {
     storage::NodeTable* table;
     std::vector<common::column_id_t> columnIDs;
+    std::vector<storage::ColumnPredicateSet> columnPredicates;
 
-    ScanNodeTableInfo(storage::NodeTable* table, std::vector<common::column_id_t> columnIDs)
-        : table{table}, columnIDs{std::move(columnIDs)} {}
+    std::unique_ptr<storage::NodeTableScanState> localScanState;
+
+    ScanNodeTableInfo(storage::NodeTable* table, std::vector<common::column_id_t> columnIDs,
+        std::vector<storage::ColumnPredicateSet> columnPredicates)
+        : table{table}, columnIDs{std::move(columnIDs)},
+          columnPredicates{std::move(columnPredicates)} {}
+    EXPLICIT_COPY_DEFAULT_MOVE(ScanNodeTableInfo);
+
+    void initScanState(NodeSemiMask* semiMask);
+
+private:
     ScanNodeTableInfo(const ScanNodeTableInfo& other)
-        : table{other.table}, columnIDs{other.columnIDs} {}
-
-    inline std::unique_ptr<ScanNodeTableInfo> copy() const {
-        return std::make_unique<ScanNodeTableInfo>(*this);
-    }
+        : table{other.table}, columnIDs{other.columnIDs},
+          columnPredicates{copyVector(other.columnPredicates)} {}
 };
 
-class ScanSingleNodeTable : public ScanTable {
-public:
-    ScanSingleNodeTable(std::unique_ptr<ScanNodeTableInfo> info, const DataPos& inVectorPos,
-        std::vector<DataPos> outVectorsPos, std::unique_ptr<PhysicalOperator> child, uint32_t id,
-        const std::string& paramsString)
-        : ScanSingleNodeTable{PhysicalOperatorType::SCAN_NODE_TABLE, std::move(info), inVectorPos,
-              std::move(outVectorsPos), std::move(child), id, paramsString} {}
+class ScanNodeTable final : public ScanTable {
+    static constexpr PhysicalOperatorType type_ = PhysicalOperatorType::SCAN_NODE_TABLE;
 
-    inline void initLocalStateInternal(ResultSet* resultSet,
-        ExecutionContext* executionContext) final {
-        ScanTable::initLocalStateInternal(resultSet, executionContext);
-        readState =
-            std::make_unique<storage::TableReadState>(*inVector, info->columnIDs, outVectors);
+public:
+    ScanNodeTable(ScanTableInfo info, std::vector<ScanNodeTableInfo> nodeInfos,
+        std::vector<std::shared_ptr<ScanNodeTableSharedState>> sharedStates, uint32_t id,
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : ScanTable{type_, std::move(info), id, std::move(printInfo)}, currentTableIdx{0},
+          nodeInfos{std::move(nodeInfos)}, sharedStates{std::move(sharedStates)} {
+        KU_ASSERT(this->nodeInfos.size() == this->sharedStates.size());
     }
+
+    std::vector<NodeSemiMask*> getSemiMasks();
+
+    bool isSource() const override { return true; }
+
+    void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) override;
 
     bool getNextTuplesInternal(ExecutionContext* context) override;
 
-    inline std::unique_ptr<PhysicalOperator> clone() override {
-        return make_unique<ScanSingleNodeTable>(info->copy(), inVectorPos, outVectorsPos,
-            children[0]->clone(), id, paramsString);
+    const ScanNodeTableSharedState& getSharedState(common::idx_t idx) const {
+        KU_ASSERT(idx < sharedStates.size());
+        return *sharedStates[idx];
     }
 
-protected:
-    ScanSingleNodeTable(PhysicalOperatorType operatorType, std::unique_ptr<ScanNodeTableInfo> info,
-        const DataPos& inVectorPos, std::vector<DataPos> outVectorsPos,
-        std::unique_ptr<PhysicalOperator> child, uint32_t id, const std::string& paramsString)
-        : ScanTable{operatorType, inVectorPos, std::move(outVectorsPos), std::move(child), id,
-              paramsString},
-          info{std::move(info)} {}
+    std::unique_ptr<PhysicalOperator> clone() override;
 
 private:
-    std::unique_ptr<ScanNodeTableInfo> info;
-    std::unique_ptr<storage::TableReadState> readState;
+    void initGlobalStateInternal(ExecutionContext* context) override;
+
+private:
+    common::idx_t currentTableIdx;
+    std::vector<ScanNodeTableInfo> nodeInfos;
+    std::vector<std::shared_ptr<ScanNodeTableSharedState>> sharedStates;
 };
 
 } // namespace processor

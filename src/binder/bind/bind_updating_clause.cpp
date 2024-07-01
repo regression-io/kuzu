@@ -79,11 +79,12 @@ std::unique_ptr<BoundUpdatingClause> Binder::bindMergeClause(
     // bindGraphPattern will update scope.
     auto boundGraphPattern = bindGraphPattern(mergeClause.getPatternElementsRef());
     rewriteMatchPattern(boundGraphPattern);
+    auto existenceMark = createVariable("__existence", LogicalType::BOOL());
+    auto distinctMark = createVariable("__distinct", LogicalType::BOOL());
     auto createInfos = bindInsertInfos(boundGraphPattern.queryGraphCollection, patternsScope);
-    auto distinctMark = createVariable("__distinctMark", *LogicalType::BOOL());
-    auto boundMergeClause =
-        std::make_unique<BoundMergeClause>(std::move(boundGraphPattern.queryGraphCollection),
-            std::move(boundGraphPattern.where), std::move(createInfos), std::move(distinctMark));
+    auto boundMergeClause = std::make_unique<BoundMergeClause>(std::move(existenceMark),
+        std::move(distinctMark), std::move(boundGraphPattern.queryGraphCollection),
+        std::move(boundGraphPattern.where), std::move(createInfos));
     if (mergeClause.hasOnMatchSetItems()) {
         for (auto& [lhs, rhs] : mergeClause.getOnMatchSetItemsRef()) {
             auto setPropertyInfo = bindSetPropertyInfo(lhs.get(), rhs.get());
@@ -99,14 +100,13 @@ std::unique_ptr<BoundUpdatingClause> Binder::bindMergeClause(
     return boundMergeClause;
 }
 
-std::vector<BoundInsertInfo> Binder::bindInsertInfos(
-    const QueryGraphCollection& queryGraphCollection,
+std::vector<BoundInsertInfo> Binder::bindInsertInfos(QueryGraphCollection& queryGraphCollection,
     const std::unordered_set<std::string>& patternsInScope_) {
     auto patternsInScope = patternsInScope_;
     std::vector<BoundInsertInfo> result;
-    auto analyzer = QueryGraphLabelAnalyzer(*clientContext);
+    auto analyzer = QueryGraphLabelAnalyzer(*clientContext, true /* throwOnViolate */);
     for (auto i = 0u; i < queryGraphCollection.getNumQueryGraphs(); ++i) {
-        auto queryGraph = queryGraphCollection.getQueryGraph(i);
+        auto queryGraph = queryGraphCollection.getQueryGraphUnsafe(i);
         // Ensure query graph does not violate declared schema.
         analyzer.pruneLabel(*queryGraph);
         for (auto j = 0u; j < queryGraph->getNumQueryNodes(); ++j) {
@@ -141,18 +141,11 @@ std::vector<BoundInsertInfo> Binder::bindInsertInfos(
 }
 
 static void validatePrimaryKeyExistence(const NodeTableCatalogEntry* nodeTableEntry,
-    const NodeExpression& node) {
+    const NodeExpression& node, const expression_vector& defaultExprs) {
     auto primaryKey = nodeTableEntry->getPrimaryKey();
-    if (*primaryKey->getDataType() == *LogicalType::SERIAL()) {
-        if (node.hasPropertyDataExpr(primaryKey->getName())) {
-            throw BinderException(
-                common::stringFormat("The primary key of {} is serial, specifying primary key "
-                                     "value is not allowed in the create statement.",
-                    nodeTableEntry->getName()));
-        }
-        return; // No input needed for SERIAL primary key.
-    }
-    if (!node.hasPropertyDataExpr(primaryKey->getName())) {
+    auto pkeyDefaultExpr = defaultExprs.at(nodeTableEntry->getPrimaryKeyPos());
+    if (!node.hasPropertyDataExpr(primaryKey->getName()) &&
+        ExpressionUtil::isNullLiteral(*pkeyDefaultExpr)) {
         throw BinderException(
             common::stringFormat("Create node {} expects primary key {} as input.", node.toString(),
                 primaryKey->getName()));
@@ -169,8 +162,6 @@ void Binder::bindInsertNode(std::shared_ptr<NodeExpression> node,
     auto tableID = node->getSingleTableID();
     auto tableSchema = catalog->getTableCatalogEntry(clientContext->getTx(), tableID);
     KU_ASSERT(tableSchema->getTableType() == TableType::NODE);
-    validatePrimaryKeyExistence(
-        ku_dynamic_cast<TableCatalogEntry*, NodeTableCatalogEntry*>(tableSchema), *node);
     auto insertInfo = BoundInsertInfo(TableType::NODE, node);
     for (auto& entry : catalog->getRdfGraphEntries(clientContext->getTx())) {
         auto rdfEntry = ku_dynamic_cast<CatalogEntry*, RDFGraphCatalogEntry*>(entry);
@@ -186,6 +177,9 @@ void Binder::bindInsertNode(std::shared_ptr<NodeExpression> node,
     }
     insertInfo.columnDataExprs =
         bindInsertColumnDataExprs(node->getPropertyDataExprRef(), tableSchema->getPropertiesRef());
+    validatePrimaryKeyExistence(
+        ku_dynamic_cast<TableCatalogEntry*, NodeTableCatalogEntry*>(tableSchema), *node,
+        insertInfo.columnDataExprs);
     infos.push_back(std::move(insertInfo));
 }
 
@@ -260,9 +254,9 @@ expression_vector Binder::bindInsertColumnDataExprs(
         if (propertyRhsExpr.contains(property.getName())) {
             rhs = propertyRhsExpr.at(property.getName());
         } else {
-            rhs = expressionBinder.createNullLiteralExpression();
+            rhs = expressionBinder.bindExpression(*property.getDefaultExpr());
         }
-        rhs = ExpressionBinder::implicitCastIfNecessary(rhs, *property.getDataType());
+        rhs = expressionBinder.implicitCastIfNecessary(rhs, property.getDataType());
         result.push_back(std::move(rhs));
     }
     return result;
@@ -279,18 +273,19 @@ std::unique_ptr<BoundUpdatingClause> Binder::bindSetClause(const UpdatingClause&
 
 BoundSetPropertyInfo Binder::bindSetPropertyInfo(parser::ParsedExpression* lhs,
     parser::ParsedExpression* rhs) {
-    auto pattern = expressionBinder.bindExpression(*lhs->getChild(0));
-    auto isNode = ExpressionUtil::isNodePattern(*pattern);
-    auto isRel = ExpressionUtil::isRelPattern(*pattern);
+    auto expr = expressionBinder.bindExpression(*lhs->getChild(0));
+    auto isNode = ExpressionUtil::isNodePattern(*expr);
+    auto isRel = ExpressionUtil::isRelPattern(*expr);
     if (!isNode && !isRel) {
         throw BinderException(
             stringFormat("Cannot set expression {} with type {}. Expect node or rel pattern.",
-                pattern->toString(), expressionTypeToString(pattern->expressionType)));
+                expr->toString(), ExpressionTypeUtil::toString(expr->expressionType)));
     }
-    auto patternExpr = ku_dynamic_cast<Expression*, NodeOrRelExpression*>(pattern.get());
+    auto& patternExpr = expr->constCast<NodeOrRelExpression>();
     auto boundSetItem = bindSetItem(lhs, rhs);
+    // Validate not updating tables belong to RDFGraph.
     auto catalog = clientContext->getCatalog();
-    for (auto tableID : patternExpr->getTableIDs()) {
+    for (auto tableID : patternExpr.getTableIDs()) {
         auto tableName = catalog->getTableCatalogEntry(clientContext->getTx(), tableID)->getName();
         for (auto& rdfGraphEntry : catalog->getRdfGraphEntries(clientContext->getTx())) {
             if (rdfGraphEntry->isParent(tableID)) {
@@ -301,14 +296,23 @@ BoundSetPropertyInfo Binder::bindSetPropertyInfo(parser::ParsedExpression* lhs,
             }
         }
     }
-    return BoundSetPropertyInfo(isNode ? UpdateTableType::NODE : UpdateTableType::REL, pattern,
-        std::move(boundSetItem));
+    if (isNode) {
+        auto info = BoundSetPropertyInfo(TableType::NODE, expr, boundSetItem);
+        auto& property = boundSetItem.first->constCast<PropertyExpression>();
+        for (auto id : patternExpr.getTableIDs()) {
+            if (property.isPrimaryKey(id)) {
+                info.pkExpr = boundSetItem.first;
+            }
+        }
+        return info;
+    }
+    return BoundSetPropertyInfo(TableType::REL, expr, std::move(boundSetItem));
 }
 
 expression_pair Binder::bindSetItem(parser::ParsedExpression* lhs, parser::ParsedExpression* rhs) {
     auto boundLhs = expressionBinder.bindExpression(*lhs);
     auto boundRhs = expressionBinder.bindExpression(*rhs);
-    boundRhs = ExpressionBinder::implicitCastIfNecessary(boundRhs, boundLhs->dataType);
+    boundRhs = expressionBinder.implicitCastIfNecessary(boundRhs, boundLhs->dataType);
     return make_pair(std::move(boundLhs), std::move(boundRhs));
 }
 
@@ -329,31 +333,30 @@ static void validateRdfResourceDeletion(Expression* pattern, main::ClientContext
 
 std::unique_ptr<BoundUpdatingClause> Binder::bindDeleteClause(
     const UpdatingClause& updatingClause) {
-    auto& deleteClause = (DeleteClause&)updatingClause;
+    auto& deleteClause = updatingClause.constCast<DeleteClause>();
+    auto deleteType = deleteClause.getDeleteClauseType();
     auto boundDeleteClause = std::make_unique<BoundDeleteClause>();
     for (auto i = 0u; i < deleteClause.getNumExpressions(); ++i) {
-        auto nodeOrRel = expressionBinder.bindExpression(*deleteClause.getExpression(i));
-        if (ExpressionUtil::isNodePattern(*nodeOrRel)) {
-            validateRdfResourceDeletion(nodeOrRel.get(), clientContext);
-            auto deleteNodeInfo = BoundDeleteInfo(UpdateTableType::NODE, nodeOrRel,
-                deleteClause.getDeleteClauseType());
+        auto pattern = expressionBinder.bindExpression(*deleteClause.getExpression(i));
+        if (ExpressionUtil::isNodePattern(*pattern)) {
+            validateRdfResourceDeletion(pattern.get(), clientContext);
+            auto deleteNodeInfo = BoundDeleteInfo(deleteType, TableType::NODE, pattern);
             boundDeleteClause->addInfo(std::move(deleteNodeInfo));
-        } else if (ExpressionUtil::isRelPattern(*nodeOrRel)) {
-            if (deleteClause.getDeleteClauseType() == DeleteClauseType::DETACH_DELETE) {
+        } else if (ExpressionUtil::isRelPattern(*pattern)) {
+            if (deleteClause.getDeleteClauseType() == DeleteNodeType::DETACH_DELETE) {
                 // TODO(Xiyang): Dummy check here. Make sure this is the correct semantic.
                 throw BinderException("Detach delete on rel tables is not supported.");
             }
-            auto rel = (RelExpression*)nodeOrRel.get();
+            auto rel = pattern->constPtrCast<RelExpression>();
             if (rel->getDirectionType() == RelDirectionType::BOTH) {
                 throw BinderException("Delete undirected rel is not supported.");
             }
-            auto deleteRel =
-                BoundDeleteInfo(UpdateTableType::REL, nodeOrRel, DeleteClauseType::DELETE);
+            auto deleteRel = BoundDeleteInfo(deleteType, TableType::REL, pattern);
             boundDeleteClause->addInfo(std::move(deleteRel));
         } else {
             throw BinderException(stringFormat(
                 "Cannot delete expression {} with type {}. Expect node or rel pattern.",
-                nodeOrRel->toString(), expressionTypeToString(nodeOrRel->expressionType)));
+                pattern->toString(), ExpressionTypeUtil::toString(pattern->expressionType)));
         }
     }
     return boundDeleteClause;

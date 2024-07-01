@@ -3,6 +3,7 @@
 #include "math.h"
 
 #include "common/null_buffer.h"
+#include "common/type_utils.h"
 #include "common/utils.h"
 #include "function/comparison/comparison_functions.h"
 #include "function/hash/vector_hash_functions.h"
@@ -30,12 +31,18 @@ void BaseHashTable::computeAndCombineVecHash(const std::vector<ValueVector*>& un
     for (; startVecIdx < unFlatKeyVectors.size(); startVecIdx++) {
         auto keyVector = unFlatKeyVectors[startVecIdx];
         auto tmpHashResultVector =
-            std::make_unique<ValueVector>(LogicalTypeID::INT64, &memoryManager);
+            std::make_unique<ValueVector>(LogicalType::HASH(), &memoryManager);
         auto tmpHashCombineResultVector =
-            std::make_unique<ValueVector>(LogicalTypeID::INT64, &memoryManager);
-        VectorHashFunction::computeHash(keyVector, tmpHashResultVector.get());
-        VectorHashFunction::combineHash(hashVector.get(), tmpHashResultVector.get(),
-            tmpHashCombineResultVector.get());
+            std::make_unique<ValueVector>(LogicalType::HASH(), &memoryManager);
+        tmpHashResultVector->state = keyVector->state;
+        tmpHashCombineResultVector->state = keyVector->state;
+        VectorHashFunction::computeHash(*keyVector, keyVector->state->getSelVector(),
+            *tmpHashResultVector, tmpHashResultVector->state->getSelVector());
+        tmpHashCombineResultVector->state =
+            !tmpHashResultVector->state->isFlat() ? tmpHashResultVector->state : hashVector->state;
+        VectorHashFunction::combineHash(*hashVector, hashVector->state->getSelVector(),
+            *tmpHashResultVector, tmpHashResultVector->state->getSelVector(),
+            *tmpHashCombineResultVector, tmpHashCombineResultVector->state->getSelVector());
         hashVector = std::move(tmpHashCombineResultVector);
     }
 }
@@ -43,11 +50,17 @@ void BaseHashTable::computeAndCombineVecHash(const std::vector<ValueVector*>& un
 void BaseHashTable::computeVectorHashes(const std::vector<ValueVector*>& flatKeyVectors,
     const std::vector<ValueVector*>& unFlatKeyVectors) {
     if (!flatKeyVectors.empty()) {
-        VectorHashFunction::computeHash(flatKeyVectors[0], hashVector.get());
+        hashVector->state = flatKeyVectors[0]->state;
+        VectorHashFunction::computeHash(*flatKeyVectors[0],
+            flatKeyVectors[0]->state->getSelVector(), *hashVector.get(),
+            hashVector->state->getSelVector());
         computeAndCombineVecHash(flatKeyVectors, 1 /* startVecIdx */);
         computeAndCombineVecHash(unFlatKeyVectors, 0 /* startVecIdx */);
     } else {
-        VectorHashFunction::computeHash(unFlatKeyVectors[0], hashVector.get());
+        hashVector->state = unFlatKeyVectors[0]->state;
+        VectorHashFunction::computeHash(*unFlatKeyVectors[0],
+            unFlatKeyVectors[0]->state->getSelVector(), *hashVector.get(),
+            hashVector->state->getSelVector());
         computeAndCombineVecHash(unFlatKeyVectors, 1 /* startVecIdx */);
     }
 }
@@ -87,20 +100,20 @@ template<>
 
 static bool compareNodeEntry(common::ValueVector* vector, uint32_t vectorPos,
     const uint8_t* entry) {
-    KU_ASSERT(0 == common::StructType::getFieldIdx(&vector->dataType, common::InternalKeyword::ID));
+    KU_ASSERT(0 == common::StructType::getFieldIdx(vector->dataType, common::InternalKeyword::ID));
     auto idVector = common::StructVector::getFieldVector(vector, 0).get();
     return compareEntry<common::internalID_t>(idVector, vectorPos,
         entry + common::NullBuffer::getNumBytesForNullValues(
-                    common::StructType::getNumFields(&vector->dataType)));
+                    common::StructType::getNumFields(vector->dataType)));
 }
 
 static bool compareRelEntry(common::ValueVector* vector, uint32_t vectorPos, const uint8_t* entry) {
-    KU_ASSERT(3 == common::StructType::getFieldIdx(&vector->dataType, common::InternalKeyword::ID));
+    KU_ASSERT(3 == common::StructType::getFieldIdx(vector->dataType, common::InternalKeyword::ID));
     auto idVector = common::StructVector::getFieldVector(vector, 3).get();
     return compareEntry<common::internalID_t>(idVector, vectorPos,
         entry + sizeof(common::internalID_t) * 2 + sizeof(common::ku_string_t) +
             common::NullBuffer::getNumBytesForNullValues(
-                common::StructType::getNumFields(&vector->dataType)));
+                common::StructType::getNumFields(vector->dataType)));
 }
 
 template<>
@@ -114,7 +127,7 @@ template<>
         return compareRelEntry(vector, vectorPos, entry);
     }
     case LogicalTypeID::STRUCT: {
-        auto numFields = StructType::getNumFields(&vector->dataType);
+        auto numFields = StructType::getNumFields(vector->dataType);
         auto entryToCompare = entry + NullBuffer::getNumBytesForNullValues(numFields);
         for (auto i = 0u; i < numFields; i++) {
             auto isNullInEntry = NullBuffer::isNull(entry, i);
@@ -150,7 +163,34 @@ void BaseHashTable::initSlotConstant(uint64_t numSlotsPerBlock_) {
     numSlotsPerBlock = numSlotsPerBlock_;
     numSlotsPerBlockLog2 = std::log2(numSlotsPerBlock);
     slotIdxInBlockMask =
-        common::BitmaskUtils::all1sMaskForLeastSignificantBits(numSlotsPerBlockLog2);
+        common::BitmaskUtils::all1sMaskForLeastSignificantBits<uint64_t>(numSlotsPerBlockLog2);
+}
+
+// ! This function will only be used by distinct aggregate and hashJoin, which assumes that all
+// keyVectors are flat.
+bool BaseHashTable::matchFlatVecWithEntry(const std::vector<common::ValueVector*>& keyVectors,
+    const uint8_t* entry) {
+    for (auto i = 0u; i < keyVectors.size(); i++) {
+        auto keyVector = keyVectors[i];
+        KU_ASSERT(keyVector->state->isFlat());
+        KU_ASSERT(keyVector->state->getSelVector().getSelSize() == 1);
+        auto pos = keyVector->state->getSelVector()[0];
+        auto isKeyVectorNull = keyVector->isNull(pos);
+        auto isEntryKeyNull = factorizedTable->isNonOverflowColNull(
+            entry + factorizedTable->getTableSchema()->getNullMapOffset(), i);
+        // If either key or entry is null, we shouldn't compare the value of keyVector and
+        // entry.
+        if (isKeyVectorNull && isEntryKeyNull) {
+            continue;
+        } else if (isKeyVectorNull != isEntryKeyNull) {
+            return false;
+        }
+        if (!compareEntryFuncs[i](keyVector, pos,
+                entry + factorizedTable->getTableSchema()->getColOffset(i))) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void BaseHashTable::initCompareFuncs() {
@@ -163,7 +203,7 @@ void BaseHashTable::initCompareFuncs() {
 void BaseHashTable::initTmpHashVector() {
     hashState = std::make_shared<DataChunkState>();
     hashState->setToFlat();
-    hashVector = std::make_unique<ValueVector>(*LogicalType::HASH(), &memoryManager);
+    hashVector = std::make_unique<ValueVector>(LogicalType::HASH(), &memoryManager);
     hashVector->state = hashState;
 }
 

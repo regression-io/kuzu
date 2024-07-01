@@ -15,12 +15,12 @@ void CountFunction::updateAll(uint8_t* state_, ValueVector* input, uint64_t mult
     MemoryManager* /*memoryManager*/) {
     auto state = reinterpret_cast<CountState*>(state_);
     if (input->hasNoNullsGuarantee()) {
-        for (auto i = 0u; i < input->state->selVector->selectedSize; ++i) {
+        for (auto i = 0u; i < input->state->getSelVector().getSelSize(); ++i) {
             state->count += multiplicity;
         }
     } else {
-        for (auto i = 0u; i < input->state->selVector->selectedSize; ++i) {
-            auto pos = input->state->selVector->selectedPositions[i];
+        for (auto i = 0u; i < input->state->getSelVector().getSelSize(); ++i) {
+            auto pos = input->state->getSelVector()[i];
             if (!input->isNull(pos)) {
                 state->count += multiplicity;
             }
@@ -41,7 +41,7 @@ void CountFunction::paramRewriteFunc(binder::expression_vector& arguments) {
 
 function_set CountFunction::getFunctionSet() {
     function_set result;
-    for (auto& type : LogicalTypeUtils::getAllValidLogicTypes()) {
+    for (auto& type : LogicalTypeUtils::getAllValidLogicTypeIDs()) {
         for (auto isDistinct : std::vector<bool>{true, false}) {
             result.push_back(AggregateFunctionUtil::getAggFunc<CountFunction>(name, type,
                 LogicalTypeID::INT64, isDistinct, paramRewriteFunc));

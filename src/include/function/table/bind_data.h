@@ -20,11 +20,17 @@ struct TableFuncBindData {
         std::vector<std::string> columnNames)
         : columnTypes{std::move(columnTypes)}, columnNames{std::move(columnNames)} {}
     TableFuncBindData(const TableFuncBindData& other)
-        : columnTypes{other.columnTypes}, columnNames{other.columnNames} {}
+        : columnTypes{common::LogicalType::copy(other.columnTypes)},
+          columnNames{other.columnNames} {}
 
     virtual ~TableFuncBindData() = default;
 
     virtual std::unique_ptr<TableFuncBindData> copy() const = 0;
+
+    template<class TARGET>
+    const TARGET* constPtrCast() const {
+        return common::ku_dynamic_cast<const TableFuncBindData*, const TARGET*>(this);
+    }
 };
 
 struct ScanBindData : public TableFuncBindData {

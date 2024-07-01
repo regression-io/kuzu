@@ -12,11 +12,6 @@ using ::testing::Test;
 namespace kuzu {
 namespace testing {
 
-enum class TransactionTestType : uint8_t {
-    NORMAL_EXECUTION = 0,
-    RECOVERY = 1,
-};
-
 static void removeDir(const std::string& dir) {
     if (std::filesystem::exists(dir)) {
         std::error_code removeErrorCode;
@@ -43,6 +38,16 @@ public:
 
     void TearDown() override { removeDir(databasePath); }
 
+    void createDBAndConn();
+
+    // multiple conns test
+    void createDB();
+    void createConns(const std::set<std::string>& connNames);
+
+    void initGraph() { initGraph(getInputDir()); }
+    void initGraph(std::string datasetDir);
+
+    void setIEDatabasePath(std::string filePath) { ieDBPath = filePath; }
     void removeIEDBPath() const {
         if (ieDBPath != "") {
             auto lastSlashPos = ieDBPath.rfind('/');
@@ -50,18 +55,6 @@ public:
             removeDir(deletePath);
         }
     }
-
-    void createDBAndConn();
-
-    // multiple conns test
-    void createDB();
-    void createConns(const std::set<std::string>& connNames);
-
-    void initGraph();
-
-    void commitOrRollbackConnection(bool isCommit, TransactionTestType transactionTestType) const;
-
-    void setIEDatabasePath(std::string filePath) { ieDBPath = filePath; }
 
 protected:
     // Static functions to access Database's non-public properties/interfaces.
@@ -81,17 +74,7 @@ protected:
         return database.vfs.get();
     }
     static inline uint64_t getBMSize(main::Database& database) {
-        return database.systemConfig.bufferPoolSize;
-    }
-    static inline storage::WAL* getWAL(main::Database& database) { return database.wal.get(); }
-    static inline void commitAndCheckpointOrRollback(main::Database& database,
-        transaction::Transaction* writeTransaction, bool isCommit,
-        bool skipCheckpointForTestingRecovery = false) {
-        if (isCommit) {
-            database.commit(writeTransaction, skipCheckpointForTestingRecovery);
-        } else {
-            database.rollback(writeTransaction, skipCheckpointForTestingRecovery);
-        }
+        return database.dbConfig.bufferPoolSize;
     }
     static inline processor::QueryProcessor* getQueryProcessor(main::Database& database) {
         return database.queryProcessor.get();
@@ -110,9 +93,6 @@ protected:
         return typeID == common::LogicalTypeID::STRING || typeID == common::LogicalTypeID::LIST;
     }
 
-    void commitOrRollbackConnectionAndInitDBIfNecessary(bool isCommit,
-        TransactionTestType transactionTestType);
-
     inline std::string getTestGroupAndName() {
         const ::testing::TestInfo* const testInfo =
             ::testing::UnitTest::GetInstance()->current_test_info();
@@ -120,16 +100,13 @@ protected:
     }
 
 private:
-    void setDatabasePath() {
-        databasePath = TestHelper::appendKuzuRootPath(
-            TestHelper::TMP_TEST_DIR + getTestGroupAndName() + TestHelper::getMillisecondsSuffix());
-    }
+    void setDatabasePath() { databasePath = TestHelper::getTempDir(getTestGroupAndName()); }
 
 public:
     std::string databasePath;
     std::unique_ptr<main::SystemConfig> systemConfig;
     std::unique_ptr<main::Database> database;
-    // for normal conn; if it is null, respresents multiple conns, need to use connMap
+    // for normal conn; if it is null, represents multiple conns, need to use connMap
     std::unique_ptr<main::Connection> conn;
     // for multiple conns
     std::unordered_map<std::string, std::unique_ptr<main::Connection>> connMap;

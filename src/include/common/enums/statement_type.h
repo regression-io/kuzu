@@ -15,28 +15,16 @@ enum class StatementType : uint8_t {
     STANDALONE_CALL = 21,
     EXPLAIN = 22,
     CREATE_MACRO = 23,
-    COMMENT_ON = 24,
     TRANSACTION = 30,
     EXTENSION = 31,
     EXPORT_DATABASE = 32,
     IMPORT_DATABASE = 33,
     ATTACH_DATABASE = 34,
     DETACH_DATABASE = 35,
-};
-
-struct StatementTypeUtils {
-    static bool allowActiveTransaction(StatementType statementType) {
-        switch (statementType) {
-        case StatementType::CREATE_TABLE:
-        case StatementType::DROP_TABLE:
-        case StatementType::ALTER:
-        case StatementType::CREATE_MACRO:
-        case StatementType::COPY_FROM:
-            return false;
-        default:
-            return true;
-        }
-    }
+    USE_DATABASE = 36,
+    CREATE_SEQUENCE = 37,
+    DROP_SEQUENCE = 38,
+    CREATE_TYPE = 39,
 };
 
 } // namespace common

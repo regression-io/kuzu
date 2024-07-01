@@ -4,6 +4,7 @@ add_subdirectory(data_chunk)
 add_subdirectory(enums)
 add_subdirectory(exception)
 add_subdirectory(serializer)
+add_subdirectory(signal)
 add_subdirectory(task_system)
 add_subdirectory(types)
 add_subdirectory(vector)
@@ -15,13 +16,13 @@ add_library(kuzu_common
         constants.cpp
         expression_type.cpp
         in_mem_overflow_buffer.cpp
-        logging_level_utils.cpp
         md5.cpp
         metric.cpp
         null_mask.cpp
         profiler.cpp
         type_utils.cpp
         utils.cpp
+        sha256.cpp
         string_utils.cpp
         system_message.cpp
         random_engine.cpp

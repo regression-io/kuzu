@@ -1,4 +1,3 @@
--GROUP CopyPartialColumnsTest
 -DATASET CSV empty
 
 --
@@ -44,6 +43,40 @@ Binder exception: Number of columns mismatch. Expected 7 but got 9.
 -STATEMENT COPY knows3 (meetTime, date, validInterval, comments, summary, dummy) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
 ---- error
 Binder exception: Table knows3 does not contain column dummy.
+
+-LOG PartialColumnsDefault
+-STATEMENT CREATE REL TABLE knows4 (FROM person TO person, date DATE, meetTime TIMESTAMP, 
+    validInterval INTERVAL, comments STRING[], summary STRUCT(locations STRING[],
+    transfer STRUCT(day DATE, amount INT64[])), notes UNION(firstmet DATE, type INT16, comment STRING), 
+    someMap MAP(STRING, STRING),
+    nullDateColumn DATE DEFAULT date('2022-06-06'), nullBooleanColumn BOOLEAN DEFAULT true, 
+    nullStringColumn STRING DEFAULT 'default', nullDoubleColumn DOUBLE DEFAULT 1.0, 
+    nullInt64Column INT64 DEFAULT 10, nullListOfInt INT64[] DEFAULT [1, 2, 3], 
+    nullTimestampColumn TIMESTAMP DEFAULT timestamp("1970-01-01 00:00:00.004666-10"),
+    MANY_MANY);
+---- ok
+-STATEMENT COPY knows4 (date, meetTime, validInterval, comments, summary, notes, someMap) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
+---- ok
+-STATEMENT MATCH (p:person)-[e:knows4]->(:person) WHERE p.ID = 2 RETURN e.*;
+---- 3
+1950-05-14|1946-08-25 19:07:22|00:23:00|[fwehu9h9832wewew,23u9h989sdfsss]|{locations: ['paris'], transfer: {day: 2011-05-01, amount: [2000,5340]}}|cool stuff found||2022-06-06|True|default|1.000000|10|[1,2,3]|1970-01-01 10:00:00.004666
+1950-05-14|2012-12-11 20:07:22|20 years 30 days 48:00:00|[fwh9y81232uisuiehuf,ewnuihxy8dyf232]|{locations: ['vancouver'], transfer: {day: 2020-01-01, amount: [120,50]}}|matthew perry||2022-06-06|True|default|1.000000|10|[1,2,3]|1970-01-01 10:00:00.004666
+2021-06-30|1946-08-25 19:07:22|10 years 5 months 13:00:00.000024|[2huh9y89fsfw23,23nsihufhw723]|{locations: ['paris'], transfer: {day: 2000-01-01, amount: [20,5000]}}|4||2022-06-06|True|default|1.000000|10|[1,2,3]|1970-01-01 10:00:00.004666
+
+-LOG PartialColumnsSequenceSerial
+-STATEMENT CREATE SEQUENCE seq;
+---- ok
+-STATEMENT CREATE REL TABLE knows5 (FROM person TO person, date DATE, meetTime TIMESTAMP, 
+    validInterval INTERVAL, comments STRING[], summary STRUCT(locations STRING[],
+    transfer STRUCT(day DATE, amount INT64[])), notes UNION(firstmet DATE, type INT16, comment STRING), 
+    someMap MAP(STRING, STRING), seqColumn INT64 DEFAULT nextval('seq'), serColumn SERIAL,
+    MANY_MANY);
+---- ok
+-STATEMENT COPY knows5 (date, meetTime, validInterval, comments, summary, notes, someMap) FROM "${KUZU_ROOT_DIRECTORY}/dataset/tinysnb/eKnows.csv" ;
+---- ok
+-STATEMENT MATCH (p:person)-[e:knows5]->(:person) RETURN sum(e.seqColumn), sum(e.serColumn);
+---- 1
+21|15
 
 -CASE NodePartialColumnsTest
 -LOG AllPartialColumns
@@ -152,13 +185,17 @@ Binder exception: Detect duplicate column name booleanColumn during COPY.
 -STATEMENT COPY tableOfTypes10 (id, int64Column, doubleColumn, booleanColumn, dateColumn, timestampColumn, stringColumn,
     listOfInt) FROM "${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/csv/types_50k.csv" (HEADER=true);
 ---- ok
--STATEMENT MATCH (row:tableOfTypes10) WHERE row.id >= 20 AND row.id <= 24 RETURN row.*;
+-STATEMENT MATCH (row:tableOfTypes10) WHERE row.id >= 20 AND row.id <= 24 RETURN 
+    row.id, row.int64Column, row.doubleColumn, row.booleanColumn, row.dateColumn, row.timestampColumn, row.stringColumn, row.listOfInt;
 ---- 5
-20|0|57.579280|True|1731-09-26|1731-09-26 03:30:08|OdM|[93,,86,37]|20
-21|7|64.630960|False|1307-01-26|1307-01-26 03:31:08|AjbxHQThEtDDlOjbzMjCQSXlvGQEjcFLykESrnFHwPKX|[]|21
-22|71|37.963386|True|1455-07-26|1455-07-26 03:07:03|dRvHHdyNXYfSUcicaxBoQEKQUfgex|[72,,45,,81]|22
-23|58|42.774957|False|1181-10-16|1181-10-16 18:19:43|ISImRVpUjynGMFRQyYmeIUVjM||23
-24|75|53.813224|False|1942-10-24|1942-10-24 09:30:16|naDlQ|[97,91,28,26,]|24
+20|0|57.579280|True|1731-09-26|1731-09-26 03:30:08|OdM|[93,,86,37]
+21|7|64.630960|False|1307-01-26|1307-01-26 03:31:08|AjbxHQThEtDDlOjbzMjCQSXlvGQEjcFLykESrnFHwPKX|[]
+22|71|37.963386|True|1455-07-26|1455-07-26 03:07:03|dRvHHdyNXYfSUcicaxBoQEKQUfgex|[72,,45,,81]
+23|58|42.774957|False|1181-10-16|1181-10-16 18:19:43|ISImRVpUjynGMFRQyYmeIUVjM|
+24|75|53.813224|False|1942-10-24|1942-10-24 09:30:16|naDlQ|[97,91,28,26,]
+-STATEMENT MATCH (row:tableOfTypes10) RETURN sum(row.serialPk);
+---- 1
+1249925001
 
 -LOG PartialCopyException5
 -STATEMENT CREATE NODE TABLE tableOfTypes11 (id INT64, int64Column INT64, doubleColumn DOUBLE, booleanColumn BOOLEAN,
@@ -184,7 +221,7 @@ Copy exception: Found NULL, which violates the non-null constraint of the primar
 ---- ok
 -STATEMENT COPY tableOfTypes12 (id, int64Column, doubleColumn, booleanColumn, dateColumn, stringColumn, listOfInt64,
 listOfString, listOfListOfInt64, structColumn) FROM
-"${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/parquet/types_50k*.parquet" (HEADER=true);
+"${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/parquet/types_50k*.parquet";
 ---- ok
 -STATEMENT MATCH (row:tableOfTypes12) WHERE row.id >= 20 AND row.id <= 24 RETURN row.*;
 ---- 5
@@ -205,6 +242,42 @@ listOfString, listOfListOfInt64, structColumn) FROM
 ---- ok
 -STATEMENT COPY tableOfTypes12 (id, dateColumn, doubleColumn, booleanColumn, int64Column, stringColumn, listOfInt64,
 listOfString, listOfListOfInt64, structColumn) FROM
-"${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/parquet/types_50k*.parquet" (HEADER=true);
+"${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/parquet/types_50k*.parquet";
 ---- error
 Binder exception: Column `dateColumn` type mismatch. Expected DATE but got INT64.
+
+-LOG PartialColumnsDefault
+-STATEMENT CREATE NODE TABLE tableOfTypes14 (nullDateColumn DATE DEFAULT date('2022-06-06'), booleanColumn BOOLEAN, 
+                                            stringColumn STRING, int64Column INT64, nullBooleanColumn BOOLEAN DEFAULT true, 
+                                            nullStringColumn STRING DEFAULT 'default', timestampColumn TIMESTAMP, 
+                                            nullDoubleColumn DOUBLE DEFAULT 1.0, nullInt64Column INT64 DEFAULT 10,
+                                            dateColumn DATE, nullListOfInt INT64[] DEFAULT [1, 2, 3], 
+                                            doubleColumn DOUBLE, listOfInt INT64[], id INT64, 
+                                            nullTimestampColumn TIMESTAMP DEFAULT timestamp("1970-01-01 00:00:00.004666-10"),
+                                            PRIMARY KEY (id));
+---- ok
+-STATEMENT COPY tableOfTypes14 (id, int64Column, doubleColumn, booleanColumn, dateColumn, timestampColumn, stringColumn,
+    listOfInt) FROM "${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/csv/types_50k.csv" (HEADER=true);
+---- ok
+-STATEMENT MATCH (row:tableOfTypes14) WHERE row.id >= 20 AND row.id <= 24 RETURN row.*;
+---- 5
+2022-06-06|False|AjbxHQThEtDDlOjbzMjCQSXlvGQEjcFLykESrnFHwPKX|7|True|default|1307-01-26 03:31:08|1.000000|10|1307-01-26|[1,2,3]|64.630960|[]|21|1970-01-01 10:00:00.004666
+2022-06-06|False|ISImRVpUjynGMFRQyYmeIUVjM|58|True|default|1181-10-16 18:19:43|1.000000|10|1181-10-16|[1,2,3]|42.774957||23|1970-01-01 10:00:00.004666
+2022-06-06|False|naDlQ|75|True|default|1942-10-24 09:30:16|1.000000|10|1942-10-24|[1,2,3]|53.813224|[97,91,28,26,]|24|1970-01-01 10:00:00.004666
+2022-06-06|True|OdM|0|True|default|1731-09-26 03:30:08|1.000000|10|1731-09-26|[1,2,3]|57.579280|[93,,86,37]|20|1970-01-01 10:00:00.004666
+2022-06-06|True|dRvHHdyNXYfSUcicaxBoQEKQUfgex|71|True|default|1455-07-26 03:07:03|1.000000|10|1455-07-26|[1,2,3]|37.963386|[72,,45,,81]|22|1970-01-01 10:00:00.004666
+
+-LOG PartialColumnsDefaultSequence
+-STATEMENT CREATE SEQUENCE seq;
+---- ok
+-STATEMENT CREATE NODE TABLE tableOfTypes15 (id INT64, int64Column INT64, doubleColumn DOUBLE, booleanColumn BOOLEAN,
+                                            dateColumn DATE, timestampColumn TIMESTAMP, stringColumn STRING,
+                                            listOfInt INT64[], seqColumn INT64 DEFAULT nextval('seq'),
+                                            PRIMARY KEY (id));
+---- ok
+-STATEMENT COPY tableOfTypes15 (id, int64Column, doubleColumn, booleanColumn, dateColumn, timestampColumn, stringColumn,
+    listOfInt) FROM "${KUZU_ROOT_DIRECTORY}/dataset/copy-test/node/csv/types_50k.csv" (HEADER=true);
+---- ok
+-STATEMENT MATCH (row:tableOfTypes15) RETURN sum(row.seqColumn);
+---- 1
+1249975000

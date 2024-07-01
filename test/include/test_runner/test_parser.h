@@ -11,13 +11,14 @@ namespace testing {
 enum class TokenType {
     // header
     DATASET,
-    GROUP,
     SKIP,
     SKIP_MUSL,
     SKIP_32BIT,
     // body
     BUFFER_POOL_SIZE,
     CASE,
+    CHECK_COLUMN_NAMES,
+    CHECK_PRECISION,
     CHECK_ORDER,
     COMMIT,
     DEFINE,
@@ -46,8 +47,8 @@ enum class TokenType {
     REMOVE_FILE
 };
 
-const std::unordered_map<std::string, TokenType> tokenMap = {{"-GROUP", TokenType::GROUP},
-    {"-DATASET", TokenType::DATASET}, {"-CASE", TokenType::CASE}, {"-COMMIT", TokenType::COMMIT},
+const std::unordered_map<std::string, TokenType> tokenMap = {{"-DATASET", TokenType::DATASET},
+    {"-CASE", TokenType::CASE}, {"-COMMIT", TokenType::COMMIT},
     {"-CHECK_ORDER", TokenType::CHECK_ORDER}, {"-ENCODED_JOIN", TokenType::ENCODED_JOIN},
     {"-LOG", TokenType::LOG}, {"-DEFINE_STATEMENT_BLOCK", TokenType::DEFINE_STATEMENT_BLOCK},
     {"-ENUMERATE", TokenType::ENUMERATE}, {"-PARALLELISM", TokenType::PARALLELISM},
@@ -61,7 +62,8 @@ const std::unordered_map<std::string, TokenType> tokenMap = {{"-GROUP", TokenTyp
     {"-CREATE_CONNECTION", TokenType::CREATE_CONNECTION}, {"]", TokenType::END_OF_STATEMENT_BLOCK},
     {"----", TokenType::RESULT}, {"--", TokenType::SEPARATOR}, {"#", TokenType::EMPTY},
     {"-SET", TokenType::SET}, {"-IMPORT_DATABASE", TokenType::IMPORT_DATABASE},
-    {"-REMOVE_FILE", TokenType::REMOVE_FILE}};
+    {"-REMOVE_FILE", TokenType::REMOVE_FILE}, {"-CHECK_PRECISION", TokenType::CHECK_PRECISION},
+    {"-CHECK_COLUMN_NAMES", TokenType::CHECK_COLUMN_NAMES}};
 
 class LogicToken {
 public:
@@ -90,9 +92,11 @@ private:
 
     void openFile();
     void tokenize();
+    void genGroupName();
     void parseHeader();
     void parseBody();
-    void extractExpectedResult(TestStatement* statement);
+    void extractExpectedResults(TestStatement* statement);
+    TestQueryResult extractExpectedResultFromToken(bool checkOutputOrder);
     void extractStatementBlock();
     void extractDataset();
     void addStatementBlock(const std::string& blockName, const std::string& testGroupName);
@@ -129,8 +133,7 @@ private:
         const std::string& testCaseName);
     TestStatement* addNewStatement(std::string& name);
 
-    const std::string exportDBPath = TestHelper::appendKuzuRootPath(
-        TestHelper::TMP_TEST_DIR + std::string("export_db") + TestHelper::getMillisecondsSuffix());
+    const std::string exportDBPath = TestHelper::getTempDir("export_db");
     // Any value here will be replaced inside the .test files
     // in queries/statements and expected error message.
     // Example: ${KUZU_ROOT_DIRECTORY} will be replaced by

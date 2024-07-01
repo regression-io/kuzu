@@ -1,4 +1,3 @@
--GROUP DeleteRelTest
 -DATASET CSV rel-update-tests
 --
 
@@ -13,6 +12,9 @@
 ---- ok
 -STATEMENT MATCH (p:person)-[e:knows]->(:person) WHERE p.ID = 0 RETURN e.length
 ---- 0
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE deleteAllRelsFromSmallListCommitRecovery
 -STATEMENT BEGIN TRANSACTION
@@ -26,6 +28,9 @@
 ---- ok
 -STATEMENT MATCH (p:person)-[e:knows]->(:person) WHERE p.ID = 0 RETURN e.length
 ---- 0
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE deleteAllRelsFromSmallListRollbackNormalExecution
 -STATEMENT BEGIN TRANSACTION
@@ -39,6 +44,9 @@
 -STATEMENT MATCH (p:person)-[e:knows]->(:person) WHERE p.ID = 0 RETURN e.length
 ---- 2300
 <FILE>:delete_rels.txt
+-STATEMENT COMMIT;
+---- ok
+
 
 -CASE deleteAllRelsFromSmallListRollbackRecovery
 -STATEMENT BEGIN TRANSACTION
@@ -53,3 +61,5 @@
 -STATEMENT MATCH (p:person)-[e:knows]->(:person) WHERE p.ID = 0 RETURN e.length
 ---- 2300
 <FILE>:delete_rels.txt
+-STATEMENT COMMIT;
+---- ok

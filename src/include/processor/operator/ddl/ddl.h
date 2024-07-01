@@ -8,12 +8,12 @@ namespace processor {
 class DDL : public PhysicalOperator {
 public:
     DDL(PhysicalOperatorType operatorType, const DataPos& outputPos, uint32_t id,
-        const std::string& paramsString)
-        : PhysicalOperator{operatorType, id, paramsString}, outputPos{outputPos},
+        std::unique_ptr<OPPrintInfo> printInfo)
+        : PhysicalOperator{operatorType, id, std::move(printInfo)}, outputPos{outputPos},
           outputVector{nullptr}, hasExecuted{false} {}
 
     bool isSource() const final { return true; }
-    bool canParallel() const final { return false; }
+    bool isParallel() const final { return false; }
 
     void initLocalStateInternal(ResultSet* resultSet, ExecutionContext* context) override;
 

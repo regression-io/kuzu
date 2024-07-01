@@ -6,36 +6,33 @@
 #include "common/serializer/buffered_file.h"
 #include "common/serializer/deserializer.h"
 #include "common/serializer/serializer.h"
-#include "storage/storage_structure/disk_array.h"
-#include "storage/store/column_chunk.h"
+#include "storage/storage_structure//disk_array_collection.h"
+#include "storage/store/string_column.h"
 
 using namespace kuzu::common;
 
 namespace kuzu {
 namespace storage {
 
-TablesStatistics::TablesStatistics(BMFileHandle* metadataFH, BufferManager* bufferManager, WAL* wal,
-    common::VirtualFileSystem* vfs)
-    : metadataFH{metadataFH}, bufferManager{bufferManager}, vfs{vfs}, wal{wal}, isUpdated{false} {
+TablesStatistics::TablesStatistics(DiskArrayCollection& metadataDAC, BufferManager* bufferManager,
+    WAL* wal)
+    : metadataDAC{metadataDAC}, bufferManager{bufferManager}, wal{wal}, isUpdated{false} {
     readOnlyVersion = std::make_unique<TablesStatisticsContent>();
 }
 
-void TablesStatistics::readFromFile() {
-    readFromFile(FileVersionType::ORIGINAL);
-}
-
-void TablesStatistics::readFromFile(FileVersionType fileVersionType) {
-    auto filePath = getTableStatisticsFilePath(wal->getDirectory(), fileVersionType);
-    auto deser =
-        Deserializer(std::make_unique<BufferedFileReader>(vfs->openFile(filePath, O_RDONLY)));
+void TablesStatistics::readFromFile(const std::string& dbPath, FileVersionType fileVersionType,
+    VirtualFileSystem* fs, main::ClientContext* context) {
+    auto filePath = getTableStatisticsFilePath(dbPath, fileVersionType, fs);
+    auto deser = Deserializer(
+        std::make_unique<BufferedFileReader>(fs->openFile(filePath, O_RDONLY, context)));
     deser.deserializeUnorderedMap(readOnlyVersion->tableStatisticPerTable);
 }
 
 void TablesStatistics::saveToFile(const std::string& directory, FileVersionType fileVersionType,
-    transaction::TransactionType transactionType) {
-    auto filePath = getTableStatisticsFilePath(directory, fileVersionType);
+    transaction::TransactionType transactionType, VirtualFileSystem* fs) {
+    auto filePath = getTableStatisticsFilePath(directory, fileVersionType, fs);
     auto ser = Serializer(
-        std::make_unique<BufferedFileWriter>(vfs->openFile(filePath, O_WRONLY | O_CREAT)));
+        std::make_unique<BufferedFileWriter>(fs->openFile(filePath, O_WRONLY | O_CREAT)));
     auto& tablesStatisticsContent = (transactionType == transaction::TransactionType::READ_ONLY ||
                                         readWriteVersion == nullptr) ?
                                         readOnlyVersion :
@@ -51,66 +48,62 @@ void TablesStatistics::initTableStatisticsForWriteTrx() {
 void TablesStatistics::initTableStatisticsForWriteTrxNoLock() {
     if (readWriteVersion == nullptr) {
         readWriteVersion = std::make_unique<TablesStatisticsContent>();
+        KU_ASSERT(readOnlyVersion);
         for (auto& [tableID, tableStatistic] : readOnlyVersion->tableStatisticPerTable) {
             readWriteVersion->tableStatisticPerTable[tableID] = tableStatistic->copy();
         }
     }
 }
 
-PropertyStatistics& TablesStatistics::getPropertyStatisticsForTable(
-    const transaction::Transaction& transaction, table_id_t tableID, property_id_t propertyID) {
-    if (transaction.isReadOnly()) {
-        KU_ASSERT(readOnlyVersion->tableStatisticPerTable.contains(tableID));
-        auto tableStatistics = readOnlyVersion->tableStatisticPerTable.at(tableID).get();
-        return tableStatistics->getPropertyStatistics(propertyID);
-    } else {
-        initTableStatisticsForWriteTrx();
-        KU_ASSERT(readWriteVersion && readWriteVersion->tableStatisticPerTable.contains(tableID));
-        auto tableStatistics = readWriteVersion->tableStatisticPerTable.at(tableID).get();
-        return tableStatistics->getPropertyStatistics(propertyID);
-    }
-}
-
-void TablesStatistics::setPropertyStatisticsForTable(table_id_t tableID, property_id_t propertyID,
-    PropertyStatistics stats) {
-    initTableStatisticsForWriteTrx();
-    KU_ASSERT(readWriteVersion && readWriteVersion->tableStatisticPerTable.contains(tableID));
-    setToUpdated();
-    auto tableStatistics = readWriteVersion->tableStatisticPerTable.at(tableID).get();
-    tableStatistics->setPropertyStatistics(propertyID, stats);
-}
-
 std::unique_ptr<MetadataDAHInfo> TablesStatistics::createMetadataDAHInfo(
-    const LogicalType& dataType, BMFileHandle& metadataFH, BufferManager* bm, WAL* wal) {
+    const LogicalType& dataType, DiskArrayCollection& metadataDAC) {
     auto metadataDAHInfo = std::make_unique<MetadataDAHInfo>();
-    metadataDAHInfo->dataDAHPageIdx =
-        InMemDiskArray<ColumnChunkMetadata>::addDAHPageToFile(metadataFH, bm, wal);
-    metadataDAHInfo->nullDAHPageIdx =
-        InMemDiskArray<ColumnChunkMetadata>::addDAHPageToFile(metadataFH, bm, wal);
+    metadataDAHInfo->dataDAHIdx = metadataDAC.addDiskArray();
+    metadataDAHInfo->nullDAHIdx = metadataDAC.addDiskArray();
     switch (dataType.getPhysicalType()) {
     case PhysicalTypeID::STRUCT: {
-        auto fields = StructType::getFields(&dataType);
+        const auto& fields = StructType::getFields(dataType);
         metadataDAHInfo->childrenInfos.resize(fields.size());
         for (auto i = 0u; i < fields.size(); i++) {
             metadataDAHInfo->childrenInfos[i] =
-                createMetadataDAHInfo(*fields[i]->getType(), metadataFH, bm, wal);
+                createMetadataDAHInfo(fields[i].getType(), metadataDAC);
         }
     } break;
     case PhysicalTypeID::LIST: {
         metadataDAHInfo->childrenInfos.push_back(
-            createMetadataDAHInfo(*LogicalType::UINT32(), metadataFH, bm, wal));
+            createMetadataDAHInfo(LogicalType::UINT32(), metadataDAC));
         metadataDAHInfo->childrenInfos.push_back(
-            createMetadataDAHInfo(*ListType::getChildType(&dataType), metadataFH, bm, wal));
+            createMetadataDAHInfo(ListType::getChildType(dataType), metadataDAC));
+        metadataDAHInfo->childrenInfos.push_back(
+            createMetadataDAHInfo(LogicalType::UINT64(), metadataDAC));
+    } break;
+    case PhysicalTypeID::ARRAY: {
+        metadataDAHInfo->childrenInfos.push_back(
+            createMetadataDAHInfo(LogicalType::UINT32(), metadataDAC));
+        metadataDAHInfo->childrenInfos.push_back(
+            createMetadataDAHInfo(ArrayType::getChildType(dataType), metadataDAC));
+        metadataDAHInfo->childrenInfos.push_back(
+            createMetadataDAHInfo(LogicalType::UINT64(), metadataDAC));
     } break;
     case PhysicalTypeID::STRING: {
+        metadataDAHInfo->childrenInfos.resize(StringColumn::CHILD_STATE_COUNT);
+
         auto dataMetadataDAHInfo = std::make_unique<MetadataDAHInfo>();
         auto offsetMetadataDAHInfo = std::make_unique<MetadataDAHInfo>();
-        dataMetadataDAHInfo->dataDAHPageIdx =
-            InMemDiskArray<ColumnChunkMetadata>::addDAHPageToFile(metadataFH, bm, wal);
-        offsetMetadataDAHInfo->dataDAHPageIdx =
-            InMemDiskArray<ColumnChunkMetadata>::addDAHPageToFile(metadataFH, bm, wal);
-        metadataDAHInfo->childrenInfos.push_back(std::move(dataMetadataDAHInfo));
-        metadataDAHInfo->childrenInfos.push_back(std::move(offsetMetadataDAHInfo));
+        dataMetadataDAHInfo->dataDAHIdx = metadataDAC.addDiskArray();
+        offsetMetadataDAHInfo->dataDAHIdx = metadataDAC.addDiskArray();
+        metadataDAHInfo
+            ->childrenInfos[static_cast<common::idx_t>(StringColumn::ChildStateIndex::DATA)] =
+            std::move(dataMetadataDAHInfo);
+        metadataDAHInfo
+            ->childrenInfos[static_cast<common::idx_t>(StringColumn::ChildStateIndex::OFFSET)] =
+            std::move(offsetMetadataDAHInfo);
+
+        auto indexMetadataDAHInfo = std::make_unique<MetadataDAHInfo>();
+        indexMetadataDAHInfo->dataDAHIdx = metadataDAC.addDiskArray();
+        metadataDAHInfo
+            ->childrenInfos[static_cast<common::idx_t>(StringColumn::ChildStateIndex::INDEX)] =
+            std::move(indexMetadataDAHInfo);
     } break;
     default: {
         // DO NOTHING.

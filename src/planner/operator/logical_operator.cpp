@@ -1,36 +1,37 @@
 #include "planner/operator/logical_operator.h"
 
+#include "common/exception/runtime.h"
+
 using namespace kuzu::common;
 
 namespace kuzu {
 namespace planner {
 
+// LCOV_EXCL_START
 std::string LogicalOperatorUtils::logicalOperatorTypeToString(LogicalOperatorType type) {
     switch (type) {
-    case LogicalOperatorType::ATTACH_DATABASE:
-        return "ATTACH_DATABASE";
     case LogicalOperatorType::ACCUMULATE:
         return "ACCUMULATE";
     case LogicalOperatorType::AGGREGATE:
         return "AGGREGATE";
     case LogicalOperatorType::ALTER:
         return "ALTER";
-    case LogicalOperatorType::COMMENT_ON:
-        return "COMMENT_ON";
+    case LogicalOperatorType::ATTACH_DATABASE:
+        return "ATTACH_DATABASE";
     case LogicalOperatorType::COPY_FROM:
         return "COPY_FROM";
     case LogicalOperatorType::COPY_TO:
         return "COPY_TO";
     case LogicalOperatorType::CREATE_MACRO:
         return "CREATE_MACRO";
+    case LogicalOperatorType::CREATE_SEQUENCE:
+        return "CREATE_SEQUENCE";
     case LogicalOperatorType::CREATE_TABLE:
         return "CREATE_TABLE";
     case LogicalOperatorType::CROSS_PRODUCT:
         return "CROSS_PRODUCT";
-    case LogicalOperatorType::DELETE_NODE:
+    case LogicalOperatorType::DELETE:
         return "DELETE_NODE";
-    case LogicalOperatorType::DELETE_REL:
-        return "DELETE_REL";
     case LogicalOperatorType::DETACH_DATABASE:
         return "DETACH_DATABASE";
     case LogicalOperatorType::DISTINCT:
@@ -41,22 +42,28 @@ std::string LogicalOperatorUtils::logicalOperatorTypeToString(LogicalOperatorTyp
         return "DUMMY_SCAN";
     case LogicalOperatorType::EMPTY_RESULT:
         return "EMPTY_RESULT";
-    case LogicalOperatorType::EXTEND:
-        return "EXTEND";
-    case LogicalOperatorType::EXPRESSIONS_SCAN:
-        return "EXPRESSIONS_SCAN";
     case LogicalOperatorType::EXPLAIN:
         return "EXPLAIN";
+    case LogicalOperatorType::EXPRESSIONS_SCAN:
+        return "EXPRESSIONS_SCAN";
+    case LogicalOperatorType::EXTENSION:
+        return "LOAD";
+    case LogicalOperatorType::EXPORT_DATABASE:
+        return "EXPORT_DATABASE";
+    case LogicalOperatorType::EXTEND:
+        return "EXTEND";
     case LogicalOperatorType::FILTER:
         return "FILTER";
     case LogicalOperatorType::FLATTEN:
         return "FLATTEN";
+    case LogicalOperatorType::GDS_CALL:
+        return "GDS_CALL";
     case LogicalOperatorType::HASH_JOIN:
         return "HASH_JOIN";
-    case LogicalOperatorType::IN_QUERY_CALL:
-        return "IN_QUERY_CALL";
-    case LogicalOperatorType::INDEX_SCAN_NODE:
-        return "INDEX_SCAN_NODE";
+    case LogicalOperatorType::IMPORT_DATABASE:
+        return "IMPORT_DATABASE";
+    case LogicalOperatorType::INDEX_LOOK_UP:
+        return "INDEX_LOOK_UP";
     case LogicalOperatorType::INTERSECT:
         return "INTERSECT";
     case LogicalOperatorType::INSERT:
@@ -83,49 +90,47 @@ std::string LogicalOperatorUtils::logicalOperatorTypeToString(LogicalOperatorTyp
         return "RECURSIVE_EXTEND";
     case LogicalOperatorType::SCAN_FILE:
         return "SCAN_FILE";
-    case LogicalOperatorType::SCAN_FRONTIER:
-        return "SCAN_FRONTIER";
-    case LogicalOperatorType::SCAN_INTERNAL_ID:
-        return "SCAN_INTERNAL_ID";
-    case LogicalOperatorType::SCAN_NODE_PROPERTY:
-        return "SCAN_NODE_PROPERTY";
+    case LogicalOperatorType::SCAN_NODE_TABLE:
+        return "SCAN_NODE_TABLE";
     case LogicalOperatorType::SEMI_MASKER:
         return "SEMI_MASKER";
-    case LogicalOperatorType::SET_NODE_PROPERTY:
-        return "SET_NODE_PROPERTY";
-    case LogicalOperatorType::SET_REL_PROPERTY:
-        return "SET_REL_PROPERTY";
+    case LogicalOperatorType::SET_PROPERTY:
+        return "SET_PROPERTY";
     case LogicalOperatorType::STANDALONE_CALL:
         return "STANDALONE_CALL";
+    case LogicalOperatorType::TABLE_FUNCTION_CALL:
+        return "TABLE_FUNCTION_CALL";
     case LogicalOperatorType::TRANSACTION:
         return "TRANSACTION";
     case LogicalOperatorType::UNION_ALL:
         return "UNION_ALL";
     case LogicalOperatorType::UNWIND:
         return "UNWIND";
-    case LogicalOperatorType::EXTENSION:
-        return "LOAD";
-    case LogicalOperatorType::EXPORT_DATABASE:
-        return "EXPORT_DATABASE";
-    case LogicalOperatorType::IMPORT_DATABASE:
-        return "IMPORT_DATABASE";
+    case LogicalOperatorType::USE_DATABASE:
+        return "USE_DATABASE";
+    case LogicalOperatorType::CREATE_TYPE:
+        return "CREATE_TYPE";
     default:
-        KU_UNREACHABLE;
+        throw RuntimeException("Unknown logical operator type.");
     }
 }
+// LCOV_EXCL_STOP
 
 bool LogicalOperatorUtils::isUpdate(LogicalOperatorType type) {
     switch (type) {
     case LogicalOperatorType::INSERT:
-    case LogicalOperatorType::DELETE_NODE:
-    case LogicalOperatorType::DELETE_REL:
-    case LogicalOperatorType::SET_NODE_PROPERTY:
-    case LogicalOperatorType::SET_REL_PROPERTY:
+    case LogicalOperatorType::DELETE:
+    case LogicalOperatorType::SET_PROPERTY:
     case LogicalOperatorType::MERGE:
         return true;
     default:
         return false;
     }
+}
+
+bool LogicalOperatorUtils::isAccHashJoin(const LogicalOperator& op) {
+    return op.getOperatorType() == LogicalOperatorType::HASH_JOIN &&
+           op.getChild(0)->getOperatorType() == LogicalOperatorType::ACCUMULATE;
 }
 
 LogicalOperator::LogicalOperator(LogicalOperatorType operatorType,

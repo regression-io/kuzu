@@ -1,15 +1,12 @@
 #pragma once
 
 #include "binder/expression/expression.h"
+#include "common/types/value/value.h"
 #include "parser/expression/parsed_expression.h"
 
 namespace kuzu {
 namespace main {
 class ClientContext;
-}
-
-namespace common {
-class Value;
 }
 
 namespace binder {
@@ -25,18 +22,6 @@ public:
         : binder{queryBinder}, context{context} {}
 
     std::shared_ptr<Expression> bindExpression(const parser::ParsedExpression& parsedExpression);
-
-    /****** validation *****/
-    static void validateExpectedDataType(const Expression& expression,
-        common::LogicalTypeID target) {
-        validateExpectedDataType(expression, std::vector<common::LogicalTypeID>{target});
-    }
-    static void validateExpectedDataType(const Expression& expression,
-        const std::vector<common::LogicalTypeID>& targets);
-    // Validate data type.
-    static void validateDataType(const Expression& expr, const common::LogicalType& expectedType);
-    // Validate recursive data type top level (used when child type is unknown).
-    static void validateDataType(const Expression& expr, common::LogicalTypeID expectedTypeID);
 
     // TODO(Xiyang): move to an expression rewriter
     std::shared_ptr<Expression> foldExpression(const std::shared_ptr<Expression>& expression);
@@ -89,17 +74,17 @@ public:
     std::shared_ptr<Expression> bindStartNodeExpression(const Expression& expression);
     std::shared_ptr<Expression> bindEndNodeExpression(const Expression& expression);
     std::shared_ptr<Expression> bindLabelFunction(const Expression& expression);
-    std::unique_ptr<Expression> createInternalLengthExpression(const Expression& expression);
-    std::shared_ptr<Expression> bindRecursiveJoinLengthFunction(const Expression& expression);
+
     // Parameter expressions.
     std::shared_ptr<Expression> bindParameterExpression(
         const parser::ParsedExpression& parsedExpression);
     // Literal expressions.
     std::shared_ptr<Expression> bindLiteralExpression(
         const parser::ParsedExpression& parsedExpression);
-    std::shared_ptr<Expression> createLiteralExpression(std::unique_ptr<common::Value> value);
-    std::shared_ptr<Expression> createStringLiteralExpression(const std::string& strVal);
+    std::shared_ptr<Expression> createLiteralExpression(const common::Value& value);
+    std::shared_ptr<Expression> createLiteralExpression(const std::string& strVal);
     std::shared_ptr<Expression> createNullLiteralExpression();
+    std::shared_ptr<Expression> createNullLiteralExpression(const common::Value& value);
     // Variable expressions.
     std::shared_ptr<Expression> bindVariableExpression(
         const parser::ParsedExpression& parsedExpression);
@@ -116,16 +101,17 @@ public:
         const parser::ParsedExpression& parsedExpression);
 
     /****** cast *****/
-    static std::shared_ptr<Expression> implicitCastIfNecessary(
-        const std::shared_ptr<Expression>& expression, common::LogicalTypeID targetTypeID);
-    static std::shared_ptr<Expression> implicitCastIfNecessary(
+    std::shared_ptr<Expression> implicitCastIfNecessary(
         const std::shared_ptr<Expression>& expression, const common::LogicalType& targetType);
-    static std::shared_ptr<Expression> implicitCast(const std::shared_ptr<Expression>& expression,
+    // Use implicitCast to cast to types you have obtained through known implicit casting rules.
+    // Use forceCast to cast to types you have obtained through other means, for example,
+    // through a maxLogicalType function
+    std::shared_ptr<Expression> implicitCast(const std::shared_ptr<Expression>& expression,
+        const common::LogicalType& targetType);
+    std::shared_ptr<Expression> forceCast(const std::shared_ptr<Expression>& expression,
         const common::LogicalType& targetType);
 
-    /****** validation *****/
-    // E.g. SUM(SUM(a.age)) is not allowed
-    static void validateAggregationExpressionIsNotNested(const Expression& expression);
+    std::string getUniqueName(const std::string& name) const;
 
 private:
     Binder* binder;

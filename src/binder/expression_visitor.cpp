@@ -7,6 +7,8 @@
 #include "binder/expression/rel_expression.h"
 #include "binder/expression/subquery_expression.h"
 #include "common/cast.h"
+#include "function/list/vector_list_functions.h"
+#include "function/sequence/sequence_functions.h"
 #include "function/uuid/vector_uuid_functions.h"
 
 using namespace kuzu::common;
@@ -68,7 +70,7 @@ expression_vector ExpressionChildrenCollector::collectSubqueryChildren(
 
 expression_vector ExpressionChildrenCollector::collectNodeChildren(const Expression& expression) {
     expression_vector result;
-    auto& node = (NodeExpression&)expression;
+    auto& node = expression.constCast<NodeExpression>();
     for (auto& property : node.getPropertyExprs()) {
         result.push_back(property);
     }
@@ -78,11 +80,14 @@ expression_vector ExpressionChildrenCollector::collectNodeChildren(const Express
 
 expression_vector ExpressionChildrenCollector::collectRelChildren(const Expression& expression) {
     expression_vector result;
-    auto& rel = (RelExpression&)expression;
+    auto& rel = expression.constCast<RelExpression>();
     result.push_back(rel.getSrcNode()->getInternalID());
     result.push_back(rel.getDstNode()->getInternalID());
     for (auto& property : rel.getPropertyExprs()) {
         result.push_back(property);
+    }
+    if (rel.hasDirectionExpr()) {
+        result.push_back(rel.getDirectionExpr());
     }
     return result;
 }
@@ -92,7 +97,24 @@ bool ExpressionVisitor::isConstant(const Expression& expression) {
     if (expression.expressionType == ExpressionType::AGGREGATE_FUNCTION) {
         return false; // We don't have a framework to fold aggregated constant.
     }
-    if (expression.getNumChildren() == 0) {
+    // TODO(Xiyang): this is a bypass to allow nextval to not be folded during binding
+    if (expression.expressionType == ExpressionType::FUNCTION) {
+        auto& funcExpr = expression.constCast<FunctionExpression>();
+        if (funcExpr.getFunctionName() == function::NextValFunction::name) {
+            return false;
+        }
+    }
+    if (expression.getNumChildren() == 0 &&
+        expression.expressionType != ExpressionType::CASE_ELSE) {
+        // If a function does not have children, we should be able to evaluate them as a constant.
+        // But I wanna apply this change separately.
+        if (expression.expressionType == ExpressionType::FUNCTION) {
+            auto& funcExpr = expression.constCast<FunctionExpression>();
+            if (funcExpr.getFunctionName() == function::ListCreationFunction::name) {
+                return true;
+            }
+            return false;
+        }
         return expression.expressionType == ExpressionType::LITERAL;
     }
     for (auto& child : ExpressionChildrenCollector::collectChildren(expression)) {

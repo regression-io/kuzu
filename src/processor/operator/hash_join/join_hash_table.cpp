@@ -11,12 +11,12 @@ namespace kuzu {
 namespace processor {
 
 JoinHashTable::JoinHashTable(MemoryManager& memoryManager, logical_type_vec_t keyTypes,
-    std::unique_ptr<FactorizedTableSchema> tableSchema)
+    FactorizedTableSchema tableSchema)
     : BaseHashTable{memoryManager, std::move(keyTypes)} {
-    auto numSlotsPerBlock = BufferPoolConstants::PAGE_256KB_SIZE / sizeof(uint8_t*);
+    auto numSlotsPerBlock = HASH_BLOCK_SIZE / sizeof(uint8_t*);
     initSlotConstant(numSlotsPerBlock);
     // Prev pointer is always the last column in the table.
-    prevPtrColOffset = tableSchema->getColOffset(tableSchema->getNumColumns() - PREV_PTR_COL_IDX);
+    prevPtrColOffset = tableSchema.getColOffset(tableSchema.getNumColumns() - PREV_PTR_COL_IDX);
     factorizedTable = std::make_unique<FactorizedTable>(&memoryManager, std::move(tableSchema));
     this->tableSchema = factorizedTable->getTableSchema();
 }
@@ -35,7 +35,7 @@ static bool discardNullFromKeys(const std::vector<ValueVector*>& vectors) {
 void JoinHashTable::appendVectors(const std::vector<ValueVector*>& keyVectors,
     const std::vector<ValueVector*>& payloadVectors, DataChunkState* keyState) {
     discardNullFromKeys(keyVectors);
-    auto numTuplesToAppend = keyState->selVector->selectedSize;
+    auto numTuplesToAppend = keyState->getSelVector().getSelSize();
     auto appendInfos = factorizedTable->allocateFlatTupleBlocks(numTuplesToAppend);
     computeVectorHashes(keyVectors);
     auto colIdx = 0u;
@@ -59,14 +59,15 @@ void JoinHashTable::appendVector(ValueVector* vector,
 }
 
 static void sortSelectedPos(ValueVector* nodeIDVector) {
-    auto selVector = nodeIDVector->state->selVector.get();
-    auto size = selVector->selectedSize;
-    auto buffer = selVector->getMultableBuffer();
-    if (selVector->isUnfiltered()) {
-        memcpy(buffer, &SelectionVector::INCREMENTAL_SELECTED_POS, size * sizeof(sel_t));
-        selVector->setToFiltered();
+    auto& selVector = nodeIDVector->state->getSelVectorUnsafe();
+    auto size = selVector.getSelSize();
+    auto buffer = selVector.getMultableBuffer();
+    if (selVector.isUnfiltered()) {
+        std::memcpy(buffer.data(), &SelectionVector::INCREMENTAL_SELECTED_POS,
+            size * sizeof(sel_t));
+        selVector.setToFiltered();
     }
-    std::sort(buffer, buffer + size, [nodeIDVector](sel_t left, sel_t right) {
+    std::sort(buffer.begin(), buffer.begin() + size, [nodeIDVector](sel_t left, sel_t right) {
         return nodeIDVector->getValue<nodeID_t>(left) < nodeIDVector->getValue<nodeID_t>(right);
     });
 }
@@ -74,7 +75,7 @@ static void sortSelectedPos(ValueVector* nodeIDVector) {
 void JoinHashTable::appendVectorWithSorting(ValueVector* keyVector,
     std::vector<ValueVector*> payloadVectors) {
     auto numTuplesToAppend = 1;
-    KU_ASSERT(keyVector->state->selVector->selectedSize == 1);
+    KU_ASSERT(keyVector->state->getSelVector().getSelSize() == 1);
     // Based on the way we are planning, we assume that the first and second vectors are both
     // nodeIDs from extending, while the first one is key, and the second one is payload.
     auto payloadNodeIDVector = payloadVectors[0];
@@ -97,7 +98,7 @@ void JoinHashTable::appendVectorWithSorting(ValueVector* keyVector,
     if (!payloadsState->isFlat()) {
         // TODO(Xiyang): I can no longer recall why I set to un-filtered but this is probably wrong.
         // We should set back to the un-sorted state.
-        payloadsState->selVector->setToUnfiltered();
+        payloadsState->getSelVectorUnsafe().setToUnfiltered();
     }
     factorizedTable->numTuples += numTuplesToAppend;
 }
@@ -107,7 +108,7 @@ void JoinHashTable::allocateHashSlots(uint64_t numTuples) {
     auto numSlotsPerBlock = (uint64_t)1 << numSlotsPerBlockLog2;
     auto numBlocksNeeded = (maxNumHashSlots + numSlotsPerBlock - 1) / numSlotsPerBlock;
     while (hashSlotsBlocks.size() < numBlocksNeeded) {
-        hashSlotsBlocks.emplace_back(std::make_unique<DataBlock>(&memoryManager));
+        hashSlotsBlocks.emplace_back(std::make_unique<DataBlock>(&memoryManager, HASH_BLOCK_SIZE));
     }
 }
 
@@ -117,14 +118,15 @@ void JoinHashTable::buildHashSlots() {
         for (auto i = 0u; i < tupleBlock->numTuples; i++) {
             auto lastSlotEntryInHT = insertEntry(tuple);
             auto prevPtr = getPrevTuple(tuple);
-            memcpy(prevPtr, &lastSlotEntryInHT, sizeof(uint8_t*));
+            memcpy(reinterpret_cast<void*>(prevPtr), reinterpret_cast<void*>(&lastSlotEntryInHT),
+                sizeof(uint8_t*));
             tuple += factorizedTable->getTableSchema()->getNumBytesPerTuple();
         }
     }
 }
 
-void JoinHashTable::probe(const std::vector<ValueVector*>& keyVectors, ValueVector* hashVector,
-    ValueVector* tmpHashVector, uint8_t** probedTuples) {
+void JoinHashTable::probe(const std::vector<ValueVector*>& keyVectors, ValueVector& hashVector,
+    SelectionVector& hashSelVec, ValueVector& tmpHashResultVector, uint8_t** probedTuples) {
     KU_ASSERT(keyVectors.size() == keyTypes.size());
     if (getNumTuples() == 0) {
         return;
@@ -132,15 +134,19 @@ void JoinHashTable::probe(const std::vector<ValueVector*>& keyVectors, ValueVect
     if (!discardNullFromKeys(keyVectors)) {
         return;
     }
-    function::VectorHashFunction::computeHash(keyVectors[0], hashVector);
+    hashSelVec.setSelSize(keyVectors[0]->state->getSelVector().getSelSize());
+    function::VectorHashFunction::computeHash(*keyVectors[0], keyVectors[0]->state->getSelVector(),
+        hashVector, hashSelVec);
     for (auto i = 1u; i < keyVectors.size(); i++) {
-        function::VectorHashFunction::computeHash(keyVectors[i], tmpHashVector);
-        function::VectorHashFunction::combineHash(hashVector, tmpHashVector, hashVector);
+        hashSelVec.setSelSize(keyVectors[i]->state->getSelVector().getSelSize());
+        function::VectorHashFunction::computeHash(*keyVectors[i],
+            keyVectors[i]->state->getSelVector(), tmpHashResultVector, hashSelVec);
+        function::VectorHashFunction::combineHash(hashVector, hashSelVec, tmpHashResultVector,
+            hashSelVec, hashVector, hashSelVec);
     }
-    for (auto i = 0u; i < hashVector->state->selVector->selectedSize; i++) {
-        auto pos = hashVector->state->selVector->selectedPositions[i];
+    for (auto i = 0u; i < hashSelVec.getSelSize(); i++) {
         KU_ASSERT(i < DEFAULT_VECTOR_CAPACITY);
-        probedTuples[i] = getTupleForHash(hashVector->getValue<hash_t>(pos));
+        probedTuples[i] = getTupleForHash(hashVector.getValue<hash_t>(hashSelVec[i]));
     }
 }
 
@@ -153,23 +159,23 @@ sel_t JoinHashTable::matchFlatKeys(const std::vector<ValueVector*>& keyVectors,
         }
         auto currentTuple = probedTuples[0];
         matchedTuples[numMatchedTuples] = currentTuple;
-        numMatchedTuples += compareFlatKeys(keyVectors, currentTuple);
+        numMatchedTuples += matchFlatVecWithEntry(keyVectors, currentTuple);
         probedTuples[0] = *getPrevTuple(currentTuple);
     }
     return numMatchedTuples;
 }
 
 sel_t JoinHashTable::matchUnFlatKey(ValueVector* keyVector, uint8_t** probedTuples,
-    uint8_t** matchedTuples, SelectionVector* matchedTuplesSelVector) {
+    uint8_t** matchedTuples, SelectionVector& matchedTuplesSelVector) {
     auto numMatchedTuples = 0;
-    for (auto i = 0u; i < keyVector->state->selVector->selectedSize; ++i) {
-        auto pos = keyVector->state->selVector->selectedPositions[i];
+    for (auto i = 0u; i < keyVector->state->getSelVector().getSelSize(); ++i) {
+        auto pos = keyVector->state->getSelVector()[i];
         while (probedTuples[i]) {
             auto currentTuple = probedTuples[i];
             auto entryCompareResult = compareEntryFuncs[0](keyVector, pos, currentTuple);
             if (entryCompareResult) {
                 matchedTuples[numMatchedTuples] = currentTuple;
-                matchedTuplesSelVector->selectedPositions[numMatchedTuples] = pos;
+                matchedTuplesSelVector[numMatchedTuples] = pos;
                 numMatchedTuples++;
                 break;
             }
@@ -191,20 +197,6 @@ uint8_t* JoinHashTable::insertEntry(uint8_t* tuple) const {
     auto prevPtr = *slot;
     *slot = tuple;
     return prevPtr;
-}
-
-bool JoinHashTable::compareFlatKeys(const std::vector<ValueVector*>& keyVectors,
-    const uint8_t* tuple) {
-    for (auto i = 0u; i < keyVectors.size(); i++) {
-        auto keyVector = keyVectors[i];
-        KU_ASSERT(keyVector->state->selVector->selectedSize == 1);
-        auto pos = keyVector->state->selVector->selectedPositions[0];
-        auto equal = compareEntryFuncs[i](keyVector, pos, tuple + tableSchema->getColOffset(i));
-        if (!equal) {
-            return false;
-        }
-    }
-    return true;
 }
 
 void JoinHashTable::computeVectorHashes(std::vector<common::ValueVector*> keyVectors) {

@@ -1,7 +1,7 @@
 #include <fcntl.h>
 
 #include "binder/binder.h"
-#include "binder/copy/bound_import_database.h"
+#include "binder/bound_import_database.h"
 #include "common/cast.h"
 #include "common/copier_config/csv_reader_config.h"
 #include "common/exception/binder.h"
@@ -18,9 +18,9 @@ namespace kuzu {
 namespace binder {
 
 static std::string getQueryFromFile(common::VirtualFileSystem* vfs, const std::string boundFilePath,
-    const std::string fileName) {
+    const std::string fileName, main::ClientContext* context) {
     auto filePath = vfs->joinPath(boundFilePath, fileName);
-    if (!vfs->fileOrPathExists(filePath)) {
+    if (!vfs->fileOrPathExists(filePath, context)) {
         throw BinderException(stringFormat("File {} does not exist.", filePath));
     }
     auto fileInfo = vfs->openFile(filePath, O_RDONLY
@@ -38,32 +38,53 @@ std::unique_ptr<BoundStatement> Binder::bindImportDatabaseClause(const Statement
     auto& importDatabaseStatement = ku_dynamic_cast<const Statement&, const ImportDB&>(statement);
     auto boundFilePath = importDatabaseStatement.getFilePath();
     auto fs = clientContext->getVFSUnsafe();
-    if (!fs->fileOrPathExists(boundFilePath)) {
+    if (!fs->fileOrPathExists(boundFilePath, clientContext)) {
         throw BinderException(stringFormat("Directory {} does not exist.", boundFilePath));
     }
     std::string finalQueryStatements;
-    finalQueryStatements += getQueryFromFile(fs, boundFilePath, ImportDBConstants::SCHEMA_NAME);
+    finalQueryStatements +=
+        getQueryFromFile(fs, boundFilePath, ImportDBConstants::SCHEMA_NAME, clientContext);
     // replace the path in copy from statement with the bound path
-    auto copyQuery = getQueryFromFile(fs, boundFilePath, ImportDBConstants::COPY_NAME);
-    auto parsedStatements = Parser::parseQuery(copyQuery);
-    for (auto& parsedStatement : parsedStatements) {
-        KU_ASSERT(parsedStatement->getStatementType() == StatementType::COPY_FROM);
-        auto copyFromStatement =
-            ku_dynamic_cast<const Statement*, const CopyFrom*>(parsedStatement.get());
-        KU_ASSERT(copyFromStatement->getSource()->type == common::ScanSourceType::FILE);
-        auto filePaths = ku_dynamic_cast<parser::BaseScanSource*, parser::FileScanSource*>(
-            copyFromStatement->getSource())
-                             ->filePaths;
-        KU_ASSERT(filePaths.size() == 1);
-        auto copyFilePath = boundFilePath + "/" + filePaths[0];
-        auto csvConfig = CSVReaderConfig::construct(
-            bindParsingOptions(copyFromStatement->getParsingOptionsRef()));
-        auto csvQuery = stringFormat("COPY {} FROM \"{}\" {};", copyFromStatement->getTableName(),
-            copyFilePath, csvConfig.option.toCypher());
-        finalQueryStatements += csvQuery;
+    auto copyQuery =
+        getQueryFromFile(fs, boundFilePath, ImportDBConstants::COPY_NAME, clientContext);
+    if (!copyQuery.empty()) {
+        auto parsedStatements = Parser::parseQuery(copyQuery);
+        for (auto& parsedStatement : parsedStatements) {
+            KU_ASSERT(parsedStatement->getStatementType() == StatementType::COPY_FROM);
+            auto copyFromStatement =
+                ku_dynamic_cast<const Statement*, const CopyFrom*>(parsedStatement.get());
+            KU_ASSERT(copyFromStatement->getSource()->type == common::ScanSourceType::FILE);
+            auto filePaths = ku_dynamic_cast<parser::BaseScanSource*, parser::FileScanSource*>(
+                copyFromStatement->getSource())
+                                 ->filePaths;
+            KU_ASSERT(filePaths.size() == 1);
+            auto fileType = bindFileType(filePaths);
+            auto copyFilePath = boundFilePath + "/" + filePaths[0];
+            std::string columns;
+            std::string delimiter = "";
+            for (auto& column : copyFromStatement->getColumnNames()) {
+                columns += delimiter;
+                columns += column;
+                if (delimiter == "") {
+                    delimiter = ",";
+                }
+            }
+            std::string query;
+            if (fileType == FileType::CSV) {
+                auto csvConfig = CSVReaderConfig::construct(
+                    bindParsingOptions(copyFromStatement->getParsingOptionsRef()));
+                query = stringFormat("COPY {} ( {} ) FROM \"{}\" {};",
+                    copyFromStatement->getTableName(), columns, copyFilePath,
+                    csvConfig.option.toCypher());
+            } else {
+                query = stringFormat("COPY {} ( {} ) FROM \"{}\";",
+                    copyFromStatement->getTableName(), columns, copyFilePath);
+            }
+            finalQueryStatements += query;
+        }
     }
-    finalQueryStatements += getQueryFromFile(fs, boundFilePath, ImportDBConstants::MACRO_NAME);
     return std::make_unique<BoundImportDatabase>(boundFilePath, finalQueryStatements);
 }
+
 } // namespace binder
 } // namespace kuzu

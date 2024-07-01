@@ -1,14 +1,41 @@
 name: Multiplatform Build & Test
 
+env:
+  USE_EXISTING_BINARY_DATASET: 1
+
 on:
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * *"
 
 jobs:
+  generate-binary-demo:
+    name: Generate Binary Dataset
+    runs-on: kuzu-self-hosted-testing
+    env:
+      NUM_THREADS: 32
+      GEN: Ninja
+      CC: gcc
+      CXX: g++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: make release
+
+      - name: Generate Datasets
+        run: bash scripts/generate_binary_demo.sh
+
+      - name: Upload binary-demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-demo
+          path: dataset/binary-demo
+
   ubuntu-2004-build-test:
     name: ubuntu-20.04
     runs-on: ubuntu-20.04
+    needs: [generate-binary-demo]
     defaults:
       run:
         shell: bash
@@ -16,8 +43,14 @@ jobs:
       CC: gcc-11
       CXX: g++-11
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - name: Install packages
         continue-on-error: true
@@ -92,7 +125,7 @@ jobs:
         continue-on-error: true
         working-directory: tools/rust_api
         run: |
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo "Rust test,$?" >> ../../status.txt
 
       - name: Rust example
@@ -119,12 +152,19 @@ jobs:
       fail-fast: false
     name: ${{ matrix.runner }}
     runs-on: ${{ matrix.runner }}
+    needs: [generate-binary-demo]
     defaults:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - uses: actions/setup-python@v4
         continue-on-error: true
@@ -190,7 +230,7 @@ jobs:
         continue-on-error: true
         working-directory: tools/rust_api
         run: |
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo "Rust test,$?" >> ../../status.txt
 
       - name: Rust example
@@ -216,6 +256,7 @@ jobs:
         runner: [windows-2019, windows-2022]
       fail-fast: false
     name: ${{ matrix.runner }}
+    needs: [generate-binary-demo]
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Disable Windows Defender
@@ -233,8 +274,14 @@ jobs:
           Set-MpPreference -DisableScriptScanning $true
           Set-MpPreference -SubmitSamplesConsent NeverSend
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - uses: ilammy/msvc-dev-cmd@v1
         continue-on-error: true
@@ -312,7 +359,7 @@ jobs:
           set OPENSSL_DIR=C:\Program Files\OpenSSL-Win64
           set CXXFLAGS=/std:c++20
           set CARGO_BUILD_JOBS=%NUMBER_OF_PROCESSORS%
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo Rust test,%ERRORLEVEL% >> status.txt
 
       - name: Rust example
@@ -341,6 +388,7 @@ jobs:
         image: ["ubuntu:23.04", "ubuntu:23.10", "debian:12", "debian:sid"]
       fail-fast: false
     name: ${{ matrix.image }}
+    needs: [generate-binary-demo]
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
@@ -360,8 +408,14 @@ jobs:
           apt-get update
           apt-get install -y git build-essential cmake gcc g++ python3 python3-dev python3-pip openjdk-17-jdk nodejs
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - name: Ensure Python dependencies
         continue-on-error: true
@@ -429,7 +483,7 @@ jobs:
         continue-on-error: true
         working-directory: tools/rust_api
         run: |
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo "Rust test,$?" >> ../../status.txt
 
       - name: Rust example
@@ -452,12 +506,13 @@ jobs:
           name: ${{env.PLATFORM}}
           path: ${{env.PLATFORM}}.csv
 
-  rhel-fedora-build-test: 
+  rhel-fedora-build-test:
     strategy:
       matrix:
         image: ["rockylinux:8", "rockylinux:9", "fedora:38", "fedora:39"]
       fail-fast: false
     name: ${{ matrix.image }}
+    needs: [generate-binary-demo]
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
@@ -497,8 +552,14 @@ jobs:
           source /opt/rh/gcc-toolset-12/enable
           echo $PATH >> $GITHUB_PATH
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - name: Ensure Python dependencies
         continue-on-error: true
@@ -569,7 +630,7 @@ jobs:
         continue-on-error: true
         working-directory: tools/rust_api
         run: |
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo "Rust test,$?" >> ../../status.txt
 
       - name: Rust example
@@ -595,6 +656,7 @@ jobs:
   archlinux-build-test:
     name: archlinux
     runs-on: ubuntu-latest
+    needs: [generate-binary-demo]
     container:
       image: archlinux:latest
     env:
@@ -608,8 +670,14 @@ jobs:
           pacman -Syu --noconfirm
           pacman -S --needed --noconfirm git base-devel cmake gcc python python-pip npm jdk17-openjdk
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         continue-on-error: true
+
+      - name: Download binary-demo
+        uses: actions/download-artifact@v4
+        with:
+          name: binary-demo
+          path: ${{ github.workspace }}/dataset/binary-demo
 
       - name: Ensure Python dependencies
         continue-on-error: true
@@ -677,7 +745,7 @@ jobs:
         working-directory: tools/rust_api
         continue-on-error: true
         run: |
-          cargo test --release --features arrow -- --test-threads=1
+          cargo test --release --features arrow -- --test-threads=12
           echo "Rust test,$?" >> ../../status.txt
 
       - name: Rust example
@@ -714,7 +782,7 @@ jobs:
         archlinux-build-test,
       ]
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Download artifacts
         uses: actions/download-artifact@v4

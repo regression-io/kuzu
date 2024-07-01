@@ -4,11 +4,6 @@ const KuzuNative = require("./kuzu_native.js");
 const QueryResult = require("./query_result.js");
 const PreparedStatement = require("./prepared_statement.js");
 
-const PRIMARY_KEY_TEXT = "(PRIMARY KEY)";
-const SRC_NODE_TEXT = "src node:";
-const DST_NODE_TEXT = "dst node:";
-const PROPERTIES_TEXT = "properties:";
-
 class Connection {
   /**
    * Initialize a new Connection object. Note that the initialization is done
@@ -30,6 +25,7 @@ class Connection {
     this._connection = null;
     this._isInitialized = false;
     this._initPromise = null;
+    this._isClosed = false;
     numThreads = parseInt(numThreads);
     if (numThreads && numThreads > 0) {
       this._numThreads = numThreads;
@@ -41,6 +37,9 @@ class Connection {
    * connection is initialized automatically when the first query is executed.
    */
   async init() {
+    if (this._isClosed) {
+      throw new Error("Connection is closed.");
+    }
     if (!this._connection) {
       const database = await this._database._getDatabase();
       this._connection = new KuzuNative.NodeConnection(database);
@@ -74,6 +73,9 @@ class Connection {
    * @returns {KuzuNative.NodeConnection} the underlying native connection.
    */
   async _getConnection() {
+    if (this._isClosed) {
+      throw new Error("Connection is closed.");
+    }
     await this.init();
     return this._connection;
   }
@@ -82,9 +84,10 @@ class Connection {
    * Execute a prepared statement with the given parameters.
    * @param {kuzu.PreparedStatement} preparedStatement the prepared statement to execute.
    * @param {Object} params a plain object mapping parameter names to values.
+   * @param {Function} [progressCallback] - Optional callback function that is invoked with the progress of the query execution. The callback receives three arguments: pipelineProgress, numPipelinesFinished, and numPipelines.
    * @returns {Promise<kuzu.QueryResult>} a promise that resolves to the query result. The promise is rejected if there is an error.
    */
-  execute(preparedStatement, params = {}) {
+  execute(preparedStatement, params = {}, progressCallback) {
     return new Promise((resolve, reject) => {
       if (
         !typeof preparedStatement === "object" ||
@@ -127,25 +130,39 @@ class Connection {
             )
           );
         }
-      }
-      this._getConnection().then((connection) => {
-        const nodeQueryResult = new KuzuNative.NodeQueryResult();
-        try {
-          connection.executeAsync(
-            preparedStatement._preparedStatement,
-            nodeQueryResult,
-            paramArray,
-            (err) => {
-              if (err) {
-                return reject(err);
-              }
-              return resolve(new QueryResult(this, nodeQueryResult));
-            }
-          );
-        } catch (e) {
-          return reject(e);
         }
-      });
+      if (progressCallback && typeof progressCallback !== "function") {
+        return reject(new Error("progressCallback must be a function."));
+      }
+      this._getConnection()
+        .then((connection) => {
+          const nodeQueryResult = new KuzuNative.NodeQueryResult();
+          try {
+            connection.executeAsync(
+              preparedStatement._preparedStatement,
+              nodeQueryResult,
+              paramArray,
+              (err) => {
+                if (err) {
+                  return reject(err);
+                }
+                this._unwrapMultipleQueryResults(nodeQueryResult)
+                  .then((queryResults) => {
+                    return resolve(queryResults);
+                  })
+                  .catch((err) => {
+                    return reject(err);
+                  });
+                },
+              progressCallback
+            );
+          } catch (e) {
+            return reject(e);
+          }
+        })
+        .catch((err) => {
+          return reject(err);
+        });
     });
   }
 
@@ -159,33 +176,100 @@ class Connection {
       if (typeof statement !== "string") {
         return reject(new Error("statement must be a string."));
       }
-      this._getConnection().then((connection) => {
-        const preparedStatement = new KuzuNative.NodePreparedStatement(
-          connection,
-          statement
-        );
-        preparedStatement.initAsync((err) => {
-          if (err) {
-            return reject(err);
-          }
-          return resolve(new PreparedStatement(this, preparedStatement));
+      this._getConnection()
+        .then((connection) => {
+          const preparedStatement = new KuzuNative.NodePreparedStatement(
+            connection,
+            statement
+          );
+          preparedStatement.initAsync((err) => {
+            if (err) {
+              return reject(err);
+            }
+            return resolve(new PreparedStatement(this, preparedStatement));
+          });
+        })
+        .catch((err) => {
+          return reject(err);
         });
-      });
     });
   }
 
   /**
    * Execute a query.
    * @param {String} statement the statement to execute.
+   * @param {Function} [progressCallback] - Optional callback function that is invoked with the progress of the query execution. The callback receives three arguments: pipelineProgress, numPipelinesFinished, and numPipelines.
    * @returns {Promise<kuzu.QueryResult>} a promise that resolves to the query result. The promise is rejected if there is an error.
    */
-  async query(statement) {
-    if (typeof statement !== "string") {
-      throw new Error("statement must be a string.");
+  query(statement, progressCallback) {
+    return new Promise((resolve, reject) => {
+      if (typeof statement !== "string") {
+        return reject(new Error("statement must be a string."));
+      }
+      if (progressCallback && typeof progressCallback !== "function") {
+        return reject(new Error("progressCallback must be a function."));
+      }
+      this._getConnection()
+        .then((connection) => {
+          const nodeQueryResult = new KuzuNative.NodeQueryResult();
+          try {
+            connection.queryAsync(statement, nodeQueryResult, (err) => {
+              if (err) {
+                return reject(err);
+              }
+              this._unwrapMultipleQueryResults(nodeQueryResult)
+                .then((queryResults) => {
+                  return resolve(queryResults);
+                })
+                .catch((err) => {
+                  return reject(err);
+                });
+            },
+            progressCallback);
+          } catch (e) {
+            return reject(e);
+          }
+        })
+        .catch((err) => {
+          return reject(err);
+        });
+    });
+  }
+
+  /**
+   * Internal function to get the next query result for multiple query results.
+   * @param {KuzuNative.NodeQueryResult} nodeQueryResult the current node query result.
+   * @returns {Promise<kuzu.QueryResult>} a promise that resolves to the next query result. The promise is rejected if there is an error.
+   */
+  _getNextQueryResult(nodeQueryResult) {
+    return new Promise((resolve, reject) => {
+      const nextNodeQueryResult = new KuzuNative.NodeQueryResult();
+      nodeQueryResult.getNextQueryResultAsync(nextNodeQueryResult, (err) => {
+        if (err) {
+          return reject(err);
+        }
+        return resolve(new QueryResult(this, nextNodeQueryResult));
+      });
+    });
+  }
+
+  /**
+   * Internal function to unwrap multiple query results into an array of query results.
+   * @param {KuzuNative.NodeQueryResult} nodeQueryResult the node query result.
+   * @returns {Promise<Array<kuzu.QueryResult>> | kuzu.QueryResult} a promise that resolves to an array of query results. The promise is rejected if there is an error.
+   */
+  async _unwrapMultipleQueryResults(nodeQueryResult) {
+    const wrappedQueryResult = new QueryResult(this, nodeQueryResult);
+    if (!nodeQueryResult.hasNextQueryResult()) {
+      return wrappedQueryResult;
     }
-    const preparedStatement = await this.prepare(statement);
-    const queryResult = await this.execute(preparedStatement);
-    return queryResult;
+    const queryResults = [wrappedQueryResult];
+    let currentQueryResult = nodeQueryResult;
+    while (currentQueryResult.hasNextQueryResult()) {
+      queryResults.push(await this._getNextQueryResult(currentQueryResult));
+      currentQueryResult = queryResults[queryResults.length - 1]._queryResult;
+    }
+    return queryResults;
   }
 
   /**
@@ -223,6 +307,34 @@ class Connection {
     } else {
       this._queryTimeout = timeoutInMs;
     }
+  }
+
+  /**
+   * Close the connection. 
+   * 
+   * Note: Call to this method is optional. The connection will be closed
+   * automatically when the object goes out of scope.
+   */
+  async close() {
+    if (this._isClosed) {
+      return;
+    }
+    if (!this._isInitialized) {
+      if (this._initPromise) {
+        // Connection is initializing, wait for it to finish first.
+        await this._initPromise;
+      } else {
+        // Connection is not initialized, simply mark it as closed and initialized.
+        this._isInitialized = true;
+        this._isClosed = true;
+        delete this._connection;
+        return;
+      }
+    }
+    // Connection is initialized, close it.
+    this._connection.close();
+    delete this._connection;
+    this._isClosed = true;
   }
 }
 

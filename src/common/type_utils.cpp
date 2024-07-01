@@ -5,12 +5,13 @@
 namespace kuzu {
 namespace common {
 
-static std::string entryToString(const LogicalType& dataType, const uint8_t* value,
+std::string TypeUtils::entryToString(const LogicalType& dataType, const uint8_t* value,
     ValueVector* vector) {
     auto valueVector = reinterpret_cast<ValueVector*>(vector);
     switch (dataType.getLogicalTypeID()) {
     case LogicalTypeID::BOOL:
         return TypeUtils::toString(*reinterpret_cast<const bool*>(value));
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64:
         return TypeUtils::toString(*reinterpret_cast<const int64_t*>(value));
     case LogicalTypeID::INT32:
@@ -33,6 +34,28 @@ static std::string entryToString(const LogicalType& dataType, const uint8_t* val
         return TypeUtils::toString(*reinterpret_cast<const double*>(value));
     case LogicalTypeID::FLOAT:
         return TypeUtils::toString(*reinterpret_cast<const float*>(value));
+    case LogicalTypeID::DECIMAL:
+        switch (dataType.getPhysicalType()) {
+        case PhysicalTypeID::INT16:
+            return DecimalType::insertDecimalPoint(
+                TypeUtils::toString(*reinterpret_cast<const int16_t*>(value)),
+                DecimalType::getScale(dataType));
+        case PhysicalTypeID::INT32:
+            return DecimalType::insertDecimalPoint(
+                TypeUtils::toString(*reinterpret_cast<const int32_t*>(value)),
+                DecimalType::getScale(dataType));
+        case PhysicalTypeID::INT64:
+            return DecimalType::insertDecimalPoint(
+                TypeUtils::toString(*reinterpret_cast<const int64_t*>(value)),
+                DecimalType::getScale(dataType));
+        case PhysicalTypeID::INT128:
+            return DecimalType::insertDecimalPoint(
+                TypeUtils::toString(*reinterpret_cast<const int128_t*>(value)),
+                DecimalType::getScale(dataType));
+        default:
+            // decimals should always be backed by one of these four
+            KU_UNREACHABLE;
+        }
     case LogicalTypeID::DATE:
         return TypeUtils::toString(*reinterpret_cast<const date_t*>(value));
     case LogicalTypeID::TIMESTAMP_NS:
@@ -72,12 +95,12 @@ static std::string entryToString(const LogicalType& dataType, const uint8_t* val
     }
 }
 
-static std::string entryToString(sel_t pos, ValueVector* vector) {
+static std::string entryToStringWithPos(sel_t pos, ValueVector* vector) {
     if (vector->isNull(pos)) {
         return "";
     }
-    return entryToString(vector->dataType, vector->getData() + vector->getNumBytesPerValue() * pos,
-        vector);
+    return TypeUtils::entryToString(vector->dataType,
+        vector->getData() + vector->getNumBytesPerValue() * pos, vector);
 }
 
 template<>
@@ -154,10 +177,10 @@ std::string TypeUtils::toString(const list_entry_t& val, void* valueVector) {
     std::string result = "[";
     auto dataVector = ListVector::getDataVector(listVector);
     for (auto i = 0u; i < val.size - 1; ++i) {
-        result += entryToString(val.offset + i, dataVector);
+        result += entryToStringWithPos(val.offset + i, dataVector);
         result += ",";
     }
-    result += entryToString(val.offset + val.size - 1, dataVector);
+    result += entryToStringWithPos(val.offset + val.size - 1, dataVector);
     result += "]";
     return result;
 }
@@ -167,7 +190,7 @@ static std::string getMapEntryStr(sel_t pos, ValueVector* dataVector, ValueVecto
     if (dataVector->isNull(pos)) {
         return "";
     }
-    return entryToString(pos, keyVector) + "=" + entryToString(pos, valVector);
+    return entryToStringWithPos(pos, keyVector) + "=" + entryToStringWithPos(pos, valVector);
 }
 
 template<>
@@ -193,7 +216,7 @@ std::string TypeUtils::toString(const map_entry_t& val, void* valueVector) {
 
 template<bool SKIP_NULL_ENTRY>
 static std::string structToString(const struct_entry_t& val, ValueVector* vector) {
-    auto fields = StructType::getFields(&vector->dataType);
+    const auto& fields = StructType::getFields(vector->dataType);
     if (fields.size() == 0) {
         return "{}";
     }
@@ -209,9 +232,9 @@ static std::string structToString(const struct_entry_t& val, ValueVector* vector
         if (i != 0) {
             result += ", ";
         }
-        result += StructType::getField(&vector->dataType, i)->getName();
+        result += StructType::getField(vector->dataType, i).getName();
         result += ": ";
-        result += entryToString(val.pos, fieldVector.get());
+        result += entryToStringWithPos(val.pos, fieldVector.get());
     }
     auto fieldVector = StructVector::getFieldVector(vector, i);
     if constexpr (SKIP_NULL_ENTRY) {
@@ -223,9 +246,9 @@ static std::string structToString(const struct_entry_t& val, ValueVector* vector
     if (i != 0) {
         result += ", ";
     }
-    result += StructType::getField(&vector->dataType, i)->getName();
+    result += StructType::getField(vector->dataType, i).getName();
     result += ": ";
-    result += entryToString(val.pos, fieldVector.get());
+    result += entryToStringWithPos(val.pos, fieldVector.get());
     result += "}";
     return result;
 }
@@ -257,7 +280,7 @@ std::string TypeUtils::toString(const union_entry_t& val, void* valVector) {
     auto unionFieldIdx =
         UnionVector::getTagVector(structVector)->getValue<union_field_idx_t>(val.entry.pos);
     auto unionFieldVector = UnionVector::getValVector(structVector, unionFieldIdx);
-    return entryToString(val.entry.pos, unionFieldVector);
+    return entryToStringWithPos(val.entry.pos, unionFieldVector);
 }
 
 } // namespace common

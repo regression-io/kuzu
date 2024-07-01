@@ -1,5 +1,6 @@
 #include "binder/binder.h"
 #include "binder/bound_scan_source.h"
+#include "binder/expression/expression_util.h"
 #include "binder/expression/literal_expression.h"
 #include "common/exception/binder.h"
 #include "common/exception/copy.h"
@@ -51,7 +52,7 @@ std::vector<std::string> Binder::bindFilePaths(const std::vector<std::string>& f
 }
 
 std::unordered_map<std::string, Value> Binder::bindParsingOptions(
-    const parser::parsing_option_t& parsingOptions) {
+    const parser::options_t& parsingOptions) {
     std::unordered_map<std::string, Value> options;
     for (auto& option : parsingOptions) {
         auto name = option.first;
@@ -59,13 +60,13 @@ std::unordered_map<std::string, Value> Binder::bindParsingOptions(
         auto expr = expressionBinder.bindExpression(*option.second);
         KU_ASSERT(expr->expressionType == ExpressionType::LITERAL);
         auto literalExpr = ku_dynamic_cast<Expression*, LiteralExpression*>(expr.get());
-        options.insert({name, *literalExpr->getValue()});
+        options.insert({name, literalExpr->getValue()});
     }
     return options;
 }
 
 std::unique_ptr<BoundBaseScanSource> Binder::bindScanSource(BaseScanSource* source,
-    const parsing_option_t& options, const std::vector<std::string>& expectedColumnNames,
+    const options_t& options, const std::vector<std::string>& expectedColumnNames,
     const std::vector<LogicalType>& expectedColumnTypes) {
     switch (source->type) {
     case common::ScanSourceType::FILE: {
@@ -80,7 +81,7 @@ std::unique_ptr<BoundBaseScanSource> Binder::bindScanSource(BaseScanSource* sour
         // Bind file scan function.
         auto func = getScanFunction(config->fileType, *config);
         auto bindInput = std::make_unique<ScanTableFuncBindInput>(config->copy(),
-            std::move(expectedColumnNames), std::move(expectedColumnTypes), clientContext);
+            std::move(expectedColumnNames), LogicalType::copy(expectedColumnTypes), clientContext);
         auto bindData = func.bindFunc(clientContext, bindInput.get());
         // Bind input columns
         expression_vector inputColumns;
@@ -102,15 +103,16 @@ std::unique_ptr<BoundBaseScanSource> Binder::bindScanSource(BaseScanSource* sour
                     columns.size(), expectedColumnNames.size()));
         }
         for (auto i = 0u; i < columns.size(); ++i) {
-            expressionBinder.validateDataType(*columns[i], expectedColumnTypes[i]);
+            ExpressionUtil::validateDataType(*columns[i], expectedColumnTypes[i]);
             columns[i]->setAlias(expectedColumnNames[i]);
         }
         return std::make_unique<BoundQueryScanSource>(std::move(boundStatement));
     }
     case ScanSourceType::OBJECT: {
-        auto objectSource = ku_dynamic_cast<BaseScanSource*, ObjectScanSource*>(source);
-        throw BinderException(stringFormat("Scan from external object {} is not supported.",
-            objectSource->objectName));
+        auto objectSource = source->constPtrCast<ObjectScanSource>();
+        auto objectStr = StringUtils::join(objectSource->objectNames, ",");
+        throw BinderException(
+            stringFormat("Scan from external object {} is not supported.", objectStr));
     }
     default:
         KU_UNREACHABLE;

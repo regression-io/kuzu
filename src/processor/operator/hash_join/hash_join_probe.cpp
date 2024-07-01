@@ -10,8 +10,10 @@ void HashJoinProbe::initLocalStateInternal(ResultSet* resultSet, ExecutionContex
     for (auto& keyDataPos : probeDataInfo.keysDataPos) {
         keyVectors.push_back(resultSet->getValueVector(keyDataPos).get());
     }
-    if (joinType == JoinType::MARK) {
-        markVector = resultSet->getValueVector(probeDataInfo.markDataPos);
+    if (probeDataInfo.markDataPos.isValid()) {
+        markVector = resultSet->getValueVector(probeDataInfo.markDataPos).get();
+    } else {
+        markVector = nullptr;
     }
     for (auto& dataPos : probeDataInfo.payloadsOutPos) {
         vectorsToReadInto.push_back(resultSet->getValueVector(dataPos).get());
@@ -23,16 +25,16 @@ void HashJoinProbe::initLocalStateInternal(ResultSet* resultSet, ExecutionContex
     columnIdxsToReadFrom.resize(probeDataInfo.getNumPayloads());
     iota(columnIdxsToReadFrom.begin(), columnIdxsToReadFrom.end(),
         probeDataInfo.keysDataPos.size());
-    hashVector = std::make_unique<ValueVector>(LogicalTypeID::INT64,
+    hashVector = std::make_unique<ValueVector>(LogicalType::HASH(),
         context->clientContext->getMemoryManager());
     if (keyVectors.size() > 1) {
-        tmpHashVector = std::make_unique<ValueVector>(LogicalTypeID::INT64,
+        tmpHashVector = std::make_unique<ValueVector>(LogicalType::HASH(),
             context->clientContext->getMemoryManager());
     }
 }
 
 bool HashJoinProbe::getMatchedTuplesForFlatKey(ExecutionContext* context) {
-    if (probeState->nextMatchedTupleIdx < probeState->matchedSelVector->selectedSize) {
+    if (probeState->nextMatchedTupleIdx < probeState->matchedSelVector.getSelSize()) {
         // Not all matched tuples have been shipped. Continue shipping.
         return true;
     }
@@ -40,17 +42,17 @@ bool HashJoinProbe::getMatchedTuplesForFlatKey(ExecutionContext* context) {
         // We still need to save and restore for flat input because we are discarding NULL join keys
         // which changes the selected position.
         // TODO(Guodong): we have potential bugs here because all keys' states should be restored.
-        restoreSelVector(keyVectors[0]->state->selVector);
+        restoreSelVector(*keyVectors[0]->state);
         if (!children[0]->getNextTuple(context)) {
             return false;
         }
-        saveSelVector(keyVectors[0]->state->selVector);
-        sharedState->getHashTable()->probe(keyVectors, hashVector.get(), tmpHashVector.get(),
+        saveSelVector(*keyVectors[0]->state);
+        sharedState->getHashTable()->probe(keyVectors, *hashVector, hashSelVec, *tmpHashVector,
             probeState->probedTuples.get());
     }
     auto numMatchedTuples = sharedState->getHashTable()->matchFlatKeys(keyVectors,
         probeState->probedTuples.get(), probeState->matchedTuples.get());
-    probeState->matchedSelVector->selectedSize = numMatchedTuples;
+    probeState->matchedSelVector.setSelSize(numMatchedTuples);
     probeState->nextMatchedTupleIdx = 0;
     return true;
 }
@@ -58,23 +60,23 @@ bool HashJoinProbe::getMatchedTuplesForFlatKey(ExecutionContext* context) {
 bool HashJoinProbe::getMatchedTuplesForUnFlatKey(ExecutionContext* context) {
     KU_ASSERT(keyVectors.size() == 1);
     auto keyVector = keyVectors[0];
-    restoreSelVector(keyVector->state->selVector);
+    restoreSelVector(*keyVector->state);
     if (!children[0]->getNextTuple(context)) {
         return false;
     }
-    saveSelVector(keyVector->state->selVector);
-    sharedState->getHashTable()->probe(keyVectors, hashVector.get(), tmpHashVector.get(),
+    saveSelVector(*keyVector->state);
+    sharedState->getHashTable()->probe(keyVectors, *hashVector, hashSelVec, *tmpHashVector,
         probeState->probedTuples.get());
     auto numMatchedTuples =
         sharedState->getHashTable()->matchUnFlatKey(keyVector, probeState->probedTuples.get(),
-            probeState->matchedTuples.get(), probeState->matchedSelVector.get());
-    probeState->matchedSelVector->selectedSize = numMatchedTuples;
+            probeState->matchedTuples.get(), probeState->matchedSelVector);
+    probeState->matchedSelVector.setSelSize(numMatchedTuples);
     probeState->nextMatchedTupleIdx = 0;
     return true;
 }
 
 uint64_t HashJoinProbe::getInnerJoinResultForFlatKey() {
-    if (probeState->matchedSelVector->selectedSize == 0) {
+    if (probeState->matchedSelVector.getSelSize() == 0) {
         return 0;
     }
     auto numTuplesToRead = 1;
@@ -85,23 +87,32 @@ uint64_t HashJoinProbe::getInnerJoinResultForFlatKey() {
 }
 
 uint64_t HashJoinProbe::getInnerJoinResultForUnFlatKey() {
-    auto numTuplesToRead = probeState->matchedSelVector->selectedSize;
+    auto numTuplesToRead = probeState->matchedSelVector.getSelSize();
     if (numTuplesToRead == 0) {
         return 0;
     }
-    auto keySelVector = keyVectors[0]->state->selVector.get();
-    if (keySelVector->selectedSize != numTuplesToRead) {
+    auto& keySelVector = keyVectors[0]->state->getSelVectorUnsafe();
+    if (keySelVector.getSelSize() != numTuplesToRead) {
         // Some keys have no matched tuple. So we modify selected position.
-        auto buffer = keySelVector->getMultableBuffer();
+        auto buffer = keySelVector.getMultableBuffer();
         for (auto i = 0u; i < numTuplesToRead; i++) {
-            buffer[i] = probeState->matchedSelVector->selectedPositions[i];
+            buffer[i] = probeState->matchedSelVector[i];
         }
-        keySelVector->setToFiltered(numTuplesToRead);
+        keySelVector.setToFiltered(numTuplesToRead);
     }
     sharedState->getHashTable()->lookup(vectorsToReadInto, columnIdxsToReadFrom,
         probeState->matchedTuples.get(), probeState->nextMatchedTupleIdx, numTuplesToRead);
     probeState->nextMatchedTupleIdx += numTuplesToRead;
     return numTuplesToRead;
+}
+
+static void writeLeftJoinMarkVector(ValueVector* markVector, bool flag) {
+    if (markVector == nullptr) {
+        return;
+    }
+    KU_ASSERT(markVector->state->getSelVector().getSelSize() == 1);
+    auto pos = markVector->state->getSelVector()[0];
+    markVector->setValue<bool>(pos, flag);
 }
 
 uint64_t HashJoinProbe::getLeftJoinResult() {
@@ -114,17 +125,20 @@ uint64_t HashJoinProbe::getLeftJoinResult() {
         // The following for loop is a temporary hack.
         for (auto& vector : keyVectors) {
             KU_ASSERT(vector->state->isFlat());
-            vector->state->selVector->selectedSize = 1;
+            vector->state->getSelVectorUnsafe().setSelSize(1);
         }
         probeState->probedTuples[0] = nullptr;
+        writeLeftJoinMarkVector(markVector, false);
+        return 1;
     }
+    writeLeftJoinMarkVector(markVector, true);
     return 1;
 }
 
 uint64_t HashJoinProbe::getCountJoinResult() {
     KU_ASSERT(vectorsToReadInto.size() == 1);
     if (getInnerJoinResult() == 0) {
-        auto pos = vectorsToReadInto[0]->state->selVector->selectedPositions[0];
+        auto pos = vectorsToReadInto[0]->state->getSelVector()[0];
         vectorsToReadInto[0]->setValue<int64_t>(pos, 0);
         probeState->probedTuples[0] = nullptr;
     }
@@ -134,17 +148,17 @@ uint64_t HashJoinProbe::getCountJoinResult() {
 uint64_t HashJoinProbe::getMarkJoinResult() {
     auto markValues = (bool*)markVector->getData();
     if (markVector->state->isFlat()) {
-        auto pos = markVector->state->selVector->selectedPositions[0];
-        markValues[pos] = probeState->matchedSelVector->selectedSize != 0;
+        auto pos = markVector->state->getSelVector()[0];
+        markValues[pos] = probeState->matchedSelVector.getSelSize() != 0;
     } else {
         std::fill(markValues, markValues + DEFAULT_VECTOR_CAPACITY, false);
-        for (auto i = 0u; i < probeState->matchedSelVector->selectedSize; i++) {
-            auto pos = probeState->matchedSelVector->selectedPositions[i];
+        for (auto i = 0u; i < probeState->matchedSelVector.getSelSize(); i++) {
+            auto pos = probeState->matchedSelVector[i];
             markValues[pos] = true;
         }
     }
     probeState->probedTuples[0] = nullptr;
-    probeState->nextMatchedTupleIdx = probeState->matchedSelVector->selectedSize;
+    probeState->nextMatchedTupleIdx = probeState->matchedSelVector.getSelSize();
     return 1;
 }
 

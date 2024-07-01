@@ -6,7 +6,7 @@
 #include "cypher_parser.h"
 #pragma GCC diagnostic pop
 
-#include "expression/parsed_expression.h"
+#include "parser/ddl/create_table_info.h"
 #include "statement.h"
 
 namespace kuzu {
@@ -26,6 +26,8 @@ class PatternElementChain;
 class RelPattern;
 struct ParsedCaseAlternative;
 struct BaseScanSource;
+class ProjectGraph;
+struct JoinHintNode;
 
 class Transformer {
 public:
@@ -52,7 +54,7 @@ private:
     std::vector<std::string> transformFilePaths(
         const std::vector<antlr4::tree::TerminalNode*>& stringLiteral);
     std::unique_ptr<BaseScanSource> transformScanSource(CypherParser::KU_ScanSourceContext& ctx);
-    parsing_option_t transformParsingOptions(CypherParser::KU_ParsingOptionsContext& ctx);
+    options_t transformOptions(CypherParser::KU_OptionsContext& ctx);
 
     std::unique_ptr<Statement> transformExportDatabase(CypherParser::KU_ExportDatabaseContext& ctx);
     std::unique_ptr<Statement> transformImportDatabase(CypherParser::KU_ImportDatabaseContext& ctx);
@@ -80,6 +82,8 @@ private:
     std::unique_ptr<ReadingClause> transformUnwind(CypherParser::OC_UnwindContext& ctx);
     std::unique_ptr<ReadingClause> transformInQueryCall(CypherParser::KU_InQueryCallContext& ctx);
     std::unique_ptr<ReadingClause> transformLoadFrom(CypherParser::KU_LoadFromContext& ctx);
+    std::unique_ptr<ProjectGraph> transformProjectGraph(CypherParser::KU_ProjectGraphContext& ctx);
+    std::shared_ptr<JoinHintNode> transformJoinHint(CypherParser::KU_JoinNodeContext& ctx);
 
     // Transform projection.
     WithClause transformWith(CypherParser::OC_WithContext& ctx);
@@ -184,7 +188,6 @@ private:
         CypherParser::OC_DoubleLiteralContext& ctx);
 
     // Transform ddl.
-    std::unique_ptr<Statement> transformDDL(CypherParser::KU_DDLContext& ctx);
     std::unique_ptr<Statement> transformAlterTable(CypherParser::KU_AlterTableContext& ctx);
     std::unique_ptr<Statement> transformCreateNodeTable(
         CypherParser::KU_CreateNodeTableContext& ctx);
@@ -193,15 +196,20 @@ private:
         CypherParser::KU_CreateRelTableGroupContext& ctx);
     std::unique_ptr<Statement> transformCreateRdfGraphClause(
         CypherParser::KU_CreateRdfGraphContext& ctx);
-    std::unique_ptr<Statement> transformDropTable(CypherParser::KU_DropTableContext& ctx);
+    std::unique_ptr<Statement> transformCreateSequence(CypherParser::KU_CreateSequenceContext& ctx);
+    std::unique_ptr<Statement> transformCreateType(CypherParser::KU_CreateTypeContext& ctx);
+    std::unique_ptr<Statement> transformDrop(CypherParser::KU_DropContext& ctx);
     std::unique_ptr<Statement> transformRenameTable(CypherParser::KU_AlterTableContext& ctx);
     std::unique_ptr<Statement> transformAddProperty(CypherParser::KU_AlterTableContext& ctx);
     std::unique_ptr<Statement> transformDropProperty(CypherParser::KU_AlterTableContext& ctx);
     std::unique_ptr<Statement> transformRenameProperty(CypherParser::KU_AlterTableContext& ctx);
+    std::unique_ptr<Statement> transformCommentOn(CypherParser::KU_CommentOnContext& ctx);
     std::string transformDataType(CypherParser::KU_DataTypeContext& ctx);
     std::string transformPrimaryKey(CypherParser::KU_CreateNodeConstraintContext& ctx);
-    std::vector<std::pair<std::string, std::string>> transformPropertyDefinitions(
+    std::vector<PropertyDefinition> transformPropertyDefinitions(
         CypherParser::KU_PropertyDefinitionsContext& ctx);
+    std::vector<PropertyDefinitionDDL> transformPropertyDefinitionsDDL(
+        CypherParser::KU_PropertyDefinitionsDDLContext& ctx);
 
     // Transform standalone call.
     std::unique_ptr<Statement> transformStandaloneCall(CypherParser::KU_StandaloneCallContext& ctx);
@@ -216,12 +224,10 @@ private:
     // Transform extension.
     std::unique_ptr<Statement> transformExtension(CypherParser::KU_ExtensionContext& ctx);
 
-    // Transform comment on.
-    std::unique_ptr<Statement> transformCommentOn(CypherParser::KU_CommentOnContext& ctx);
-
-    // Transform attach/detach database.
+    // Transform attach/detach/use database.
     std::unique_ptr<Statement> transformAttachDatabase(CypherParser::KU_AttachDatabaseContext& ctx);
     std::unique_ptr<Statement> transformDetachDatabase(CypherParser::KU_DetachDatabaseContext& ctx);
+    std::unique_ptr<Statement> transformUseDatabase(CypherParser::KU_UseDatabaseContext& ctx);
 
 private:
     CypherParser::Ku_StatementsContext& root;

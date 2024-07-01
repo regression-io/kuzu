@@ -17,25 +17,12 @@ WALPageIdxGroup::WALPageIdxGroup() {
 }
 
 BMFileHandle::BMFileHandle(const std::string& path, uint8_t flags, BufferManager* bm,
-    PageSizeClass pageSizeClass, FileVersionedType fileVersionedType,
-    common::VirtualFileSystem* vfs)
-    : FileHandle{path, flags, vfs}, fileVersionedType{fileVersionedType}, bm{bm},
-      pageSizeClass{pageSizeClass} {
-    initPageStatesAndGroups();
-}
-
-BMFileHandle::~BMFileHandle() {
-    bm->removeFilePagesFromFrames(*this);
-}
-
-void BMFileHandle::initPageStatesAndGroups() {
-    pageStates.resize(pageCapacity);
-    for (auto i = 0ull; i < numPages; i++) {
-        pageStates[i] = std::make_unique<PageState>();
-    }
-    auto numPageGroups = getNumPageGroups();
-    frameGroupIdxes.resize(numPageGroups);
-    for (auto i = 0u; i < numPageGroups; i++) {
+    uint32_t fileIndex, PageSizeClass pageSizeClass, FileVersionedType fileVersionedType,
+    common::VirtualFileSystem* vfs, main::ClientContext* context)
+    : FileHandle{path, flags, vfs, context}, fileVersionedType{fileVersionedType}, bm{bm},
+      pageSizeClass{pageSizeClass}, pageStates{numPages, pageCapacity},
+      frameGroupIdxes{getNumPageGroups(), getNumPageGroups()}, fileIndex{fileIndex} {
+    for (auto i = 0u; i < frameGroupIdxes.size(); i++) {
         frameGroupIdxes[i] = bm->addNewFrameGroup(pageSizeClass);
     }
 }
@@ -44,7 +31,7 @@ page_idx_t BMFileHandle::addNewPageWithoutLock() {
     if (numPages == pageCapacity) {
         addNewPageGroupWithoutLock();
     }
-    pageStates[numPages] = std::make_unique<PageState>();
+    pageStates[numPages].resetToEvicted();
     return numPages++;
 }
 

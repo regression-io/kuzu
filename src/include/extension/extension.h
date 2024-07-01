@@ -7,11 +7,16 @@
 #include "main/db_config.h"
 
 namespace kuzu {
+namespace function {
+struct TableFunction;
+} // namespace function
 namespace main {
 class Database;
 } // namespace main
 
 namespace extension {
+
+std::string getPlatform();
 
 class KUZU_API Extension {
 public:
@@ -28,11 +33,18 @@ struct ExtensionUtils {
     static constexpr const char* EXTENSION_REPO =
         "http://extension.kuzudb.com/v{}/{}/lib{}.kuzu_extension";
 
+    static constexpr const char* OFFICIAL_EXTENSION[] = {"HTTPFS", "POSTGRES", "DUCKDB"};
+
     static std::string getExtensionPath(const std::string& extensionDir, const std::string& name);
 
     static bool isFullPath(const std::string& extension);
 
     static ExtensionRepoInfo getExtensionRepoInfo(const std::string& extension);
+
+    KUZU_API static void registerTableFunction(main::Database& database,
+        std::unique_ptr<function::TableFunction> function);
+
+    static bool isOfficialExtension(const std::string& extension);
 };
 
 struct ExtensionOptions {

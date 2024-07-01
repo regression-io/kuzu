@@ -1,25 +1,30 @@
 SET(CMAKE_FIND_PACKAGE_SORT_ORDER NATURAL)
 SET(CMAKE_FIND_PACKAGE_SORT_DIRECTION DEC)
-SET(OPENSSL_USE_STATIC_LIBS TRUE)
+# Address sanitizer may change the ABI, so we use dynamic linking
+# if it's enabled.
+if(${ENABLE_ADDRESS_SANITIZER})
+        SET(OPENSSL_USE_STATIC_LIBS FALSE)
+else()
+        SET(OPENSSL_USE_STATIC_LIBS TRUE)
+endif()
 
 find_package(OpenSSL REQUIRED)
 include_directories(${OPENSSL_INCLUDE_DIR})
 add_compile_definitions(CPPHTTPLIB_OPENSSL_SUPPORT)
 
-add_subdirectory(third_party/mbedtls)
-
 include_directories(
         ${PROJECT_SOURCE_DIR}/src/include
         ${PROJECT_SOURCE_DIR}/third_party/httplib
-        src/include
-        third_party/mbedtls/include)
+        src/include)
 
 add_library(httpfs
         SHARED
         src/httpfs.cpp
         src/httpfs_extension.cpp
         src/s3fs.cpp
-        src/crypto.cpp)
+        src/crypto.cpp
+        src/http_config.cpp
+        src/cached_file_manager.cpp)
 
 target_link_libraries(httpfs
         PRIVATE
@@ -46,9 +51,9 @@ if (WIN32)
         # appealing:
         #       1. Link against the shared library. This works well assuming
         #       the DLL is locatable, but this assumption isn't valid for users
-        #       of kuzu_shell.exe.
-        #       2. Link against the executable (kuzu_shell.exe). This is
-        #       strange but works well for kuzu_shell.exe. However, it forces
+        #       of kuzu.exe.
+        #       2. Link against the executable (kuzu.exe). This is
+        #       strange but works well for kuzu.exe. However, it forces
         #       users who are embedding kuzu in their application to recompile
         #       the extension _and_ export the symbols for the extension to
         #       locate on load.

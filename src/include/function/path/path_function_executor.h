@@ -27,38 +27,40 @@ struct UnaryPathExecutor {
     static void executeNodeIDs(common::ValueVector& input, common::ValueVector& result) {
         auto nodesFieldIdx = 0;
         KU_ASSERT(nodesFieldIdx ==
-                  common::StructType::getFieldIdx(&input.dataType, common::InternalKeyword::NODES));
+                  common::StructType::getFieldIdx(input.dataType, common::InternalKeyword::NODES));
         auto nodesVector = common::StructVector::getFieldVector(&input, nodesFieldIdx).get();
         auto internalIDFieldIdx = 0;
-        execute(*input.state->selVector, *nodesVector, internalIDFieldIdx, result);
+        execute(input.state->getSelVector(), *nodesVector, internalIDFieldIdx, result);
     }
 
     static void executeRelIDs(common::ValueVector& input, common::ValueVector& result) {
         auto relsFieldIdx = 1;
         KU_ASSERT(relsFieldIdx ==
-                  common::StructType::getFieldIdx(&input.dataType, common::InternalKeyword::RELS));
+                  common::StructType::getFieldIdx(input.dataType, common::InternalKeyword::RELS));
         auto relsVector = common::StructVector::getFieldVector(&input, relsFieldIdx).get();
         auto internalIDFieldIdx = 3;
-        execute(*input.state->selVector, *relsVector, internalIDFieldIdx, result);
+        execute(input.state->getSelVector(), *relsVector, internalIDFieldIdx, result);
     }
 
     static bool selectNodeIDs(common::ValueVector& input,
         common::SelectionVector& selectionVector) {
         auto nodesFieldIdx = 0;
         KU_ASSERT(nodesFieldIdx ==
-                  common::StructType::getFieldIdx(&input.dataType, common::InternalKeyword::NODES));
+                  common::StructType::getFieldIdx(input.dataType, common::InternalKeyword::NODES));
         auto nodesVector = common::StructVector::getFieldVector(&input, nodesFieldIdx).get();
         auto internalIDFieldIdx = 0;
-        return select(*input.state->selVector, *nodesVector, internalIDFieldIdx, selectionVector);
+        return select(input.state->getSelVector(), *nodesVector, internalIDFieldIdx,
+            selectionVector);
     }
 
     static bool selectRelIDs(common::ValueVector& input, common::SelectionVector& selectionVector) {
         auto relsFieldIdx = 1;
         KU_ASSERT(relsFieldIdx ==
-                  common::StructType::getFieldIdx(&input.dataType, common::InternalKeyword::RELS));
+                  common::StructType::getFieldIdx(input.dataType, common::InternalKeyword::RELS));
         auto relsVector = common::StructVector::getFieldVector(&input, relsFieldIdx).get();
         auto internalIDFieldIdx = 3;
-        return select(*input.state->selVector, *relsVector, internalIDFieldIdx, selectionVector);
+        return select(input.state->getSelVector(), *relsVector, internalIDFieldIdx,
+            selectionVector);
     }
 
 private:
@@ -66,21 +68,21 @@ private:
         common::ValueVector& listVector, common::struct_field_idx_t fieldIdx,
         common::ValueVector& result) {
         auto listDataVector = common::ListVector::getDataVector(&listVector);
-        KU_ASSERT(fieldIdx == common::StructType::getFieldIdx(&listDataVector->dataType,
+        KU_ASSERT(fieldIdx == common::StructType::getFieldIdx(listDataVector->dataType,
                                   common::InternalKeyword::ID));
         auto internalIDsVector =
             common::StructVector::getFieldVector(listDataVector, fieldIdx).get();
         std::unordered_set<common::nodeID_t, InternalIDHasher> internalIDSet;
         if (inputSelVector.isUnfiltered()) {
-            for (auto i = 0u; i < inputSelVector.selectedSize; ++i) {
+            for (auto i = 0u; i < inputSelVector.getSelSize(); ++i) {
                 auto& listEntry = listVector.getValue<common::list_entry_t>(i);
                 bool isTrail = isAllInternalIDDistinct(internalIDsVector, listEntry.offset,
                     listEntry.size, internalIDSet);
                 result.setValue<bool>(i, isTrail);
             }
         } else {
-            for (auto i = 0u; i < inputSelVector.selectedSize; ++i) {
-                auto pos = inputSelVector.selectedPositions[i];
+            for (auto i = 0u; i < inputSelVector.getSelSize(); ++i) {
+                auto pos = inputSelVector[i];
                 auto& listEntry = listVector.getValue<common::list_entry_t>(pos);
                 bool isTrail = isAllInternalIDDistinct(internalIDsVector, listEntry.offset,
                     listEntry.size, internalIDSet);
@@ -93,7 +95,7 @@ private:
         common::ValueVector& listVector, common::struct_field_idx_t fieldIdx,
         common::SelectionVector& selectionVector) {
         auto listDataVector = common::ListVector::getDataVector(&listVector);
-        KU_ASSERT(fieldIdx == common::StructType::getFieldIdx(&listDataVector->dataType,
+        KU_ASSERT(fieldIdx == common::StructType::getFieldIdx(listDataVector->dataType,
                                   common::InternalKeyword::ID));
         auto internalIDsVector =
             common::StructVector::getFieldVector(listDataVector, fieldIdx).get();
@@ -101,7 +103,7 @@ private:
         auto numSelectedValues = 0u;
         auto buffer = selectionVector.getMultableBuffer();
         if (inputSelVector.isUnfiltered()) {
-            for (auto i = 0u; i < inputSelVector.selectedSize; ++i) {
+            for (auto i = 0u; i < inputSelVector.getSelSize(); ++i) {
                 auto& listEntry = listVector.getValue<common::list_entry_t>(i);
                 bool isTrail = isAllInternalIDDistinct(internalIDsVector, listEntry.offset,
                     listEntry.size, internalIDSet);
@@ -109,8 +111,8 @@ private:
                 numSelectedValues += isTrail;
             }
         } else {
-            for (auto i = 0u; i < inputSelVector.selectedSize; ++i) {
-                auto pos = inputSelVector.selectedPositions[i];
+            for (auto i = 0u; i < inputSelVector.getSelSize(); ++i) {
+                auto pos = inputSelVector[i];
                 auto& listEntry = listVector.getValue<common::list_entry_t>(pos);
                 bool isTrail = isAllInternalIDDistinct(internalIDsVector, listEntry.offset,
                     listEntry.size, internalIDSet);
@@ -118,7 +120,7 @@ private:
                 numSelectedValues += isTrail;
             }
         }
-        selectionVector.selectedSize = numSelectedValues;
+        selectionVector.setSelSize(numSelectedValues);
         return numSelectedValues > 0;
     }
 };

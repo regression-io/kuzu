@@ -2,18 +2,23 @@
 
 #include <unordered_map>
 
-#include "catalog/catalog_entry/node_table_catalog_entry.h"
-#include "common/exception/storage.h"
+#include "binder/binder.h"
+#include "catalog/catalog_entry/scalar_macro_catalog_entry.h"
+#include "catalog/catalog_entry/sequence_catalog_entry.h"
+#include "catalog/catalog_entry/table_catalog_entry.h"
+#include "catalog/catalog_entry/type_catalog_entry.h"
 #include "common/file_system/file_info.h"
+#include "common/serializer/buffered_file.h"
+#include "processor/expression_mapper.h"
 #include "storage/storage_manager.h"
 #include "storage/storage_utils.h"
-#include "storage/store/node_table.h"
 #include "storage/wal/wal_record.h"
-#include "storage/wal_replayer_utils.h"
 #include "transaction/transaction.h"
 
+using namespace kuzu::binder;
 using namespace kuzu::catalog;
 using namespace kuzu::common;
+using namespace kuzu::processor;
 using namespace kuzu::storage;
 using namespace kuzu::transaction;
 
@@ -23,81 +28,71 @@ namespace storage {
 // COMMIT_CHECKPOINT:   isCheckpoint = true,  isRecovering = false
 // ROLLBACK:            isCheckpoint = false, isRecovering = false
 // RECOVERY_CHECKPOINT: isCheckpoint = true,  isRecovering = true
-WALReplayer::WALReplayer(WAL* wal, StorageManager* storageManager, BufferManager* bufferManager,
-    Catalog* catalog, WALReplayMode replayMode, common::VirtualFileSystem* vfs)
-    : isRecovering{replayMode == WALReplayMode::RECOVERY_CHECKPOINT},
-      isCheckpoint{replayMode != WALReplayMode::ROLLBACK}, storageManager{storageManager},
-      bufferManager{bufferManager}, vfs{vfs}, wal{wal}, catalog{catalog} {
-    init();
-}
-
-void WALReplayer::init() {
-    walFileHandle = wal->fileHandle;
+WALReplayer::WALReplayer(main::ClientContext& clientContext, BMFileHandle& shadowFH,
+    WALReplayMode replayMode)
+    : shadowFH{shadowFH}, isRecovering{replayMode == WALReplayMode::RECOVERY_CHECKPOINT},
+      isCheckpoint{replayMode != WALReplayMode::ROLLBACK}, clientContext{clientContext} {
+    walFilePath = clientContext.getVFSUnsafe()->joinPath(clientContext.getDatabasePath(),
+        StorageConstants::WAL_FILE_SUFFIX);
     pageBuffer = std::make_unique<uint8_t[]>(BufferPoolConstants::PAGE_4KB_SIZE);
 }
 
 void WALReplayer::replay() {
-    // Note: We assume no other thread is accessing the wal during the following operations.
-    // If this assumption no longer holds, we need to lock the wal.
-    if (!isRecovering && isCheckpoint && !wal->isLastLoggedRecordCommit()) {
-        throw StorageException(
-            "Cannot checkpointInMemory WAL because last logged record is not a commit record.");
+    if (!clientContext.getVFSUnsafe()->fileOrPathExists(walFilePath, &clientContext)) {
+        return;
     }
-    if (!wal->isEmptyWAL()) {
-        auto walIterator = wal->getIterator();
-        WALRecord walRecord;
+    auto fileInfo = clientContext.getVFSUnsafe()->openFile(walFilePath, O_RDONLY);
+    auto walFileSize = fileInfo->getFileSize();
+    // Check if the wal file is empty or corrupted. so nothing to read.
+    if (walFileSize == 0) {
+        return;
+    }
+    // TODO(Guodong): Handle the case that wal file is corrupted and there is no COMMIT record for
+    // the last transaction.
+    try {
+        Deserializer deserializer(std::make_unique<BufferedFileReader>(std::move(fileInfo)));
         std::unordered_map<DBFileID, std::unique_ptr<FileInfo>> fileCache;
-        while (walIterator->hasNextRecord()) {
-            walIterator->getNextRecord(walRecord);
-            replayWALRecord(walRecord, fileCache);
+        while (!deserializer.finished()) {
+            auto walRecord = WALRecord::deserialize(deserializer);
+            replayWALRecord(*walRecord, fileCache);
         }
-    }
-    // We next perform an in-memory checkpointing or rolling back of node/relTables.
-    if (!wal->getUpdatedTables().empty()) {
-        if (isCheckpoint) {
-            storageManager->checkpointInMemory();
-        } else {
-            storageManager->rollbackInMemory();
-        }
+    } catch (const Exception& e) {
+        throw RuntimeException(
+            stringFormat("Failed to read wal record from WAL file. Error: {}", e.what()));
     }
 }
 
 void WALReplayer::replayWALRecord(WALRecord& walRecord,
     std::unordered_map<DBFileID, std::unique_ptr<FileInfo>>& fileCache) {
-    switch (walRecord.recordType) {
+    switch (walRecord.type) {
     case WALRecordType::PAGE_UPDATE_OR_INSERT_RECORD: {
         replayPageUpdateOrInsertRecord(walRecord, fileCache);
+    } break;
+    case WALRecordType::CATALOG_RECORD: {
+        replayCatalogRecord(walRecord);
     } break;
     case WALRecordType::TABLE_STATISTICS_RECORD: {
         replayTableStatisticsRecord(walRecord);
     } break;
     case WALRecordType::COMMIT_RECORD: {
     } break;
-    case WALRecordType::CATALOG_RECORD: {
-        replayCatalogRecord();
-    } break;
-    case WALRecordType::CREATE_TABLE_RECORD: {
-        replayCreateTableRecord(walRecord);
-    } break;
-    case WALRecordType::CREATE_RDF_GRAPH_RECORD: {
-        replayRdfGraphRecord(walRecord);
+    case WALRecordType::CREATE_CATALOG_ENTRY_RECORD: {
+        replayCreateCatalogEntryRecord(walRecord);
     } break;
     case WALRecordType::COPY_TABLE_RECORD: {
         replayCopyTableRecord(walRecord);
     } break;
-    case WALRecordType::DROP_TABLE_RECORD: {
-        replayDropTableRecord(walRecord);
+    case WALRecordType::DROP_CATALOG_ENTRY_RECORD: {
+        replayDropCatalogEntryRecord(walRecord);
     } break;
-    case WALRecordType::DROP_PROPERTY_RECORD: {
-        replayDropPropertyRecord(walRecord);
+    case WALRecordType::ALTER_TABLE_ENTRY_RECORD: {
+        replayAlterTableEntryRecord(walRecord);
     } break;
-    case WALRecordType::ADD_PROPERTY_RECORD: {
-        replayAddPropertyRecord(walRecord);
+    case WALRecordType::UPDATE_SEQUENCE_RECORD: {
+        replayUpdateSequenceRecord(walRecord);
     } break;
     default:
-        throw RuntimeException(
-            "Unrecognized WAL record type inside WALReplayer::replay. recordType: " +
-            walRecordTypeToString(walRecord.recordType));
+        KU_UNREACHABLE;
     }
 }
 
@@ -105,23 +100,20 @@ void WALReplayer::replayPageUpdateOrInsertRecord(const WALRecord& walRecord,
     std::unordered_map<DBFileID, std::unique_ptr<FileInfo>>& fileCache) {
     // 1. As the first step we copy over the page on disk, regardless of if we are recovering
     // (and checkpointing) or checkpointing while during regular execution.
-    auto dbFileID = walRecord.pageInsertOrUpdateRecord.dbFileID;
+    auto& pageInsertOrUpdateRecord = walRecord.constCast<PageUpdateOrInsertRecord>();
+    auto dbFileID = pageInsertOrUpdateRecord.dbFileID;
     auto entry = fileCache.find(dbFileID);
     if (entry == fileCache.end()) {
         fileCache.insert(std::make_pair(dbFileID,
-            StorageUtils::getFileInfoForReadWrite(wal->getDirectory(), dbFileID, vfs)));
+            StorageUtils::getFileInfoForReadWrite(clientContext.getDatabasePath(), dbFileID,
+                clientContext.getVFSUnsafe())));
         entry = fileCache.find(dbFileID);
     }
     auto& fileInfoOfDBFile = entry->second;
     if (isCheckpoint) {
-        if (!wal->isLastLoggedRecordCommit()) {
-            // Nothing to undo.
-            return;
-        }
-        walFileHandle->readPage(pageBuffer.get(), walRecord.pageInsertOrUpdateRecord.pageIdxInWAL);
+        shadowFH.readPage(pageBuffer.get(), pageInsertOrUpdateRecord.pageIdxInWAL);
         fileInfoOfDBFile->writeFile(pageBuffer.get(), BufferPoolConstants::PAGE_4KB_SIZE,
-            walRecord.pageInsertOrUpdateRecord.pageIdxInOriginalFile *
-                BufferPoolConstants::PAGE_4KB_SIZE);
+            pageInsertOrUpdateRecord.pageIdxInOriginalFile * BufferPoolConstants::PAGE_4KB_SIZE);
     }
     if (!isRecovering) {
         // 2: If we are not recovering, we do any in-memory checkpointing or rolling back work
@@ -132,187 +124,185 @@ void WALReplayer::replayPageUpdateOrInsertRecord(const WALRecord& walRecord,
     }
 }
 
-void WALReplayer::replayTableStatisticsRecord(const WALRecord& walRecord) {
+void WALReplayer::replayCatalogRecord(const WALRecord&) {
     if (isCheckpoint) {
-        if (walRecord.tableStatisticsRecord.isNodeTable) {
-            auto walFilePath = StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(vfs,
-                wal->getDirectory(), common::FileVersionType::WAL_VERSION);
+        auto vfs = clientContext.getVFSUnsafe();
+        auto checkpointFile = StorageUtils::getCatalogFilePath(vfs, clientContext.getDatabasePath(),
+            common::FileVersionType::WAL_VERSION);
+        auto originalFile = StorageUtils::getCatalogFilePath(vfs, clientContext.getDatabasePath(),
+            common::FileVersionType::ORIGINAL);
+        vfs->overwriteFile(checkpointFile, originalFile);
+    }
+}
+
+void WALReplayer::replayTableStatisticsRecord(const WALRecord& walRecord) {
+    auto& tableStatisticsRecord = walRecord.constCast<TableStatisticsRecord>();
+    auto vfs = clientContext.getVFSUnsafe();
+    auto storageManager = clientContext.getStorageManager();
+    if (isCheckpoint) {
+        switch (tableStatisticsRecord.tableType) {
+        case TableType::NODE: {
+            auto checkpointFile = StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(vfs,
+                clientContext.getDatabasePath(), common::FileVersionType::WAL_VERSION);
+            if (!vfs->fileOrPathExists(walFilePath, &clientContext)) {
+                // This is a temp hack: multiple transactions can log multiple table stats records
+                // before checkpoint.
+                return;
+            }
             auto originalFilePath = StorageUtils::getNodesStatisticsAndDeletedIDsFilePath(vfs,
-                wal->getDirectory(), common::FileVersionType::ORIGINAL);
-            vfs->overwriteFile(walFilePath, originalFilePath);
+                clientContext.getDatabasePath(), common::FileVersionType::ORIGINAL);
+            vfs->overwriteFile(checkpointFile, originalFilePath);
             if (!isRecovering) {
                 storageManager->getNodesStatisticsAndDeletedIDs()->checkpointInMemoryIfNecessary();
             }
-        } else {
-            auto walFilePath = StorageUtils::getRelsStatisticsFilePath(vfs, wal->getDirectory(),
-                common::FileVersionType::WAL_VERSION);
+        } break;
+        case TableType::REL: {
+            auto checkpointFile = StorageUtils::getRelsStatisticsFilePath(vfs,
+                clientContext.getDatabasePath(), common::FileVersionType::WAL_VERSION);
+            if (!vfs->fileOrPathExists(checkpointFile, &clientContext)) {
+                // This is a temp hack: multiple transactions can log multiple table stats records
+                // before checkpoint.
+                return;
+            }
             auto originalFilePath = StorageUtils::getRelsStatisticsFilePath(vfs,
-                wal->getDirectory(), common::FileVersionType::ORIGINAL);
-            vfs->overwriteFile(walFilePath, originalFilePath);
+                clientContext.getDatabasePath(), common::FileVersionType::ORIGINAL);
+            vfs->overwriteFile(checkpointFile, originalFilePath);
             if (!isRecovering) {
                 storageManager->getRelsStatistics()->checkpointInMemoryIfNecessary();
             }
+        } break;
+        default: {
+            KU_UNREACHABLE;
+        }
         }
     } else {
-        if (walRecord.tableStatisticsRecord.isNodeTable) {
+        switch (tableStatisticsRecord.tableType) {
+        case TableType::NODE: {
             storageManager->getNodesStatisticsAndDeletedIDs()->rollbackInMemoryIfNecessary();
-        } else {
+        } break;
+        case TableType::REL: {
             storageManager->getRelsStatistics()->rollbackInMemoryIfNecessary();
+        } break;
+        default: {
+            KU_UNREACHABLE;
+        }
         }
     }
 }
 
-void WALReplayer::replayCatalogRecord() {
-    if (isCheckpoint) {
-        auto walFile = StorageUtils::getCatalogFilePath(vfs, wal->getDirectory(),
-            common::FileVersionType::WAL_VERSION);
-        auto originalFile = StorageUtils::getCatalogFilePath(vfs, wal->getDirectory(),
-            common::FileVersionType::ORIGINAL);
-        vfs->overwriteFile(walFile, originalFile);
-        if (!isRecovering) {
-            catalog->checkpointInMemory();
+void WALReplayer::replayCreateCatalogEntryRecord(const WALRecord& walRecord) {
+    if (!(isCheckpoint && isRecovering)) {
+        // Nothing to do.
+        return;
+    }
+    auto& createEntryRecord = walRecord.constCast<CreateCatalogEntryRecord>();
+    switch (createEntryRecord.ownedCatalogEntry->getType()) {
+    case CatalogEntryType::NODE_TABLE_ENTRY:
+    case CatalogEntryType::REL_TABLE_ENTRY:
+    case CatalogEntryType::REL_GROUP_ENTRY:
+    case CatalogEntryType::RDF_GRAPH_ENTRY: {
+        auto& tableEntry = createEntryRecord.ownedCatalogEntry->constCast<TableCatalogEntry>();
+        clientContext.getCatalog()->createTableSchema(&DUMMY_WRITE_TRANSACTION,
+            tableEntry.getBoundCreateTableInfo(&DUMMY_WRITE_TRANSACTION));
+    } break;
+    case CatalogEntryType::SCALAR_MACRO_ENTRY: {
+        auto& macroEntry =
+            createEntryRecord.ownedCatalogEntry->constCast<ScalarMacroCatalogEntry>();
+        clientContext.getCatalog()->addScalarMacroFunction(&DUMMY_WRITE_TRANSACTION,
+            macroEntry.getName(), macroEntry.getMacroFunction()->copy());
+    } break;
+    case CatalogEntryType::SEQUENCE_ENTRY: {
+        auto& sequenceEntry =
+            createEntryRecord.ownedCatalogEntry->constCast<SequenceCatalogEntry>();
+        clientContext.getCatalog()->createSequence(&DUMMY_WRITE_TRANSACTION,
+            sequenceEntry.getBoundCreateSequenceInfo());
+    } break;
+    case CatalogEntryType::TYPE_ENTRY: {
+        auto& typeEntry = createEntryRecord.ownedCatalogEntry->constCast<TypeCatalogEntry>();
+        clientContext.getCatalog()->createType(&DUMMY_WRITE_TRANSACTION, typeEntry.getName(),
+            typeEntry.getLogicalType().copy());
+    } break;
+    default: {
+        KU_UNREACHABLE;
+    }
+    }
+}
+
+// Replay catalog should only work under RECOVERY mode.
+void WALReplayer::replayDropCatalogEntryRecord(const WALRecord& walRecord) {
+    if (!(isCheckpoint && isRecovering)) {
+        return;
+    }
+    auto& dropEntryRecord = walRecord.constCast<DropCatalogEntryRecord>();
+    auto entryID = dropEntryRecord.entryID;
+    switch (dropEntryRecord.entryType) {
+    case CatalogEntryType::NODE_TABLE_ENTRY:
+    case CatalogEntryType::REL_TABLE_ENTRY:
+    case CatalogEntryType::REL_GROUP_ENTRY:
+    case CatalogEntryType::RDF_GRAPH_ENTRY: {
+        clientContext.getCatalog()->dropTableSchema(&DUMMY_WRITE_TRANSACTION, entryID);
+        // During recovery, storageManager does not exist.
+        if (clientContext.getStorageManager()) {
+            clientContext.getStorageManager()->dropTable(entryID, clientContext.getVFSUnsafe());
         }
-    } else {
-        // Since DDL statements are single statements that are auto committed, it is impossible
-        // for users to roll back a DDL statement.
+    } break;
+    case CatalogEntryType::SEQUENCE_ENTRY: {
+        clientContext.getCatalog()->dropSequence(&DUMMY_WRITE_TRANSACTION, entryID);
+    } break;
+    default: {
+        KU_UNREACHABLE;
+    }
     }
 }
 
-void WALReplayer::replayCreateTableRecord(const WALRecord& walRecord) {
-    if (!isCheckpoint) {
-        storageManager->dropTable(walRecord.createTableRecord.tableID);
+void WALReplayer::replayAlterTableEntryRecord(const WALRecord& walRecord) {
+    if (!(isCheckpoint && isRecovering)) {
+        return;
     }
-}
-
-void WALReplayer::replayRdfGraphRecord(const WALRecord& walRecord) {
-    WALRecord resourceTableWALRecord = {.recordType = WALRecordType::CREATE_TABLE_RECORD,
-        .createTableRecord = walRecord.rdfGraphRecord.resourceTableRecord};
-    replayCreateTableRecord(resourceTableWALRecord);
-    WALRecord literalTableWALRecord = {.recordType = WALRecordType::CREATE_TABLE_RECORD,
-        .createTableRecord = walRecord.rdfGraphRecord.literalTableRecord};
-    replayCreateTableRecord(literalTableWALRecord);
-
-    WALRecord resourceTripleTableWALRecord = {.recordType = WALRecordType::CREATE_TABLE_RECORD,
-        .createTableRecord = walRecord.rdfGraphRecord.resourceTripleTableRecord};
-    replayCreateTableRecord(resourceTripleTableWALRecord);
-    WALRecord literalTripleTableWALRecord = {.recordType = WALRecordType::CREATE_TABLE_RECORD,
-        .createTableRecord = walRecord.rdfGraphRecord.literalTripleTableRecord};
-    replayCreateTableRecord(literalTripleTableWALRecord);
-}
-
-void WALReplayer::replayCopyTableRecord(const WALRecord& walRecord) {
-    auto tableID = walRecord.copyTableRecord.tableID;
-    if (isCheckpoint) {
-        if (!isRecovering) {
-            // CHECKPOINT.
-            // If we are not recovering, i.e., we are checkpointing during normal execution,
-            // then we need to update the nodeTable because the actual columns and lists
-            // files have been changed during checkpoint. So the in memory
-            // fileHandles are obsolete and should be reconstructed (e.g. since the numPages
-            // have likely changed they need to reconstruct their page locks).
-            auto catalogEntry = catalog->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID);
-            if (catalogEntry->getType() == CatalogEntryType::NODE_TABLE_ENTRY) {
-                auto nodeTableEntry =
-                    ku_dynamic_cast<TableCatalogEntry*, NodeTableCatalogEntry*>(catalogEntry);
-                auto nodeTable =
-                    ku_dynamic_cast<Table*, NodeTable*>(storageManager->getTable(tableID));
-                nodeTable->initializePKIndex(nodeTableEntry, false /* readOnly */, vfs);
-            }
-        } else {
-            // RECOVERY.
-            if (wal->isLastLoggedRecordCommit()) {
-                return;
-            }
-            // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
+    auto binder = Binder(&clientContext);
+    auto& alterEntryRecord = walRecord.constCast<AlterTableEntryRecord>();
+    clientContext.getCatalog()->alterTableSchema(&DUMMY_WRITE_TRANSACTION,
+        *alterEntryRecord.ownedAlterInfo);
+    if (alterEntryRecord.ownedAlterInfo->alterType == common::AlterType::ADD_PROPERTY) {
+        auto exprBinder = binder.getExpressionBinder();
+        auto addInfo =
+            alterEntryRecord.ownedAlterInfo->extraInfo->constPtrCast<BoundExtraAddPropertyInfo>();
+        // We don't implicit cast here since it must already be done the first time
+        auto boundDefault = exprBinder->bindExpression(*addInfo->defaultValue);
+        auto defaultValueEvaluator = ExpressionMapper::getEvaluator(boundDefault, nullptr);
+        auto schema = clientContext.getCatalog()->getTableCatalogEntry(&DUMMY_WRITE_TRANSACTION,
+            alterEntryRecord.ownedAlterInfo->tableID);
+        auto addedPropID = schema->getPropertyID(addInfo->propertyName);
+        auto addedProp = schema->getProperty(addedPropID);
+        if (clientContext.getStorageManager()) {
+            auto storageManager = clientContext.getStorageManager();
+            storageManager->getTable(alterEntryRecord.ownedAlterInfo->tableID)
+                ->addColumn(&DUMMY_WRITE_TRANSACTION, *addedProp, *defaultValueEvaluator);
         }
-    } else {
-        // ROLLBACK.
-        // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
     }
 }
 
-void WALReplayer::replayDropTableRecord(const WALRecord& walRecord) {
-    if (isCheckpoint) {
-        auto tableID = walRecord.dropTableRecord.tableID;
-        if (!isRecovering) {
-            auto tableEntry = catalog->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID);
-            switch (tableEntry->getTableType()) {
-            case TableType::NODE: {
-                storageManager->dropTable(tableID);
-                // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-                WALReplayerUtils::removeHashIndexFile(vfs, tableID, wal->getDirectory());
-            } break;
-            case TableType::REL: {
-                storageManager->dropTable(tableID);
-                // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-            } break;
-            case TableType::RDF: {
-                // Do nothing.
-            } break;
-            default: {
-                KU_UNREACHABLE;
-            }
-            }
-        } else {
-            if (!wal->isLastLoggedRecordCommit()) {
-                // Nothing to undo.
-                return;
-            }
-            auto catalogForRecovery = getCatalogForRecovery(FileVersionType::ORIGINAL);
-            auto tableEntry =
-                catalogForRecovery->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID);
-            switch (tableEntry->getTableType()) {
-            case TableType::NODE: {
-                // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-                WALReplayerUtils::removeHashIndexFile(vfs, tableID, wal->getDirectory());
-            } break;
-            case TableType::REL:
-            case TableType::RDF: {
-                // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-            } break;
-            default: {
-                KU_UNREACHABLE;
-            }
-            }
-        }
-    } else {
-        // See comments for COPY_NODE_RECORD.
-    }
+void WALReplayer::replayCopyTableRecord(const WALRecord&) const {
+    // DO NOTHING.
+    // TODO(Guodong): Should handle metaDA and reclaim free pages when rollback.
 }
 
-void WALReplayer::replayDropPropertyRecord(const WALRecord& walRecord) {
-    if (isCheckpoint) {
-        auto tableID = walRecord.dropPropertyRecord.tableID;
-        auto propertyID = walRecord.dropPropertyRecord.propertyID;
-        if (!isRecovering) {
-            auto tableEntry = catalog->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID);
-            storageManager->getTable(tableID)->dropColumn(tableEntry->getColumnID(propertyID));
-            // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-        } else {
-            if (!wal->isLastLoggedRecordCommit()) {
-                // Nothing to undo.
-                return;
-            }
-            // TODO(Guodong): Do nothing for now. Should remove metaDA and reclaim free pages.
-        }
-    } else {
-        // See comments for COPY_NODE_RECORD.
+void WALReplayer::replayUpdateSequenceRecord(const WALRecord& walRecord) {
+    if (!(isCheckpoint && isRecovering)) {
+        return;
     }
-}
-
-void WALReplayer::replayAddPropertyRecord(const WALRecord& walRecord) {
-    auto tableID = walRecord.addPropertyRecord.tableID;
-    auto propertyID = walRecord.addPropertyRecord.propertyID;
-    if (!isCheckpoint) {
-        auto tableEntry = catalog->getTableCatalogEntry(&DUMMY_READ_TRANSACTION, tableID);
-        storageManager->getTable(tableID)->dropColumn(tableEntry->getColumnID(propertyID));
-    }
+    auto& dropEntryRecord = walRecord.constCast<UpdateSequenceRecord>();
+    auto sequenceID = dropEntryRecord.sequenceID;
+    auto entry =
+        clientContext.getCatalog()->getSequenceCatalogEntry(&DUMMY_WRITE_TRANSACTION, sequenceID);
+    entry->replayVal(dropEntryRecord.data.usageCount, dropEntryRecord.data.currVal,
+        dropEntryRecord.data.nextVal);
 }
 
 void WALReplayer::truncateFileIfInsertion(BMFileHandle* fileHandle,
     const PageUpdateOrInsertRecord& pageInsertOrUpdateRecord) {
     if (pageInsertOrUpdateRecord.isInsert) {
-        // If we are rolling back and this is a page insertion we truncate the fileHandle's
+        // If we are rolling back and this is a page insertion we truncate the shadowingFH's
         // data structures that hold locks for pageIdxs.
         // Note: We can directly call removePageIdxAndTruncateIfNecessary here because we
         // assume there is a single write transaction in the system at any point in time.
@@ -331,23 +321,26 @@ void WALReplayer::truncateFileIfInsertion(BMFileHandle* fileHandle,
 void WALReplayer::checkpointOrRollbackVersionedFileHandleAndBufferManager(
     const WALRecord& walRecord, const DBFileID& dbFileID) {
     BMFileHandle* fileHandle = getVersionedFileHandleIfWALVersionAndBMShouldBeCleared(dbFileID);
+    auto& pageInsertOrUpdateRecord = walRecord.constCast<PageUpdateOrInsertRecord>();
     if (fileHandle) {
-        fileHandle->clearWALPageIdxIfNecessary(
-            walRecord.pageInsertOrUpdateRecord.pageIdxInOriginalFile);
+        fileHandle->clearWALPageIdxIfNecessary(pageInsertOrUpdateRecord.pageIdxInOriginalFile);
         if (isCheckpoint) {
             // Update the page in buffer manager if it is in a frame. Note that we assume
             // that the pageBuffer currently contains the contents of the WALVersion, so the
             // caller needs to make sure that this assumption holds.
-            bufferManager->updateFrameIfPageIsInFrameWithoutLock(*fileHandle, pageBuffer.get(),
-                walRecord.pageInsertOrUpdateRecord.pageIdxInOriginalFile);
+            clientContext.getMemoryManager()
+                ->getBufferManager()
+                ->updateFrameIfPageIsInFrameWithoutLock(*fileHandle, pageBuffer.get(),
+                    pageInsertOrUpdateRecord.pageIdxInOriginalFile);
         } else {
-            truncateFileIfInsertion(fileHandle, walRecord.pageInsertOrUpdateRecord);
+            truncateFileIfInsertion(fileHandle, pageInsertOrUpdateRecord);
         }
     }
 }
 
 BMFileHandle* WALReplayer::getVersionedFileHandleIfWALVersionAndBMShouldBeCleared(
     const DBFileID& dbFileID) {
+    auto storageManager = clientContext.getStorageManager();
     switch (dbFileID.dbFileType) {
     case DBFileType::METADATA: {
         return storageManager->getMetadataFH();
@@ -364,15 +357,6 @@ BMFileHandle* WALReplayer::getVersionedFileHandleIfWALVersionAndBMShouldBeCleare
         KU_UNREACHABLE;
     }
     }
-}
-
-std::unique_ptr<Catalog> WALReplayer::getCatalogForRecovery(FileVersionType fileVersionType) {
-    // When we are recovering our database, the catalog field of walReplayer has not been
-    // initialized and recovered yet. We need to create a new catalog to get node/rel tableEntries
-    // for recovering.
-    auto catalogForRecovery = std::make_unique<Catalog>(vfs);
-    catalogForRecovery->getReadOnlyVersion()->readFromFile(wal->getDirectory(), fileVersionType);
-    return catalogForRecovery;
 }
 
 } // namespace storage

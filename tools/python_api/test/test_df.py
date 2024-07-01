@@ -146,8 +146,8 @@ def test_to_df(conn_db_readonly: ConnDB) -> None:
         assert str(pd["r.level"].dtype) == "int8"
         assert pd["r.code"].tolist() == [9223372036854775808, 23, 6689]
         assert str(pd["r.code"].dtype) == "uint64"
-        assert pd["r.temprature"].tolist() == [32800, 20, 1]
-        assert str(pd["r.temprature"].dtype) == "uint32"
+        assert pd["r.temperature"].tolist() == [32800, 20, 1]
+        assert str(pd["r.temperature"].dtype) == "uint32"
         assert pd["r.ulength"].tolist() == [33768, 180, 90]
         assert str(pd["r.ulength"].dtype) == "uint16"
         assert pd["r.ulevel"].tolist() == [250, 12, 220]
@@ -242,11 +242,17 @@ def test_to_df(conn_db_readonly: ConnDB) -> None:
         assert pd["m.grade"].tolist() == [True, 254.0, 8.989]
         assert str(pd["m.grade"].dtype) == "object"
 
+    def _test_serial_to_df(conn: kuzu.Connection) -> None:
+        df = conn.execute("MATCH (a:moviesSerial) RETURN a.ID AS id").get_as_df()
+        assert len(df) == 3
+        assert df["id"].tolist() == [0, 1, 2]
+
     _test_person_to_df(conn)
     conn.set_max_threads_for_exec(2)
     _test_study_at_to_df(conn)
     _test_movies_to_df(conn)
     _test_timestamps_to_df(conn)
+    _test_serial_to_df(conn)
 
 
 def test_df_multiple_times(conn_db_readonly: ConnDB) -> None:
@@ -538,3 +544,30 @@ def test_get_df_unicode(conn_db_readonly: ConnDB) -> None:
         "The 😂😃🧘🏻‍♂️🌍🌦️🍞🚗 movie",
         "Roma",
     ]
+
+def test_get_df_decimal(conn_db_readonly: ConnDB) -> None:
+    conn, _ = conn_db_readonly
+    res = conn.execute("UNWIND [1, 2, 3] AS A UNWIND [5.7, 8.3, 2.9] AS B RETURN CAST(CAST(A AS DECIMAL) * CAST(B AS DECIMAL) AS DECIMAL(18, 1)) AS PROD").get_as_df()
+    assert sorted(res["PROD"].tolist()) == sorted([
+        Decimal('5.7'),
+        Decimal('8.3'),
+        Decimal('2.9'),
+        Decimal('11.4'),
+        Decimal('16.6'),
+        Decimal('5.8'),
+        Decimal('17.1'),
+        Decimal('24.9'),
+        Decimal('8.7'),
+    ])
+    res = conn.execute("UNWIND [1, 2, 3] AS A UNWIND [5.7, 8.3, 2.9] AS B RETURN CAST(CAST(A AS DECIMAL) * CAST(B AS DECIMAL) AS DECIMAL(4, 1)) AS PROD").get_as_df()
+    assert sorted(res["PROD"].tolist()) == sorted([
+        Decimal('5.7'),
+        Decimal('8.3'),
+        Decimal('2.9'),
+        Decimal('11.4'),
+        Decimal('16.6'),
+        Decimal('5.8'),
+        Decimal('17.1'),
+        Decimal('24.9'),
+        Decimal('8.7'),
+    ])

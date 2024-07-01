@@ -18,7 +18,7 @@ public:
     //===--------------------------------------------------------------------===//
     // getters & setters
     //===--------------------------------------------------------------------===//
-    function::function_set& getFunctionSet() { return functionSet; }
+    const function::function_set& getFunctionSet() const { return functionSet; }
 
     //===--------------------------------------------------------------------===//
     // serialization & deserialization
@@ -26,7 +26,6 @@ public:
     // We always register functions while initializing the catalog, so we don't have to
     // serialize functions.
     void serialize(common::Serializer& /*serializer*/) const override { return; }
-    std::unique_ptr<CatalogEntry> copy() const override;
 
 protected:
     function::function_set functionSet;

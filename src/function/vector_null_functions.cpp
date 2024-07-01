@@ -1,5 +1,6 @@
 #include "function/null/vector_null_functions.h"
 
+#include "common/exception/runtime.h"
 #include "function/null/null_functions.h"
 
 using namespace kuzu::common;
@@ -19,7 +20,8 @@ void VectorNullFunction::bindExecFunction(ExpressionType expressionType,
         return;
     }
     default:
-        throw RuntimeException("Invalid expression type " + expressionTypeToString(expressionType) +
+        throw RuntimeException("Invalid expression type " +
+                               ExpressionTypeUtil::toString(expressionType) +
                                "for VectorNullOperations::bindUnaryExecFunction.");
     }
 }
@@ -38,7 +40,8 @@ void VectorNullFunction::bindSelectFunction(ExpressionType expressionType,
         return;
     }
     default:
-        throw RuntimeException("Invalid expression type " + expressionTypeToString(expressionType) +
+        throw RuntimeException("Invalid expression type " +
+                               ExpressionTypeUtil::toString(expressionType) +
                                "for VectorNullOperations::bindUnarySelectFunction.");
     }
 }

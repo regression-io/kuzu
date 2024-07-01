@@ -3,7 +3,7 @@
 #include "common/cast.h"
 #include "planner/operator/factorization/flatten_resolver.h"
 #include "planner/operator/factorization/sink_util.h"
-#include "planner/operator/scan/logical_scan_internal_id.h"
+#include "planner/operator/scan/logical_scan_node_table.h"
 
 using namespace kuzu::common;
 
@@ -67,6 +67,10 @@ void LogicalHashJoin::computeFactorizedSchema() {
         }
         SinkOperatorUtil::mergeSchema(*buildSchema, expressionsToMaterializeInNonKeyGroups,
             *schema);
+        if (mark != nullptr) {
+            auto groupPos = schema->getGroupPos(*joinConditions[0].first);
+            schema->insertToGroupAndScope(mark, groupPos);
+        }
     } break;
     case JoinType::MARK: {
         std::unordered_set<f_group_pos> probeSideKeyGroupPositions;
@@ -96,6 +100,9 @@ void LogicalHashJoin::computeFlatSchema() {
             // Join key may repeat for internal ID based joins.
             schema->insertToGroupAndScopeMayRepeat(expression, 0);
         }
+        if (mark != nullptr) {
+            schema->insertToGroupAndScope(mark, 0);
+        }
     } break;
     case JoinType::MARK: {
         schema->insertToGroupAndScope(mark, 0);
@@ -103,6 +110,13 @@ void LogicalHashJoin::computeFlatSchema() {
     default:
         KU_UNREACHABLE;
     }
+}
+
+std::string LogicalHashJoin::getExpressionsForPrinting() const {
+    if (isNodeIDOnlyJoin()) {
+        return binder::ExpressionUtil::toStringOrdered(getJoinNodeIDs());
+    }
+    return binder::ExpressionUtil::toString(joinConditions);
 }
 
 binder::expression_vector LogicalHashJoin::getExpressionsToMaterialize() const {
@@ -118,6 +132,13 @@ binder::expression_vector LogicalHashJoin::getExpressionsToMaterialize() const {
     default:
         KU_UNREACHABLE;
     }
+}
+
+std::unique_ptr<LogicalOperator> LogicalHashJoin::copy() {
+    auto op = std::make_unique<LogicalHashJoin>(joinConditions, joinType, mark, children[0]->copy(),
+        children[1]->copy());
+    op->sipInfo = sipInfo;
+    return op;
 }
 
 bool LogicalHashJoin::isNodeIDOnlyJoin() const {
@@ -174,11 +195,11 @@ bool LogicalHashJoin::isJoinKeyUniqueOnBuildSide(const binder::Expression& joinN
         }
         op = op->getChild(0).get();
     }
-    if (op->getOperatorType() != LogicalOperatorType::SCAN_INTERNAL_ID) {
+    if (op->getOperatorType() != LogicalOperatorType::SCAN_NODE_TABLE) {
         return false;
     }
-    auto scan = ku_dynamic_cast<LogicalOperator*, LogicalScanInternalID*>(op);
-    if (scan->getInternalID()->getUniqueName() != joinNodeID.getUniqueName()) {
+    auto scan = ku_dynamic_cast<LogicalOperator*, LogicalScanNodeTable*>(op);
+    if (scan->getNodeID()->getUniqueName() != joinNodeID.getUniqueName()) {
         return false;
     }
     return true;

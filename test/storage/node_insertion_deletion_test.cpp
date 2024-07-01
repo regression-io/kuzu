@@ -1,6 +1,7 @@
 #include <fcntl.h>
 
 #include "common/constants.h"
+#include "common/exception/runtime.h"
 #include "common/file_system/local_file_system.h"
 #include "graph_test/graph_test.h"
 
@@ -84,6 +85,7 @@ TEST_F(NodeInsertionDeletionTests, DeleteAddMixedTest) {
     conn->query("BEGIN TRANSACTION");
     ASSERT_EQ(conn->query(query)->getNext()->getValue(0)->getValue<int64_t>(), 10005);
     ASSERT_EQ(readConn->query(query)->getNext()->getValue(0)->getValue<int64_t>(), 10005);
+    conn->query("COMMIT");
 }
 
 TEST_F(NodeInsertionDeletionTests, InsertManyNodesTest) {
@@ -118,7 +120,7 @@ TEST_F(NodeInsertionDeletionTests, TruncatedWalTest) {
     // single page, since we currently may fail to recover if the headers are intact but shadow
     // pages are missing. Pages are flushed before writing the commit record to make sure that
     // doesn't happen during a regular interruption.
-    for (int64_t i = 0; i < 100; i++) {
+    for (int64_t i = 0; i < 200; i++) {
         auto result =
             conn->execute(preparedStatement.get(), std::make_pair(std::string("id"), 10000 + i));
         ASSERT_TRUE(result->isSuccess()) << result->toString();
@@ -135,5 +137,5 @@ TEST_F(NodeInsertionDeletionTests, TruncatedWalTest) {
         walFileInfo->truncate(BufferPoolConstants::PAGE_4KB_SIZE);
     }
     // Re-open database
-    database = std::make_unique<Database>(databasePath);
+    EXPECT_THROW(database = std::make_unique<Database>(databasePath), Exception);
 }

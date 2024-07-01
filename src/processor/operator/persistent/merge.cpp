@@ -32,9 +32,10 @@ bool Merge::getNextTuplesInternal(ExecutionContext* context) {
     if (!children[0]->getNextTuple(context)) {
         return false;
     }
-    KU_ASSERT(existenceVector->state->isFlat());
-    auto existencePos = existenceVector->state->selVector->selectedPositions[0];
-    if (!existenceVector->isNull(existencePos)) {
+    KU_ASSERT(existenceVector->state->getSelVector().getSelSize() == 1);
+    auto pos = existenceVector->state->getSelVector()[0];
+    auto patternExist = existenceVector->getValue<bool>(pos);
+    if (patternExist) {
         for (auto& executor : onMatchNodeSetExecutors) {
             executor->set(context);
         }
@@ -42,16 +43,18 @@ bool Merge::getNextTuplesInternal(ExecutionContext* context) {
             executor->set(context);
         }
     } else {
-        // pattern not exist
-        if (distinctVector != nullptr &&
-            !distinctVector->getValue<bool>(
-                distinctVector->state->selVector->selectedPositions[0])) {
-            // pattern has been created
+        auto patternHasBeenCreated = false;
+        if (distinctVector != nullptr) {
+            KU_ASSERT(distinctVector->state->getSelVector().getSelSize() == 1);
+            auto distinctPos = distinctVector->state->getSelVector()[0];
+            patternHasBeenCreated = !distinctVector->getValue<bool>(distinctPos);
+        }
+        if (patternHasBeenCreated) {
             for (auto& executor : nodeInsertExecutors) {
-                executor.evaluateResult(context);
+                executor.skipInsert();
             }
             for (auto& executor : relInsertExecutors) {
-                executor.insert(context->clientContext->getTx(), context);
+                executor.skipInsert();
             }
             for (auto& executor : onMatchNodeSetExecutors) {
                 executor->set(context);
@@ -62,10 +65,10 @@ bool Merge::getNextTuplesInternal(ExecutionContext* context) {
         } else {
             // do insert and on create
             for (auto& executor : nodeInsertExecutors) {
-                executor.insert(context->clientContext->getTx(), context);
+                executor.insert(context->clientContext->getTx());
             }
             for (auto& executor : relInsertExecutors) {
-                executor.insert(context->clientContext->getTx(), context);
+                executor.insert(context->clientContext->getTx());
             }
             for (auto& executor : onCreateNodeSetExecutors) {
                 executor->set(context);
@@ -76,6 +79,14 @@ bool Merge::getNextTuplesInternal(ExecutionContext* context) {
         }
     }
     return true;
+}
+
+std::unique_ptr<PhysicalOperator> Merge::clone() {
+    return std::make_unique<Merge>(existenceMark, distinctMark, copyVector(nodeInsertExecutors),
+        copyVector(relInsertExecutors), NodeSetExecutor::copy(onCreateNodeSetExecutors),
+        RelSetExecutor::copy(onCreateRelSetExecutors),
+        NodeSetExecutor::copy(onMatchNodeSetExecutors),
+        RelSetExecutor::copy(onMatchRelSetExecutors), children[0]->clone(), id, printInfo->copy());
 }
 
 } // namespace processor

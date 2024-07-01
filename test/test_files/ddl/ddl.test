@@ -1,4 +1,3 @@
--GROUP DDL
 -DATASET CSV tinysnb
 --
 
@@ -31,6 +30,13 @@ Binder exception: Table movies does not exist.
 ---- ok
 -STATEMENT match (:person)-[s:studyAt]->(:organisation) return s.year
 ---- ok
+-STATEMENT CREATE NODE TABLE books (ID INT64, rating DOUBLE DEFAULT 0, PRIMARY KEY (ID));
+---- ok
+-STATEMENT CREATE (b:books {ID: 0});
+---- ok
+-STATEMENT MATCH (b:books) RETURN b.*;
+---- 1
+0|0.000000
 
 -CASE DDLOutputMessages
 -STATEMENT CREATE NODE TABLE university(ID INT64, PRIMARY KEY(ID))
@@ -62,6 +68,20 @@ Table likes has been created.
 -STATEMENT Call table_info('likes_person_organisation') RETURN *;
 ---- 1
 1|since|INT64
+-STATEMENT CREATE REL TABLE GROUP likes (FROM person TO person, FROM person TO organisation);
+---- error
+Binder exception: likes already exists in catalog.
+-STATEMENT CREATE REL TABLE GROUP knows (FROM person TO person, FROM person TO organisation);
+---- error
+Binder exception: knows already exists in catalog.
+-STATEMENT CREATE REL TABLE test_person_person (FROM person TO person);
+---- ok
+-STATEMENT CREATE REL TABLE GROUP test (FROM person TO person, FROM person TO organisation);
+---- error
+Catalog exception: test_person_person already exists in catalog.
+-STATEMENT CREATE REL TABLE GROUP test2 (FROM person TO person, FROM person TO person);
+---- error
+Catalog exception: test2_person_person already exists in catalog.
 
 -CASE CreateNodeTableCommitNormalExecution
 -STATEMENT CREATE NODE TABLE EXAM_PAPER(STUDENT_ID INT64, MARK DOUBLE, PRIMARY KEY(STUDENT_ID))
@@ -104,6 +124,11 @@ Binder exception: Table knows does not exist.
 -STATEMENT MATCH (c:Comment) RETURN SUM(c.propy);
 ---- 1
 215488
+-STATEMENT create (c:Comment {id: 12345});
+---- ok
+-STATEMENT MATCH (c:Comment) RETURN SUM(c.propy);
+---- 1
+215489
 
 -CASE AddRelProperty
 -STATEMENT create node table Comment (id int64, PRIMARY KEY (id));
@@ -137,7 +162,7 @@ Binder exception: Table knows does not exist.
 ---- ok
 -STATEMENT MATCH (:person)-[s:studyAt]->(:organisation) RETURN * ORDER BY s.year DESC LIMIT 1
 ---- 1
-(0:0)-{_LABEL: studyAt, _ID: 4:0, year: 2021, length: 5, level: 5, code: 9223372036854775808, temprature: 32800, ulength: 33768, ulevel: 250, hugedata: 1844674407370955161811111111}->(1:0)
+(0:0)-{_LABEL: studyAt, _ID: 4:0, year: 2021, length: 5, level: 5, code: 9223372036854775808, temperature: 32800, ulength: 33768, ulevel: 250, hugedata: 1844674407370955161811111111}->(1:0)
 
 -DEFINE_STATEMENT_BLOCK PERSON_TABLE_NULL_CHECK [
 -STATEMENT MATCH (p:person) return p.random
@@ -249,7 +274,7 @@ long long string
 [142,short,long long long string]
 
 -CASE AddListOfListOfStringPropertyToPersonTableWithDefaultValueNormalExecution
--STATEMENT ALTER TABLE person ADD random STRING[][] 
+-STATEMENT ALTER TABLE person ADD random STRING[][]
             DEFAULT [['142','51'],['short','long','123'],
             ['long long long string','short short short short short']]
 ---- ok
@@ -375,7 +400,7 @@ VERY LONG STRING!!
 [13,15,long string!!]
 
 -CASE AddListOfListOfStringPropertyToStudyAtTableWithDefaultValueNormalExecution
--STATEMENT ALTER TABLE studyAt ADD random STRING[][] 
+-STATEMENT ALTER TABLE studyAt ADD random STRING[][]
             DEFAULT [['hello','good','long long string test'],
             ['6'],['very very long string']]
 ---- ok
@@ -426,3 +451,29 @@ Elizabeth
 Farooq
 Greg
 Hubert Blaine Wolfeschlegelsteinhausenbergerdorff
+
+-CASE CreateTableIfNotExists
+-STATEMENT CREATE NODE TABLE IF NOT EXISTS UW(ID INT64, PRIMARY KEY(ID))
+---- 1
+Table UW has been created.
+-STATEMENT CREATE NODE TABLE IF NOT EXISTS UW (ID INT64, PRIMARY KEY(ID))
+---- 1
+Table UW already exists.
+-STATEMENT CREATE REL TABLE finds (FROM UW TO UW);
+---- 1
+Table finds has been created.
+-STATEMENT CREATE REL TABLE IF NOT EXISTS finds (FROM UW TO UW);
+---- 1
+Table finds already exists.
+-STATEMENT CREATE NODE TABLE student (ID INT64, PRIMARY KEY(ID));
+---- 1
+Table student has been created.
+-STATEMENT CREATE REL TABLE GROUP interests(FROM UW to student, From student to student);
+---- 1
+Table interests has been created.
+-STATEMENT CREATE REL TABLE GROUP IF NOT EXISTS interests(FROM UW to student, From student to student);
+---- 1
+Table interests already exists.
+-STATEMENT CREATE NODE TABLE IF NOT EXISTS UW1 (ID INT64, PRIMARY KEY(ID))
+---- 1
+Table UW1 has been created.

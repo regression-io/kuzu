@@ -1,4 +1,3 @@
--GROUP TCKMatch1
 -DATASET CSV tck
 
 --
@@ -6,8 +5,7 @@
 # Match non-existent nodes returns empty
 -CASE Scenario1
 -STATEMENT MATCH (n) RETURN n;
----- error
-Binder exception: No node table exists in database.
+---- 0
 
 # Matching all nodes
 -CASE Scenario2
@@ -180,13 +178,13 @@ Binder exception: Cannot bind r as node pattern.
 ---- ok
 -STATEMENT MATCH ()-[r]-(r) RETURN r;
 ---- error
-Binder exception: r has data type NODE but (REL) was expected.
+Binder exception: r has data type NODE but REL was expected.
 -STATEMENT MATCH ()-[r]->(r) RETURN r;
 ---- error
-Binder exception: r has data type NODE but (REL) was expected.
+Binder exception: r has data type NODE but REL was expected.
 -STATEMENT MATCH ()<-[r]-(r) RETURN r;
 ---- error
-Binder exception: r has data type NODE but (REL) was expected.
+Binder exception: r has data type NODE but REL was expected.
 -STATEMENT MATCH ()-[r]-()-[]-(r) RETURN r;
 ---- error
 Binder exception: Cannot bind r as node pattern.

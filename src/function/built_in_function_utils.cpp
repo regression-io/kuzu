@@ -7,7 +7,7 @@
 #include "function/aggregate_function.h"
 #include "function/arithmetic/vector_arithmetic_functions.h"
 #include "function/function_collection.h"
-#include "function/scalar_function.h"
+#include "transaction/transaction.h"
 
 using namespace kuzu::common;
 using namespace kuzu::catalog;
@@ -17,38 +17,51 @@ namespace kuzu {
 namespace function {
 
 static void validateNonEmptyCandidateFunctions(std::vector<AggregateFunction*>& candidateFunctions,
-    const std::string& name, const std::vector<common::LogicalType>& inputTypes, bool isDistinct,
-    function::function_set& set);
+    const std::string& name, const std::vector<LogicalType>& inputTypes, bool isDistinct,
+    const function::function_set& set);
 static void validateNonEmptyCandidateFunctions(std::vector<Function*>& candidateFunctions,
-    const std::string& name, const std::vector<common::LogicalType>& inputTypes,
-    function::function_set& set);
+    const std::string& name, const std::vector<LogicalType>& inputTypes,
+    const function::function_set& set);
 
-void BuiltInFunctionsUtils::createFunctions(CatalogSet* catalogSet) {
+void BuiltInFunctionsUtils::createFunctions(transaction::Transaction* transaction,
+    CatalogSet* catalogSet) {
     auto functions = FunctionCollection::getFunctions();
     for (auto i = 0u; functions[i].name != nullptr; ++i) {
         auto functionSet = functions[i].getFunctionSetFunc();
-        catalogSet->createEntry(std::make_unique<FunctionCatalogEntry>(
-            functions[i].catalogEntryType, functions[i].name, std::move(functionSet)));
+        catalogSet->createEntry(transaction,
+            std::make_unique<FunctionCatalogEntry>(functions[i].catalogEntryType, functions[i].name,
+                std::move(functionSet)));
     }
 }
 
-Function* BuiltInFunctionsUtils::matchFunction(const std::string& name, CatalogSet* catalogSet) {
-    return matchFunction(name, std::vector<common::LogicalType>{}, catalogSet);
+catalog::CatalogEntry* BuiltInFunctionsUtils::getFunctionCatalogEntry(
+    transaction::Transaction* transaction, const std::string& name, CatalogSet* catalogSet) {
+    if (!catalogSet->containsEntry(transaction, name)) {
+        throw CatalogException(stringFormat("{} function does not exist.", name));
+    }
+    return catalogSet->getEntry(transaction, name);
+}
+
+Function* BuiltInFunctionsUtils::matchFunction(transaction::Transaction* transaction,
+    const std::string& name, CatalogSet* catalogSet) {
+    return matchFunction(transaction, name, std::vector<LogicalType>{}, catalogSet);
+}
+
+Function* BuiltInFunctionsUtils::matchFunction(transaction::Transaction* transaction,
+    const std::string& name, const std::vector<LogicalType>& inputTypes, CatalogSet* catalogSet) {
+    auto entry = getFunctionCatalogEntry(transaction, name, catalogSet);
+    return matchFunction(name, inputTypes, entry);
 }
 
 Function* BuiltInFunctionsUtils::matchFunction(const std::string& name,
-    const std::vector<common::LogicalType>& inputTypes, CatalogSet* catalogSet) {
-    if (!catalogSet->containsEntry(name)) {
-        throw CatalogException(stringFormat("{} function does not exist.", name));
-    }
-    auto& functionSet =
-        reinterpret_cast<FunctionCatalogEntry*>(catalogSet->getEntry(name))->getFunctionSet();
-    bool isOverload = functionSet.size() > 1;
+    const std::vector<LogicalType>& inputTypes, const catalog::CatalogEntry* catalogEntry) {
+    auto functionEntry = catalogEntry->constPtrCast<FunctionCatalogEntry>();
+    auto& functionSet = functionEntry->getFunctionSet();
     std::vector<Function*> candidateFunctions;
     uint32_t minCost = UINT32_MAX;
     for (auto& function : functionSet) {
-        auto func = reinterpret_cast<Function*>(function.get());
-        auto cost = getFunctionCost(inputTypes, func, isOverload);
+        auto func = function.get();
+        auto cost = getFunctionCost(inputTypes, func);
         if (cost == UINT32_MAX) {
             continue;
         }
@@ -70,8 +83,9 @@ Function* BuiltInFunctionsUtils::matchFunction(const std::string& name,
 
 AggregateFunction* BuiltInFunctionsUtils::matchAggregateFunction(const std::string& name,
     const std::vector<common::LogicalType>& inputTypes, bool isDistinct, CatalogSet* catalogSet) {
-    auto& functionSet =
-        reinterpret_cast<FunctionCatalogEntry*>(catalogSet->getEntry(name))->getFunctionSet();
+    auto& functionSet = ku_dynamic_cast<CatalogEntry*, FunctionCatalogEntry*>(
+        catalogSet->getEntry(&transaction::DUMMY_WRITE_TRANSACTION, name))
+                            ->getFunctionSet();
     std::vector<AggregateFunction*> candidateFunctions;
     for (auto& function : functionSet) {
         auto aggregateFunction = ku_dynamic_cast<Function*, AggregateFunction*>(function.get());
@@ -126,6 +140,8 @@ uint32_t BuiltInFunctionsUtils::getCastCost(LogicalTypeID inputTypeID, LogicalTy
         return castDouble(targetTypeID);
     case LogicalTypeID::FLOAT:
         return castFloat(targetTypeID);
+    case LogicalTypeID::DECIMAL:
+        return castDecimal(targetTypeID);
     case LogicalTypeID::DATE:
         return castDate(targetTypeID);
     case LogicalTypeID::UUID:
@@ -137,7 +153,12 @@ uint32_t BuiltInFunctionsUtils::getCastCost(LogicalTypeID inputTypeID, LogicalTy
     case LogicalTypeID::TIMESTAMP_NS:
     case LogicalTypeID::TIMESTAMP_TZ:
         // currently don't allow timestamp to other timestamp types
+        // When we implement this in the future, revise tryGetMaxLogicalTypeID
         return castTimestamp(targetTypeID);
+    case LogicalTypeID::LIST:
+        return castList(targetTypeID);
+    case LogicalTypeID::ARRAY:
+        return castArray(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
     }
@@ -145,14 +166,19 @@ uint32_t BuiltInFunctionsUtils::getCastCost(LogicalTypeID inputTypeID, LogicalTy
 
 uint32_t BuiltInFunctionsUtils::getTargetTypeCost(LogicalTypeID typeID) {
     switch (typeID) {
+    case LogicalTypeID::SERIAL:
+    case LogicalTypeID::INT16:
+        return 100;
     case LogicalTypeID::INT64:
         return 101;
     case LogicalTypeID::INT32:
         return 102;
     case LogicalTypeID::INT128:
         return 103;
-    case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return 104;
+    case LogicalTypeID::DOUBLE:
+        return 105;
     case LogicalTypeID::TIMESTAMP:
         return 120;
     case LogicalTypeID::STRING:
@@ -175,7 +201,10 @@ uint32_t BuiltInFunctionsUtils::castInt64(LogicalTypeID targetTypeID) {
     case LogicalTypeID::INT128:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
+    case LogicalTypeID::SERIAL:
+        return 0;
     default:
         return UNDEFINED_CAST_COST;
     }
@@ -183,10 +212,12 @@ uint32_t BuiltInFunctionsUtils::castInt64(LogicalTypeID targetTypeID) {
 
 uint32_t BuiltInFunctionsUtils::castInt32(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -195,11 +226,13 @@ uint32_t BuiltInFunctionsUtils::castInt32(LogicalTypeID targetTypeID) {
 
 uint32_t BuiltInFunctionsUtils::castInt16(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT32:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -208,12 +241,14 @@ uint32_t BuiltInFunctionsUtils::castInt16(LogicalTypeID targetTypeID) {
 
 uint32_t BuiltInFunctionsUtils::castInt8(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT16:
     case LogicalTypeID::INT32:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -225,6 +260,7 @@ uint32_t BuiltInFunctionsUtils::castUInt64(LogicalTypeID targetTypeID) {
     case LogicalTypeID::INT128:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -233,11 +269,13 @@ uint32_t BuiltInFunctionsUtils::castUInt64(LogicalTypeID targetTypeID) {
 
 uint32_t BuiltInFunctionsUtils::castUInt32(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::UINT64:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -247,12 +285,14 @@ uint32_t BuiltInFunctionsUtils::castUInt32(LogicalTypeID targetTypeID) {
 uint32_t BuiltInFunctionsUtils::castUInt16(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
     case LogicalTypeID::INT32:
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::UINT32:
     case LogicalTypeID::UINT64:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -263,6 +303,7 @@ uint32_t BuiltInFunctionsUtils::castUInt8(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
     case LogicalTypeID::INT16:
     case LogicalTypeID::INT32:
+    case LogicalTypeID::SERIAL:
     case LogicalTypeID::INT64:
     case LogicalTypeID::INT128:
     case LogicalTypeID::UINT16:
@@ -270,6 +311,7 @@ uint32_t BuiltInFunctionsUtils::castUInt8(LogicalTypeID targetTypeID) {
     case LogicalTypeID::UINT64:
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -280,6 +322,7 @@ uint32_t BuiltInFunctionsUtils::castInt128(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
     case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
+    case LogicalTypeID::DECIMAL:
         return getTargetTypeCost(targetTypeID);
     default:
         return UNDEFINED_CAST_COST;
@@ -304,6 +347,16 @@ uint32_t BuiltInFunctionsUtils::castDouble(LogicalTypeID targetTypeID) {
 
 uint32_t BuiltInFunctionsUtils::castFloat(LogicalTypeID targetTypeID) {
     switch (targetTypeID) {
+    case LogicalTypeID::DOUBLE:
+        return getTargetTypeCost(targetTypeID);
+    default:
+        return UNDEFINED_CAST_COST;
+    }
+}
+
+uint32_t BuiltInFunctionsUtils::castDecimal(LogicalTypeID targetTypeID) {
+    switch (targetTypeID) {
+    case LogicalTypeID::FLOAT:
     case LogicalTypeID::DOUBLE:
         return getTargetTypeCost(targetTypeID);
     default:
@@ -368,10 +421,28 @@ uint32_t BuiltInFunctionsUtils::castFromRDFVariant(LogicalTypeID inputTypeID) {
     }
 }
 
+uint32_t BuiltInFunctionsUtils::castList(LogicalTypeID targetTypeID) {
+    switch (targetTypeID) {
+    case LogicalTypeID::ARRAY:
+        return getTargetTypeCost(targetTypeID);
+    default:
+        return UNDEFINED_CAST_COST;
+    }
+}
+
+uint32_t BuiltInFunctionsUtils::castArray(LogicalTypeID targetTypeID) {
+    switch (targetTypeID) {
+    case LogicalTypeID::LIST:
+        return getTargetTypeCost(targetTypeID);
+    default:
+        return UNDEFINED_CAST_COST;
+    }
+}
+
 // When there is multiple candidates functions, e.g. double + int and double + double for input
 // "1.5 + parameter", we prefer the one without any implicit casting i.e. double + double.
-// Additionally, we prefer function with string parameter because string is most permissive and can
-// be cast to any type.
+// Additionally, we prefer function with string parameter because string is most permissive and
+// can be cast to any type.
 Function* BuiltInFunctionsUtils::getBestMatch(std::vector<Function*>& functionsToMatch) {
     KU_ASSERT(functionsToMatch.size() > 1);
     Function* result = nullptr;
@@ -398,20 +469,12 @@ Function* BuiltInFunctionsUtils::getBestMatch(std::vector<Function*>& functionsT
 }
 
 uint32_t BuiltInFunctionsUtils::getFunctionCost(const std::vector<LogicalType>& inputTypes,
-    Function* function, bool isOverload) {
-    switch (function->type) {
-    case FunctionType::SCALAR: {
-        auto scalarFunction = ku_dynamic_cast<Function*, ScalarFunction*>(function);
-        if (scalarFunction->isVarLength) {
-            KU_ASSERT(function->parameterTypeIDs.size() == 1);
-            return matchVarLengthParameters(inputTypes, function->parameterTypeIDs[0], isOverload);
-        } else {
-            return matchParameters(inputTypes, function->parameterTypeIDs, isOverload);
-        }
+    Function* function) {
+    if (function->isVarLength) {
+        KU_ASSERT(function->parameterTypeIDs.size() == 1);
+        return matchVarLengthParameters(inputTypes, function->parameterTypeIDs[0]);
     }
-    default:
-        return matchParameters(inputTypes, function->parameterTypeIDs, isOverload);
-    }
+    return matchParameters(inputTypes, function->parameterTypeIDs);
 }
 
 uint32_t BuiltInFunctionsUtils::getAggregateFunctionCost(const std::vector<LogicalType>& inputTypes,
@@ -431,7 +494,7 @@ uint32_t BuiltInFunctionsUtils::getAggregateFunctionCost(const std::vector<Logic
 }
 
 uint32_t BuiltInFunctionsUtils::matchParameters(const std::vector<LogicalType>& inputTypes,
-    const std::vector<LogicalTypeID>& targetTypeIDs, bool /*isOverload*/) {
+    const std::vector<LogicalTypeID>& targetTypeIDs) {
     if (inputTypes.size() != targetTypeIDs.size()) {
         return UINT32_MAX;
     }
@@ -447,9 +510,9 @@ uint32_t BuiltInFunctionsUtils::matchParameters(const std::vector<LogicalType>& 
 }
 
 uint32_t BuiltInFunctionsUtils::matchVarLengthParameters(const std::vector<LogicalType>& inputTypes,
-    LogicalTypeID targetTypeID, bool /*isOverload*/) {
+    LogicalTypeID targetTypeID) {
     auto cost = 0u;
-    for (auto inputType : inputTypes) {
+    for (const auto& inputType : inputTypes) {
         auto castCost = getCastCost(inputType.getLogicalTypeID(), targetTypeID);
         if (castCost == UNDEFINED_CAST_COST) {
             return UINT32_MAX;
@@ -461,7 +524,7 @@ uint32_t BuiltInFunctionsUtils::matchVarLengthParameters(const std::vector<Logic
 
 void BuiltInFunctionsUtils::validateSpecialCases(std::vector<Function*>& candidateFunctions,
     const std::string& name, const std::vector<LogicalType>& inputTypes,
-    function::function_set& set) {
+    const function::function_set& set) {
     // special case for add func
     if (name == AddFunction::name) {
         auto targetType0 = candidateFunctions[0]->parameterTypeIDs[0];
@@ -500,7 +563,7 @@ static std::string getFunctionMatchFailureMsg(const std::string name,
 
 void validateNonEmptyCandidateFunctions(std::vector<AggregateFunction*>& candidateFunctions,
     const std::string& name, const std::vector<LogicalType>& inputTypes, bool isDistinct,
-    function::function_set& set) {
+    const function::function_set& set) {
     if (candidateFunctions.empty()) {
         std::string supportedInputsString;
         for (auto& function : set) {
@@ -517,7 +580,7 @@ void validateNonEmptyCandidateFunctions(std::vector<AggregateFunction*>& candida
 
 void validateNonEmptyCandidateFunctions(std::vector<Function*>& candidateFunctions,
     const std::string& name, const std::vector<LogicalType>& inputTypes,
-    function::function_set& set) {
+    const function::function_set& set) {
     if (candidateFunctions.empty()) {
         std::string supportedInputsString;
         for (auto& function : set) {

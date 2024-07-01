@@ -21,9 +21,9 @@ std::shared_ptr<Expression> ExpressionBinder::bindBooleanExpression(ExpressionTy
     const expression_vector& children) {
     expression_vector childrenAfterCast;
     for (auto& child : children) {
-        childrenAfterCast.push_back(implicitCastIfNecessary(child, LogicalTypeID::BOOL));
+        childrenAfterCast.push_back(implicitCastIfNecessary(child, LogicalType::BOOL()));
     }
-    auto functionName = expressionTypeToString(expressionType);
+    auto functionName = ExpressionTypeUtil::toString(expressionType);
     function::scalar_func_exec_t execFunc;
     function::VectorBooleanFunction::bindExecFunction(expressionType, childrenAfterCast, execFunc);
     function::scalar_func_select_t selectFunc;

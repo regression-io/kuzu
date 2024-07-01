@@ -6,22 +6,44 @@
 namespace kuzu {
 namespace binder {
 
-class BoundMatchClause : public BoundReadingClause {
-public:
-    BoundMatchClause(QueryGraphCollection queryGraphCollection,
-        common::MatchClauseType matchClauseType)
-        : BoundReadingClause{common::ClauseType::MATCH},
-          queryGraphCollection{std::move(queryGraphCollection)}, matchClauseType{matchClauseType} {}
+struct BoundJoinHintNode {
+    std::shared_ptr<Expression> nodeOrRel;
+    std::vector<std::shared_ptr<BoundJoinHintNode>> children;
 
-    inline const QueryGraphCollection* getQueryGraphCollection() const {
-        return &queryGraphCollection;
+    BoundJoinHintNode() = default;
+    explicit BoundJoinHintNode(std::shared_ptr<Expression> nodeOrRel)
+        : nodeOrRel{std::move(nodeOrRel)} {}
+
+    void addChild(std::shared_ptr<BoundJoinHintNode> child) {
+        children.push_back(std::move(child));
     }
 
-    inline common::MatchClauseType getMatchClauseType() const { return matchClauseType; }
+    bool isLeaf() const { return children.empty(); }
+    bool isBinary() const { return children.size() == 2; }
+    bool isMultiWay() const { return children.size() > 2; }
+};
+
+class BoundMatchClause : public BoundReadingClause {
+    static constexpr common::ClauseType clauseType_ = common::ClauseType::MATCH;
+
+public:
+    BoundMatchClause(QueryGraphCollection collection, common::MatchClauseType matchClauseType)
+        : BoundReadingClause{clauseType_}, collection{std::move(collection)},
+          matchClauseType{matchClauseType} {}
+
+    QueryGraphCollection* getQueryGraphCollectionUnsafe() { return &collection; }
+    const QueryGraphCollection* getQueryGraphCollection() const { return &collection; }
+
+    common::MatchClauseType getMatchClauseType() const { return matchClauseType; }
+
+    void setHint(std::shared_ptr<BoundJoinHintNode> root) { hintRoot = std::move(root); }
+    bool hasHint() const { return hintRoot != nullptr; }
+    std::shared_ptr<BoundJoinHintNode> getHint() const { return hintRoot; }
 
 private:
-    QueryGraphCollection queryGraphCollection;
+    QueryGraphCollection collection;
     common::MatchClauseType matchClauseType;
+    std::shared_ptr<BoundJoinHintNode> hintRoot;
 };
 
 } // namespace binder

@@ -13,57 +13,56 @@ bool CastArrayHelper::checkCompatibleNestedTypes(LogicalTypeID sourceTypeID,
         if (targetTypeID == LogicalTypeID::ARRAY || targetTypeID == LogicalTypeID::LIST) {
             return true;
         }
-    }
+    } break;
     case LogicalTypeID::MAP:
     case LogicalTypeID::STRUCT: {
         if (sourceTypeID == targetTypeID) {
             return true;
         }
-    }
+    } break;
     case LogicalTypeID::ARRAY: {
         if (targetTypeID == LogicalTypeID::LIST || targetTypeID == LogicalTypeID::ARRAY) {
             return true;
         }
-    }
+    } break;
     default:
         return false;
     }
     return false;
 }
 
-bool CastArrayHelper::containsListToArray(const LogicalType* srcType, const LogicalType* dstType) {
-    if ((srcType->getLogicalTypeID() == LogicalTypeID::LIST ||
-            srcType->getLogicalTypeID() == LogicalTypeID::ARRAY) &&
-        dstType->getLogicalTypeID() == LogicalTypeID::ARRAY) {
+bool CastArrayHelper::containsListToArray(const LogicalType& srcType, const LogicalType& dstType) {
+    if ((srcType.getLogicalTypeID() == LogicalTypeID::LIST ||
+            srcType.getLogicalTypeID() == LogicalTypeID::ARRAY) &&
+        dstType.getLogicalTypeID() == LogicalTypeID::ARRAY) {
         return true;
     }
 
-    if (checkCompatibleNestedTypes(srcType->getLogicalTypeID(), dstType->getLogicalTypeID())) {
-        switch (srcType->getPhysicalType()) {
+    if (checkCompatibleNestedTypes(srcType.getLogicalTypeID(), dstType.getLogicalTypeID())) {
+        switch (srcType.getPhysicalType()) {
         case PhysicalTypeID::LIST: {
-            auto srcChildType = (srcType->getLogicalTypeID() == LogicalTypeID::ARRAY) ?
-                                    ArrayType::getChildType(srcType) :
-                                    ListType::getChildType(srcType);
-            auto dstChildType = (dstType->getLogicalTypeID() == LogicalTypeID::ARRAY) ?
-                                    ArrayType::getChildType(dstType) :
-                                    ListType::getChildType(dstType);
-            return containsListToArray(srcChildType, dstChildType);
+            return containsListToArray(ListType::getChildType(srcType),
+                ListType::getChildType(dstType));
+        }
+        case PhysicalTypeID::ARRAY: {
+            return containsListToArray(ArrayType::getChildType(srcType),
+                ListType::getChildType(dstType));
         }
         case PhysicalTypeID::STRUCT: {
             auto srcFieldTypes = StructType::getFieldTypes(srcType);
             auto dstFieldTypes = StructType::getFieldTypes(dstType);
             if (srcFieldTypes.size() != dstFieldTypes.size()) {
                 throw ConversionException{
-                    stringFormat("Unsupported casting function from {} to {}.", srcType->toString(),
-                        dstType->toString())};
+                    stringFormat("Unsupported casting function from {} to {}.", srcType.toString(),
+                        dstType.toString())};
             }
 
             for (auto i = 0u; i < srcFieldTypes.size(); i++) {
-                if (containsListToArray(srcFieldTypes[i], dstFieldTypes[i])) {
+                if (containsListToArray(*srcFieldTypes[i], *dstFieldTypes[i])) {
                     return true;
                 }
             }
-        }
+        } break;
         default:
             return false;
         }
@@ -71,43 +70,48 @@ bool CastArrayHelper::containsListToArray(const LogicalType* srcType, const Logi
     return false;
 }
 
-void CastArrayHelper::validateListEntry(ValueVector* inputVector, LogicalType* resultType,
+void CastArrayHelper::validateListEntry(ValueVector* inputVector, const LogicalType& resultType,
     uint64_t pos) {
     if (inputVector->isNull(pos)) {
         return;
     }
-    auto inputType = inputVector->dataType;
+    const auto& inputType = inputVector->dataType;
 
-    switch (resultType->getPhysicalType()) {
-    case PhysicalTypeID::LIST: {
+    switch (resultType.getPhysicalType()) {
+    case PhysicalTypeID::ARRAY: {
         if (inputType.getPhysicalType() == PhysicalTypeID::LIST) {
-            if (inputType.getLogicalTypeID() == LogicalTypeID::ARRAY &&
-                resultType->getLogicalTypeID() == LogicalTypeID::ARRAY) {
-                if (ArrayType::getNumElements(&inputType) !=
-                    ArrayType::getNumElements(resultType)) {
-                    throw ConversionException(
-                        stringFormat("Unsupported casting function from {} to {}.",
-                            inputType.toString(), resultType->toString()));
-                }
+            auto listEntry = inputVector->getValue<list_entry_t>(pos);
+            if (listEntry.size != ArrayType::getNumElements(resultType)) {
+                throw ConversionException{
+                    stringFormat("Unsupported casting LIST with incorrect list entry to ARRAY. "
+                                 "Expected: {}, Actual: {}.",
+                        ArrayType::getNumElements(resultType),
+                        inputVector->getValue<list_entry_t>(pos).size)};
             }
-            if (inputType.getLogicalTypeID() == LogicalTypeID::LIST &&
-                resultType->getLogicalTypeID() == LogicalTypeID::ARRAY) {
-                auto listEntry = inputVector->getValue<list_entry_t>(pos);
-                if (listEntry.size != ArrayType::getNumElements(resultType)) {
-                    throw ConversionException{
-                        stringFormat("Unsupported casting LIST with incorrect list entry to ARRAY. "
-                                     "Expected: {}, Actual: {}.",
-                            ArrayType::getNumElements(resultType),
-                            inputVector->getValue<list_entry_t>(pos).size)};
-                }
+            auto inputChildVector = ListVector::getDataVector(inputVector);
+            for (auto i = listEntry.offset; i < listEntry.offset + listEntry.size; i++) {
+                validateListEntry(inputChildVector, ArrayType::getChildType(resultType), i);
+            }
+        } else if (inputType.getPhysicalType() == PhysicalTypeID::ARRAY) {
+            if (ArrayType::getNumElements(inputType) != ArrayType::getNumElements(resultType)) {
+                throw ConversionException(
+                    stringFormat("Unsupported casting function from {} to {}.",
+                        inputType.toString(), resultType.toString()));
             }
             auto listEntry = inputVector->getValue<list_entry_t>(pos);
             auto inputChildVector = ListVector::getDataVector(inputVector);
-            auto resultChildType = (resultType->getLogicalTypeID() == LogicalTypeID::ARRAY) ?
-                                       ArrayType::getChildType(resultType) :
-                                       ListType::getChildType(resultType);
             for (auto i = listEntry.offset; i < listEntry.offset + listEntry.size; i++) {
-                validateListEntry(inputChildVector, resultChildType, i);
+                validateListEntry(inputChildVector, ArrayType::getChildType(resultType), i);
+            }
+        }
+    } break;
+    case PhysicalTypeID::LIST: {
+        if (inputType.getPhysicalType() == PhysicalTypeID::LIST ||
+            inputType.getPhysicalType() == PhysicalTypeID::ARRAY) {
+            auto listEntry = inputVector->getValue<list_entry_t>(pos);
+            auto inputChildVector = ListVector::getDataVector(inputVector);
+            for (auto i = listEntry.offset; i < listEntry.offset + listEntry.size; i++) {
+                validateListEntry(inputChildVector, ListType::getChildType(resultType), i);
             }
         }
     } break;
@@ -118,7 +122,7 @@ void CastArrayHelper::validateListEntry(ValueVector* inputVector, LogicalType* r
 
             auto structEntry = inputVector->getValue<struct_entry_t>(pos);
             for (auto i = 0u; i < fieldVectors.size(); i++) {
-                validateListEntry(fieldVectors[i].get(), fieldTypes[i], structEntry.pos);
+                validateListEntry(fieldVectors[i].get(), *fieldTypes[i], structEntry.pos);
             }
         }
     } break;

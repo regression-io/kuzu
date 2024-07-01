@@ -13,17 +13,26 @@ struct StructPackFunctions {
 
     static void execFunc(const std::vector<std::shared_ptr<common::ValueVector>>& parameters,
         common::ValueVector& result, void* /*dataPtr*/ = nullptr);
+    static void undirectedRelPackExecFunc(
+        const std::vector<std::shared_ptr<common::ValueVector>>& parameters,
+        common::ValueVector& result, void* /*dataPtr*/ = nullptr);
     static void compileFunc(FunctionBindData* bindData,
+        const std::vector<std::shared_ptr<common::ValueVector>>& parameters,
+        std::shared_ptr<common::ValueVector>& result);
+    static void undirectedRelCompileFunc(FunctionBindData* bindData,
         const std::vector<std::shared_ptr<common::ValueVector>>& parameters,
         std::shared_ptr<common::ValueVector>& result);
 };
 
 struct StructExtractBindData : public FunctionBindData {
-    common::vector_idx_t childIdx;
+    common::idx_t childIdx;
 
-    StructExtractBindData(std::unique_ptr<common::LogicalType> dataType,
-        common::vector_idx_t childIdx)
+    StructExtractBindData(common::LogicalType dataType, common::idx_t childIdx)
         : FunctionBindData{std::move(dataType)}, childIdx{childIdx} {}
+
+    inline std::unique_ptr<FunctionBindData> copy() const override {
+        return std::make_unique<StructExtractBindData>(resultType.copy(), childIdx);
+    }
 };
 
 struct StructExtractFunctions {

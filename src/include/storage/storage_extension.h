@@ -3,10 +3,15 @@
 #include "main/attached_database.h"
 
 namespace kuzu {
+namespace binder {
+struct AttachOption;
+}
+
 namespace storage {
 
 using attach_function_t = std::unique_ptr<main::AttachedDatabase> (*)(std::string dbPath,
-    std::string dbName, main::ClientContext* clientContext);
+    std::string dbName, main::ClientContext* clientContext,
+    const binder::AttachOption& attachOption);
 
 class StorageExtension {
 public:
@@ -14,9 +19,9 @@ public:
         : attachFunction{std::move(attachFunction)} {}
     virtual bool canHandleDB(std::string /*dbType*/) const { return false; }
 
-    std::unique_ptr<main::AttachedDatabase> attach(std::string dbPath, std::string dbName,
-        main::ClientContext* clientContext) const {
-        return attachFunction(dbPath, dbName, clientContext);
+    std::unique_ptr<main::AttachedDatabase> attach(std::string dbName, std::string dbPath,
+        main::ClientContext* clientContext, const binder::AttachOption& attachOption) const {
+        return attachFunction(dbName, dbPath, clientContext, attachOption);
     }
 
     virtual ~StorageExtension() = default;

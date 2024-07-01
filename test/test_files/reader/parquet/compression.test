@@ -1,4 +1,3 @@
--GROUP ParquetCompressionTest
 -DATASET CSV empty
 
 --
@@ -20,3 +19,12 @@
 6||
 |longlongstring|[]
 4|abc|[3,,2]
+
+-CASE BROTLIDecompress
+-STATEMENT LOAD FROM '${KUZU_ROOT_DIRECTORY}/dataset/reader/parquet/compression/brotli.parquet' RETURN *;
+---- 5
+Alice|53
+Bob|47
+Carol|29
+Dan|92
+Eva|22

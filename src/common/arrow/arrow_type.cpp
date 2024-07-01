@@ -1,6 +1,6 @@
 #include "common/arrow/arrow_converter.h"
 #include "common/exception/not_implemented.h"
-#include "common/exception/runtime.h"
+#include "common/string_utils.h"
 
 namespace kuzu {
 namespace common {
@@ -37,6 +37,8 @@ LogicalType ArrowConverter::fromArrowSchema(const ArrowSchema* schema) {
         return LogicalType(LogicalTypeID::INT64);
     case 'L':
         return LogicalType(LogicalTypeID::UINT64);
+    case 'e':
+        throw NotImplementedException("16 bit floats are not supported");
     case 'f':
         return LogicalType(LogicalTypeID::FLOAT);
     case 'g':
@@ -57,8 +59,13 @@ LogicalType ArrowConverter::fromArrowSchema(const ArrowSchema* schema) {
             KU_UNREACHABLE;
         }
 
-    case 'd':
-        throw NotImplementedException("Decimals are not supported");
+    case 'd': {
+        auto split = StringUtils::splitComma(std::string(arrowType + 2));
+        if (split.size() > 2 && split[2] != "128") {
+            throw NotImplementedException("Decimal bitwidths other than 128 are not implemented");
+        }
+        return LogicalType::DECIMAL(stoul(split[0]), stoul(split[1]));
+    }
     case 'w':
         return LogicalType(LogicalTypeID::BLOB); // fixed width binary
     case 't':
@@ -100,37 +107,31 @@ LogicalType ArrowConverter::fromArrowSchema(const ArrowSchema* schema) {
         // complex types need a complementary ExtraTypeInfo object
         case 'l':
         case 'L':
-            return *LogicalType::LIST(
-                std::make_unique<LogicalType>(fromArrowSchema(schema->children[0])));
+            return LogicalType::LIST(LogicalType(fromArrowSchema(schema->children[0])));
         case 'w':
-            throw RuntimeException("Fixed list is currently WIP.");
-            // TODO Manh: Array Binding
-            // return *LogicalType::FIXED_LIST(
-            //    std::make_unique<LogicalType>(fromArrowSchema(schema->children[0])),
-            //    std::stoi(arrowType+3));
+            return LogicalType::ARRAY(LogicalType(fromArrowSchema(schema->children[0])),
+                std::stoul(arrowType + 3));
         case 's':
             for (int64_t i = 0; i < schema->n_children; i++) {
                 structFields.emplace_back(std::string(schema->children[i]->name),
-                    std::make_unique<LogicalType>(fromArrowSchema(schema->children[i])));
+                    LogicalType(fromArrowSchema(schema->children[i])));
             }
-            return *LogicalType::STRUCT(std::move(structFields));
+            return LogicalType::STRUCT(std::move(structFields));
         case 'm':
-            return *LogicalType::MAP(
-                std::make_unique<LogicalType>(fromArrowSchema(schema->children[0]->children[0])),
-                std::make_unique<LogicalType>(fromArrowSchema(schema->children[0]->children[1])));
-        case 'u':
-            throw RuntimeException("Unions are currently WIP.");
+            return LogicalType::MAP(LogicalType(fromArrowSchema(schema->children[0]->children[0])),
+                LogicalType(fromArrowSchema(schema->children[0]->children[1])));
+        case 'u': {
             for (int64_t i = 0; i < schema->n_children; i++) {
-                structFields.emplace_back(std::string(schema->children[i]->name),
-                    std::make_unique<LogicalType>(fromArrowSchema(schema->children[i])));
+                structFields.emplace_back(std::to_string(i),
+                    LogicalType(fromArrowSchema(schema->children[i])));
             }
-            return *LogicalType::UNION(std::move(structFields));
+            return LogicalType::UNION(std::move(structFields));
+        }
         case 'v':
             switch (arrowType[2]) {
             case 'l':
             case 'L':
-                return *LogicalType::LIST(
-                    std::make_unique<LogicalType>(fromArrowSchema(schema->children[0])));
+                return LogicalType::LIST(LogicalType(fromArrowSchema(schema->children[0])));
             default:
                 KU_UNREACHABLE;
             }

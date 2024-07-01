@@ -11,22 +11,20 @@ class FunctionExpression : public Expression {
 public:
     FunctionExpression(std::string functionName, common::ExpressionType expressionType,
         std::unique_ptr<function::FunctionBindData> bindData, const std::string& uniqueName)
-        : Expression{expressionType, *bindData->resultType, uniqueName},
+        : Expression{expressionType, bindData->resultType.copy(), uniqueName},
           functionName{std::move(functionName)}, bindData{std::move(bindData)} {}
 
     FunctionExpression(std::string functionName, common::ExpressionType expressionType,
         std::unique_ptr<function::FunctionBindData> bindData,
         const std::shared_ptr<Expression>& child, const std::string& uniqueName)
-        : Expression{expressionType, *bindData->resultType, child, uniqueName},
+        : Expression{expressionType, bindData->resultType.copy(), child, uniqueName},
           functionName{std::move(functionName)}, bindData{std::move(bindData)} {}
 
     FunctionExpression(std::string functionName, common::ExpressionType expressionType,
         std::unique_ptr<function::FunctionBindData> bindData, expression_vector children,
         const std::string& uniqueName)
-        : Expression{expressionType, *bindData->resultType, std::move(children), uniqueName},
+        : Expression{expressionType, bindData->resultType.copy(), std::move(children), uniqueName},
           functionName{std::move(functionName)}, bindData{std::move(bindData)} {}
-
-    ~FunctionExpression() override = default;
 
     inline std::string getFunctionName() const { return functionName; }
     inline function::FunctionBindData* getBindData() const { return bindData.get(); }

@@ -12,8 +12,8 @@
 #include "expression_evaluator/case_evaluator.h"
 #include "expression_evaluator/function_evaluator.h"
 #include "expression_evaluator/literal_evaluator.h"
-#include "expression_evaluator/node_rel_evaluator.h"
 #include "expression_evaluator/path_evaluator.h"
+#include "expression_evaluator/pattern_evaluator.h"
 #include "expression_evaluator/reference_evaluator.h"
 #include "planner/operator/schema.h"
 
@@ -54,7 +54,7 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getEvaluator(
     auto expressionType = expression->expressionType;
     if (schema->isExpressionInScope(*expression)) {
         return getReferenceEvaluator(expression, schema);
-    } else if (isExpressionLiteral(expressionType)) {
+    } else if (ExpressionType::LITERAL == expressionType) {
         return getLiteralEvaluator(*expression);
     } else if (ExpressionUtil::isNodePattern(*expression)) {
         return getNodeEvaluator(expression, schema);
@@ -71,7 +71,7 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getEvaluator(
     } else {
         // LCOV_EXCL_START
         throw NotImplementedException(stringFormat("Cannot evaluate expression with type {}.",
-            expressionTypeToString(expressionType)));
+            ExpressionTypeUtil::toString(expressionType)));
         // LCOV_EXCL_STOP
     }
 }
@@ -80,7 +80,7 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getConstantEvaluator(
     const std::shared_ptr<Expression>& expression) {
     KU_ASSERT(ExpressionVisitor::isConstant(*expression));
     auto expressionType = expression->expressionType;
-    if (isExpressionLiteral(expressionType)) {
+    if (ExpressionType::LITERAL == expressionType) {
         return getLiteralEvaluator(*expression);
     } else if (ExpressionType::CASE_ELSE == expressionType) {
         return getCaseEvaluator(expression, nullptr);
@@ -89,23 +89,21 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getConstantEvaluator(
     } else {
         // LCOV_EXCL_START
         throw NotImplementedException(stringFormat("Cannot evaluate expression with type {}.",
-            expressionTypeToString(expressionType)));
+            ExpressionTypeUtil::toString(expressionType)));
         // LCOV_EXCL_STOP
     }
 }
 
 std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getLiteralEvaluator(
     const Expression& expression) {
-    auto& literalExpression = (LiteralExpression&)expression;
-    return std::make_unique<LiteralExpressionEvaluator>(
-        std::make_shared<Value>(*literalExpression.getValue()));
+    auto& literalExpression = expression.constCast<LiteralExpression>();
+    return std::make_unique<LiteralExpressionEvaluator>(literalExpression.getValue());
 }
 
 std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getParameterEvaluator(
     const Expression& expression) {
-    auto& parameterExpression = (ParameterExpression&)expression;
-    KU_ASSERT(parameterExpression.getLiteral() != nullptr);
-    return std::make_unique<LiteralExpressionEvaluator>(parameterExpression.getLiteral());
+    auto& parameterExpression = expression.constCast<ParameterExpression>();
+    return std::make_unique<LiteralExpressionEvaluator>(parameterExpression.getValue());
 }
 
 std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getReferenceEvaluator(
@@ -141,7 +139,7 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getFunctionEvaluator(
 
 std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getNodeEvaluator(
     std::shared_ptr<Expression> expression, const Schema* schema) {
-    auto node = (NodeExpression*)expression.get();
+    auto node = expression->constPtrCast<NodeExpression>();
     expression_vector children;
     children.push_back(node->getInternalID());
     children.push_back(node->getLabelExpression());
@@ -149,13 +147,13 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getNodeEvaluator(
         children.push_back(property);
     }
     auto childrenEvaluators = getEvaluators(children, schema);
-    return std::make_unique<NodeRelExpressionEvaluator>(std::move(expression),
+    return std::make_unique<PatternExpressionEvaluator>(std::move(expression),
         std::move(childrenEvaluators));
 }
 
 std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getRelEvaluator(
     std::shared_ptr<Expression> expression, const Schema* schema) {
-    auto rel = (RelExpression*)expression.get();
+    auto rel = expression->constPtrCast<RelExpression>();
     expression_vector children;
     children.push_back(rel->getSrcNode()->getInternalID());
     children.push_back(rel->getDstNode()->getInternalID());
@@ -164,7 +162,12 @@ std::unique_ptr<ExpressionEvaluator> ExpressionMapper::getRelEvaluator(
         children.push_back(property);
     }
     auto childrenEvaluators = getEvaluators(children, schema);
-    return std::make_unique<NodeRelExpressionEvaluator>(std::move(expression),
+    if (rel->hasDirectionExpr()) {
+        auto directionEvaluator = getEvaluator(rel->getDirectionExpr(), schema);
+        return std::make_unique<UndirectedRelExpressionEvaluator>(std::move(expression),
+            std::move(childrenEvaluators), std::move(directionEvaluator));
+    }
+    return std::make_unique<PatternExpressionEvaluator>(std::move(expression),
         std::move(childrenEvaluators));
 }
 

@@ -9,15 +9,15 @@ using namespace kuzu::processor;
 namespace kuzu {
 namespace evaluator {
 
-std::unique_ptr<Value> ExpressionEvaluatorUtils::evaluateConstantExpression(
-    const std::shared_ptr<binder::Expression>& expression, storage::MemoryManager* memoryManager) {
+Value ExpressionEvaluatorUtils::evaluateConstantExpression(
+    const std::shared_ptr<binder::Expression>& expression, main::ClientContext* clientContext) {
     auto evaluator = ExpressionMapper::getConstantEvaluator(expression);
     auto emptyResultSet = std::make_unique<ResultSet>(0);
-    evaluator->init(*emptyResultSet, memoryManager);
-    evaluator->evaluate(nullptr);
-    auto selVector = evaluator->resultVector->state->selVector.get();
-    KU_ASSERT(selVector->selectedSize == 1);
-    return evaluator->resultVector->getAsValue(selVector->selectedPositions[0]);
+    evaluator->init(*emptyResultSet, clientContext);
+    evaluator->evaluate();
+    auto& selVector = evaluator->resultVector->state->getSelVector();
+    KU_ASSERT(selVector.getSelSize() == 1);
+    return *evaluator->resultVector->getAsValue(selVector[0]);
 }
 
 } // namespace evaluator

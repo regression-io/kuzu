@@ -1,12 +1,14 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "common/api.h"
 #include "common/case_insensitive_map.h"
 #include "kuzu_fwd.h"
+#include "main/db_config.h"
 
 namespace kuzu {
 namespace common {
@@ -34,6 +36,7 @@ class StorageExtension;
 namespace main {
 struct ExtensionOption;
 class DatabaseManager;
+class ClientContext;
 
 /**
  * @brief Stores runtime configuration for creating or opening a Database
@@ -101,7 +104,7 @@ public:
 
     // TODO(Ziyi): Instead of exposing a dedicated API for adding a new function, we should consider
     // add function through the extension module.
-    void addBuiltInFunction(std::string name,
+    void addTableFunction(std::string name,
         std::vector<std::unique_ptr<function::Function>> functionSet);
 
     KUZU_API void registerFileSystem(std::unique_ptr<common::FileSystem> fs);
@@ -112,32 +115,22 @@ public:
     KUZU_API void addExtensionOption(std::string name, common::LogicalTypeID type,
         common::Value defaultValue);
 
+    KUZU_API catalog::Catalog* getCatalog() { return catalog.get(); }
+
     ExtensionOption* getExtensionOption(std::string name);
 
     common::case_insensitive_map_t<std::unique_ptr<storage::StorageExtension>>&
     getStorageExtensions();
 
-    DatabaseManager* getDatabaseManagerUnsafe() const;
+    uint64_t getNextQueryID();
 
 private:
     void openLockFile();
-    void initDBDirAndCoreFilesIfNecessary();
-    static void initLoggers();
-    static void dropLoggers();
-
-    // Commits and checkpoints a write transaction or rolls that transaction back. This involves
-    // either replaying the WAL and either redoing or undoing and in either case at the end WAL is
-    // cleared.
-    // skipCheckpointForTestingRecovery is used to simulate a failure before checkpointing in tests.
-    void commit(transaction::Transaction* transaction, bool skipCheckpointForTestingRecovery);
-    void rollback(transaction::Transaction* transaction, bool skipCheckpointForTestingRecovery);
-    void checkpointAndClearWAL(storage::WALReplayMode walReplayMode);
-    void rollbackAndClearWAL();
-    void recoverIfNecessary();
+    void initAndLockDBDir();
 
 private:
     std::string databasePath;
-    SystemConfig systemConfig;
+    DBConfig dbConfig;
     std::unique_ptr<common::VirtualFileSystem> vfs;
     std::unique_ptr<storage::BufferManager> bufferManager;
     std::unique_ptr<storage::MemoryManager> memoryManager;
@@ -145,12 +138,14 @@ private:
     std::unique_ptr<catalog::Catalog> catalog;
     std::unique_ptr<storage::StorageManager> storageManager;
     std::unique_ptr<transaction::TransactionManager> transactionManager;
-    std::unique_ptr<storage::WAL> wal;
-    std::shared_ptr<spdlog::logger> logger;
     std::unique_ptr<common::FileInfo> lockFile;
     std::unique_ptr<extension::ExtensionOptions> extensionOptions;
     std::unique_ptr<DatabaseManager> databaseManager;
     common::case_insensitive_map_t<std::unique_ptr<storage::StorageExtension>> storageExtensions;
+    struct QueryIDGenerator {
+        uint64_t queryID = 0;
+        std::mutex queryIDLock;
+    } queryIDGenerator;
 };
 
 } // namespace main
